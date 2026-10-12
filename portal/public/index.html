@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0c0b">
+  <meta name="description" content="HieuSRO - cổng thông tin Silkroad phong cách cổ điển, giao diện tiếng Việt.">
+  <title>HieuSRO - Con Đường Tơ Lụa Việt Nam</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="HieuSRO">
+      <span class="brand-mark">HS</span>
+      <span><strong>HIEU SRO</strong><small>CON ĐƯỜNG TƠ LỤA</small></span>
+    </a>
+    <button class="menu-btn" id="menuBtn" aria-label="Mở menu">☰</button>
+    <nav id="nav">
+      <a href="#top">Trang chủ</a>
+      <a href="#gioithieu">Giới thiệu</a>
+      <a href="#database">Database</a>
+      <a href="#tintuc">Tin tức</a>
+      <a href="#dangky">Đăng ký</a>
+      <a class="nav-play" href="/play">Chơi ngay</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-glow"></div>
+      <div class="hero-content">
+        <p class="eyebrow">SILKROAD ONLINE • WEB • MOBILE</p>
+        <h1>HÀNH TRÌNH TRÊN<br><span>CON ĐƯỜNG TƠ LỤA</span></h1>
+        <p class="hero-copy">Bản web/mobile tiếng Việt đang được phát triển từ nền OpenSRO, giữ phong cách cổ điển và hướng tới một máy chủ riêng hoàn toàn chủ động.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="/play">Vào game thử nghiệm</a>
+          <a class="btn ghost" href="#dangky">Tạo tài khoản</a>
+        </div>
+        <div class="status-row">
+          <div><span class="dot online"></span><b>Cổng web</b><small>Đang hoạt động</small></div>
+          <div><span class="dot" id="gameDot"></span><b>Tài khoản game</b><small id="gameSyncLabel">Đang kiểm tra...</small></div>
+          <div><span class="metric" id="accountCount">0</span><b>Tài khoản</b><small>đã đăng ký</small></div>
+        </div>
+      </div>
+      <div class="hero-card">
+        <div class="card-kicker">MÁY CHỦ THỬ NGHIỆM</div>
+        <h2>HieuSRO</h2>
+        <div class="server-line"><span>Phiên bản</span><strong>1.150</strong></div>
+        <div class="server-line"><span>Nền tảng</span><strong>WebGPU</strong></div>
+        <div class="server-line"><span>Ngôn ngữ</span><strong>Tiếng Việt</strong></div>
+        <div class="server-line"><span>Khu vực</span><strong>Singapore</strong></div>
+        <a class="btn primary full" href="/play">Chơi trên trình duyệt</a>
+      </div>
+    </section>
+
+    <section class="section" id="gioithieu">
+      <div class="section-heading">
+        <p>KHÁM PHÁ</p>
+        <h2>Một Silkroad quen thuộc, tối ưu cho web và mobile</h2>
+      </div>
+      <div class="feature-grid">
+        <article><span>01</span><h3>Giữ chất Silkroad</h3><p>Map, không khí, UI và nhịp chơi được giữ gần với trải nghiệm cổ điển.</p></article>
+        <article><span>02</span><h3>Chạy trực tiếp trên web</h3><p>Không cần cài launcher để thử nghiệm, mở trình duyệt là có thể truy cập client.</p></article>
+        <article><span>03</span><h3>Mobile hóa</h3><p>Đang bổ sung joystick, touch camera, skill bar và auto combat cho điện thoại.</p></article>
+        <article><span>04</span><h3>Server riêng</h3><p>Tài khoản, nhân vật, drop, EXP, event và cấu hình sẽ do máy chủ riêng quản lý.</p></article>
+      </div>
+    </section>
+
+    <section class="section database-section" id="database">
+      <div class="section-heading left">
+        <p>DATABASE</p>
+        <h2>Tra cứu dữ liệu & trạng thái hệ thống</h2>
+      </div>
+      <div class="db-grid">
+        <div class="db-card"><small>ACCOUNT DATABASE</small><strong id="dbAccounts">0</strong><span>Tài khoản website</span></div>
+        <div class="db-card"><small>GAME SYNC</small><strong id="dbSynced">0</strong><span>Tài khoản đã đồng bộ GameWorld</span></div>
+        <div class="db-card wide"><small>DỮ LIỆU GAME</small><h3>Item • Skill • Monster • Quest • Map</h3><p>Phần database gameplay riêng sẽ được nối sau khi hoàn tất server game-data v1.150.</p></div>
+      </div>
+    </section>
+
+    <section class="section news-section" id="tintuc">
+      <div class="section-heading left">
+        <p>TIN TỨC</p>
+        <h2>Tiến độ phát triển</h2>
+      </div>
+      <div class="news-list">
+        <article><time>12.10.2026</time><div><h3>Client WebGPU đã chạy được trên iPhone</h3><p>Hoàn tất deploy client thử nghiệm và tải asset runtime thành công.</p></div></article>
+        <article><time>12.10.2026</time><div><h3>Cổng tài khoản tiếng Việt</h3><p>Bổ sung hệ thống đăng ký, hash mật khẩu bằng bcrypt và chuẩn bị kết nối Agent provisioning API.</p></div></article>
+        <article><time>SẮP TỚI</time><div><h3>Máy chủ HieuSRO riêng</h3><p>Thay backend public bằng Agent + GameWorld + database nhân vật riêng.</p></div></article>
+      </div>
+    </section>
+
+    <section class="section register-section" id="dangky">
+      <div class="register-copy">
+        <p class="eyebrow">TẠO TÀI KHOẢN</p>
+        <h2>Bắt đầu hành trình</h2>
+        <p>Tài khoản được lưu bằng mật khẩu đã mã hóa. Khi GameWorld riêng được nối, cùng tài khoản này sẽ được đồng bộ sang hệ thống đăng nhập game.</p>
+        <ul>
+          <li>Mật khẩu được hash bằng bcrypt</li>
+          <li>Không lưu mật khẩu dạng văn bản</li>
+          <li>Tên tài khoản không phân biệt hoa/thường khi kiểm tra trùng</li>
+        </ul>
+      </div>
+      <form class="register-form" id="registerForm">
+        <label>Tên tài khoản<input name="id" autocomplete="username" maxlength="64" placeholder="Ví dụ: Hieu3010" required></label>
+        <label>Email<input name="email" type="email" autocomplete="email" placeholder="email@example.com" required></label>
+        <label>Mật khẩu<input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="72" placeholder="Tối thiểu 8 ký tự" required></label>
+        <label>Nhập lại mật khẩu<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="72" required></label>
+        <label class="agree"><input type="checkbox" required> <span>Tôi đồng ý với quy định thử nghiệm của máy chủ.</span></label>
+        <button class="btn primary full" type="submit" id="submitBtn">Tạo tài khoản</button>
+        <div class="form-message" id="formMessage" aria-live="polite"></div>
+      </form>
+    </section>
+  </main>
+
+  <footer>
+    <div class="brand footer-brand"><span class="brand-mark">HS</span><span><strong>HIEU SRO</strong><small>COMMUNITY TEST PROJECT</small></span></div>
+    <p>Dự án thử nghiệm độc lập. Không liên kết chính thức với Joymax.</p>
+    <a href="/play">Vào game</a>
+  </footer>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

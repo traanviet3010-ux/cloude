@@ -10,7 +10,9 @@ const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
 const ASSET_UPSTREAM_HOST = process.env.OPENSRO_ASSET_UPSTREAM_HOST || "opensro.online";
 const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-game-server.onrender.com";
 const LANGUAGE_COOKIE = "hieusro_lang";
-const LOCALIZED_TEXT = /^\/assets\/text\/(textuisystem|textzonename|textdataname|texthelp|messagetips)\.en\.json$/;
+const LOCALIZED_TEXT = /^\/assets\/text\/(textuisystem|textzonename|textdataname|texthelp)\.en\.json$/;
+const MESSAGE_TIPS_PATH = "/assets/text/messagetips.en.json";
+let localizedTipsCache = { body: null, expiresAt: 0 };
 
 const MIME = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -115,7 +117,7 @@ function proxyHttp(req, res) {
     if (pathname.startsWith("/assets/")) {
       res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     }
-    if (LOCALIZED_TEXT.test(pathname)) {
+    if (LOCALIZED_TEXT.test(pathname) || pathname === MESSAGE_TIPS_PATH) {
       res.setHeader("Vary", "Cookie");
       res.setHeader("Cache-Control", "no-cache");
     }
@@ -128,6 +130,49 @@ function proxyHttp(req, res) {
     res.end(`HieuSRO upstream error: ${error.message}`);
   });
   req.pipe(upstream);
+}
+
+async function localizedMessageTips(req, res) {
+  if (req.method !== "GET" || selectedLanguage(req) !== "vi") return false;
+  const now = Date.now();
+  try {
+    if (!localizedTipsCache.body || localizedTipsCache.expiresAt <= now) {
+      const [tipsResponse, helpResponse] = await Promise.all([
+        fetch(`https://${ASSET_UPSTREAM_HOST}${MESSAGE_TIPS_PATH}`, { signal: AbortSignal.timeout(10000) }),
+        fetch(`https://${GAME_UPSTREAM_HOST}/i18n/texthelp.vi.json`, { signal: AbortSignal.timeout(10000) })
+      ]);
+      if (!tipsResponse.ok) throw new Error(`English message tips ${tipsResponse.status}`);
+      if (!helpResponse.ok) throw new Error(`Vietnamese help text ${helpResponse.status}`);
+      const tips = await tipsResponse.json();
+      const help = await helpResponse.json();
+      const entries = help?.entries && typeof help.entries === "object" ? help.entries : {};
+      const apply = row => {
+        if (!row || typeof row !== "object" || typeof row.textKey !== "string") return;
+        const value = entries[row.textKey];
+        if (typeof value === "string" && value) row.text = value;
+      };
+      for (const row of tips.rows || []) apply(row);
+      for (const row of Object.values(tips.rowsById || {})) apply(row);
+      for (const row of Object.values(tips.rowsByTextKey || {})) apply(row);
+      tips.language = "vi";
+      tips.fallbackLanguage = "en";
+      localizedTipsCache = {
+        body: JSON.stringify(tips),
+        expiresAt: now + 5 * 60 * 1000
+      };
+    }
+    secureHeaders(res);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Vary", "Cookie");
+    res.end(localizedTipsCache.body);
+    console.log(`[i18n] GET ${MESSAGE_TIPS_PATH} -> merged vi catalogue 200`);
+    return true;
+  } catch (error) {
+    console.error(`[i18n:error] message tips: ${error.message}; falling back to English`);
+    return false;
+  }
 }
 
 function serveStatic(req, res) {
@@ -171,7 +216,7 @@ function serveStatic(req, res) {
   });
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
 
@@ -179,6 +224,8 @@ const server = http.createServer((req, res) => {
       serveStatic(req, res);
       return;
     }
+
+    if (pathname === MESSAGE_TIPS_PATH && await localizedMessageTips(req, res)) return;
 
     if (
       pathname.startsWith("/assets/") || pathname === "/assets" ||
@@ -190,7 +237,8 @@ const server = http.createServer((req, res) => {
     }
     serveStatic(req, res);
   } catch (error) {
-    res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end(String(error));
+    if (!res.headersSent) res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+    res.end(String(error));
   }
 });
 

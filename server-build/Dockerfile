@@ -74,22 +74,18 @@ for name, size in expected.items():
 print('All licensed client input sizes match exactly.')
 PY
 
-# Extract the licensed retail data and validate every authoritative input.
 RUN corepack pnpm assets prepare
 RUN corepack pnpm assets doctor
-
-# server.srogz needs the real outdoor movement/navmesh bundles, but it does not
-# need browser presentation GLBs. Building this lane separately avoids making
-# optional event-pet meshes a dependency of authoritative server data.
 RUN corepack pnpm assets build world-outdoor
 
 COPY build-server-world.mjs /tmp/build-server-world.mjs
 RUN node /tmp/build-server-world.mjs
 
-# Build the immutable GameWorld projection directly, then make the server's own
-# item loader read it as an independent validation pass.
 RUN node scripts/build/server/buildServerGameDataBundle.mjs \
  && node apps/server-observatory/tools/item-catalog.mjs
+
+COPY smoke.sh /tmp/smoke.sh
+RUN chmod +x /tmp/smoke.sh && /tmp/smoke.sh
 
 RUN set -eux; \
     mkdir -p /out; \

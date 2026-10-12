@@ -74,20 +74,13 @@ for name, size in expected.items():
 print('All licensed client input sizes match exactly.')
 PY
 
-# Extract the licensed retail data and validate every authoritative input.
 RUN corepack pnpm assets prepare
 RUN corepack pnpm assets doctor
-
-# server.srogz needs the real outdoor movement/navmesh bundles, but it does not
-# need browser presentation GLBs. Building this lane separately avoids making
-# optional event-pet meshes a dependency of authoritative server data.
 RUN corepack pnpm assets build world-outdoor
 
 COPY build-server-world.mjs /tmp/build-server-world.mjs
 RUN node /tmp/build-server-world.mjs
 
-# Build the immutable GameWorld projection directly, then make the server's own
-# item loader read it as an independent validation pass.
 RUN node scripts/build/server/buildServerGameDataBundle.mjs \
  && node apps/server-observatory/tools/item-catalog.mjs
 
@@ -100,20 +93,62 @@ RUN set -eux; \
     sha256sum /out/server.srogz | tee /out/server.srogz.sha256; \
     printf '%s\n' "$OPEN_SRO_COMMIT" > /out/opensro-commit.txt; \
     cd /src/opensro/apps/server; \
-    CGO_ENABLED=0 GOOS=linux go build -o /out/sro-agent ./cmd/services/sro-agent; \
-    CGO_ENABLED=0 GOOS=linux go build -o /out/sro-gameworld ./cmd/services/sro-gameworld; \
-    test -s /out/sro-agent; \
-    test -s /out/sro-gameworld; \
-    ls -lh /out/server.srogz /out/sro-agent /out/sro-gameworld
+    CGO_ENABLED=0 GOOS=linux go build -o /out/agent ./cmd/services/sro-agent; \
+    CGO_ENABLED=0 GOOS=linux go build -o /out/gameworld ./cmd/services/sro-gameworld; \
+    CGO_ENABLED=0 GOOS=linux go build -o /out/sro-nomad ./cmd/operations/sro-nomad; \
+    CGO_ENABLED=0 GOOS=linux go build -o /out/sro-bootstrap-development ./cmd/operations/sro-bootstrap-development; \
+    test -s /out/agent; \
+    test -s /out/gameworld; \
+    test -s /out/sro-nomad; \
+    test -s /out/sro-bootstrap-development; \
+    ls -lh /out/server.srogz /out/agent /out/gameworld /out/sro-nomad /out/sro-bootstrap-development
 
 FROM python:3.12-slim-bookworm AS runtime
+ARG NOMAD_VERSION=2.0.7
 WORKDIR /opt/hieusro
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl nginx \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /opt/hieusro/bin /tmp/nomad-extract \
+ && curl -fsSLo /tmp/nomad.zip "https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_amd64.zip" \
+ && python - <<'PY'
+import zipfile
+zipfile.ZipFile('/tmp/nomad.zip').extract('nomad', '/tmp/nomad-extract')
+PY
+RUN mv /tmp/nomad-extract/nomad /opt/hieusro/bin/nomad \
+ && chmod +x /opt/hieusro/bin/nomad \
+ && rm -rf /tmp/nomad.zip /tmp/nomad-extract \
+ && /opt/hieusro/bin/nomad version
+
+RUN mkdir -p /opt/hieusro/server/config /opt/hieusro/server/ops/nomad/jobs /opt/hieusro/server/ops/nomad/config
+
 COPY --from=builder /out/server.srogz /opt/hieusro/server.srogz
 COPY --from=builder /out/server.srogz.sha256 /opt/hieusro/server.srogz.sha256
 COPY --from=builder /out/opensro-commit.txt /opt/hieusro/opensro-commit.txt
-COPY --from=builder /out/sro-agent /opt/hieusro/sro-agent
-COPY --from=builder /out/sro-gameworld /opt/hieusro/sro-gameworld
-COPY server.py /opt/hieusro/server.py
-ENV PORT=10000
+COPY --from=builder /out/agent /opt/hieusro/server/agent
+COPY --from=builder /out/gameworld /opt/hieusro/server/gameworld
+COPY --from=builder /out/sro-nomad /opt/hieusro/server/sro-nomad
+COPY --from=builder /out/sro-bootstrap-development /opt/hieusro/server/sro-bootstrap-development
+COPY --from=builder /src/opensro/apps/server/ops/nomad/jobs/agent.nomad.hcl /opt/hieusro/server/ops/nomad/jobs/agent.nomad.hcl
+COPY --from=builder /src/opensro/apps/server/ops/nomad/jobs/gameworld.nomad.hcl /opt/hieusro/server/ops/nomad/jobs/gameworld.nomad.hcl
+COPY --from=builder /src/opensro/apps/server/ops/nomad/config/dev-windows.hcl /opt/hieusro/server/ops/nomad/config/dev-windows.hcl
+COPY runtime-shards.json /opt/hieusro/server/config/shards.json
+COPY runtime-dev-account.env /opt/hieusro/server/config/dev-account.env
+COPY runtime-nginx.conf /opt/hieusro/runtime-nginx.conf
+COPY runtime-start.sh /opt/hieusro/runtime-start.sh
+
+RUN chmod +x \
+    /opt/hieusro/server/agent \
+    /opt/hieusro/server/gameworld \
+    /opt/hieusro/server/sro-nomad \
+    /opt/hieusro/server/sro-bootstrap-development \
+    /opt/hieusro/runtime-start.sh \
+ && sha256sum -c /opt/hieusro/server.srogz.sha256
+
+ENV PORT=10000 \
+    SRO_STATE_ROOT=/opt/hieusro/server/.state \
+    SRO_ALLOWED_ORIGINS=https://opensro-mobile-test.onrender.com,https://hieusro-portal.onrender.com
+
 EXPOSE 10000
-CMD ["python", "/opt/hieusro/server.py"]
+CMD ["/opt/hieusro/runtime-start.sh"]

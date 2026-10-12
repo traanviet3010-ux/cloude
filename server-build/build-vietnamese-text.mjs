@@ -129,3 +129,29 @@ try {
 } catch (error) {
   console.warn(`HieuSRO i18n messagetips skipped: ${error.message}`);
 }
+
+// Preserve the exact localization symbol on every item reference sent to the
+// browser. OpenSRO already keeps ItemRef.NameStrID internally, but RefItemRow
+// previously dropped it and forced the browser to keep the server's English
+// presentation name. HieuSRO needs the symbol so both public and login-only
+// item rows can resolve through the selected textdataname catalogue.
+const enterworldRoot = path.resolve("apps/server/internal/game/enterworld");
+{
+  const file = path.join(enterworldRoot, "response.go");
+  let source = await readFile(file, "utf8");
+  const before = '\tCodename                   string       `json:"codename"`\n\tKind                       string       `json:"kind"`\n\tName                       string       `json:"name"`\n';
+  const after = '\tCodename                   string       `json:"codename"`\n\tNameStrID                  string       `json:"nameStrId,omitempty"`\n\tKind                       string       `json:"kind"`\n\tName                       string       `json:"name"`\n';
+  if (!source.includes(before)) throw new Error("RefItemRow shape changed upstream");
+  source = source.replace(before, after);
+  await writeFile(file, source, "utf8");
+}
+{
+  const file = path.join(enterworldRoot, "bootstrap.go");
+  let source = await readFile(file, "utf8");
+  const before = '\t\tCodename:     row.Codename,\n\t\tKind:         "equipment",\n\t\tName:         row.Name,\n';
+  const after = '\t\tCodename:     row.Codename,\n\t\tNameStrID:    row.NameStrID,\n\t\tKind:         "equipment",\n\t\tName:         row.Name,\n';
+  if (!source.includes(before)) throw new Error("refItemCollector projection changed upstream");
+  source = source.replace(before, after);
+  await writeFile(file, source, "utf8");
+}
+console.log("HieuSRO i18n: exact item nameStrId projection installed");

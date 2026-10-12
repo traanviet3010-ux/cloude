@@ -20,7 +20,7 @@
       <a href="#top">Trang chủ</a>
       <a href="#gioithieu">Giới thiệu</a>
       <a href="#database">Database</a>
-      <a href="#tintuc">Tin tức</a>
+      <a href="#taikhoan">Tài khoản</a>
       <a href="#dangky">Đăng ký</a>
       <a class="nav-play" href="/play">Chơi ngay</a>
     </nav>
@@ -35,7 +35,7 @@
         <p class="hero-copy">Bản web/mobile tiếng Việt đang được phát triển từ nền OpenSRO, giữ phong cách cổ điển và hướng tới một máy chủ riêng hoàn toàn chủ động.</p>
         <div class="hero-actions">
           <a class="btn primary" href="/play">Vào game thử nghiệm</a>
-          <a class="btn ghost" href="#dangky">Tạo tài khoản</a>
+          <a class="btn ghost" href="#taikhoan">Trung tâm tài khoản</a>
         </div>
         <div class="status-row">
           <div><span class="dot online"></span><b>Cổng web</b><small>Đang hoạt động</small></div>
@@ -79,6 +79,77 @@
       </div>
     </section>
 
+    <section class="section account-section" id="taikhoan">
+      <div class="section-heading left">
+        <p>TRUNG TÂM TÀI KHOẢN</p>
+        <h2>Đăng nhập & quản lý tài khoản HieuSRO</h2>
+      </div>
+
+      <div id="guestAccount" class="account-grid">
+        <div class="account-panel">
+          <h3>Đăng nhập</h3>
+          <p class="panel-copy">Dùng tài khoản anh đã đăng ký trên website.</p>
+          <form id="loginForm" class="stack-form">
+            <label>Tên tài khoản<input name="id" autocomplete="username" required></label>
+            <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required></label>
+            <button class="btn primary full" type="submit" id="loginBtn">Đăng nhập</button>
+            <div class="form-message" id="loginMessage" aria-live="polite"></div>
+          </form>
+        </div>
+        <div class="account-panel highlight">
+          <span class="panel-kicker">CHƯA CÓ TÀI KHOẢN?</span>
+          <h3>Tạo tài khoản mới</h3>
+          <p>Tạo tài khoản miễn phí rồi quay lại đây để xem thông tin, đổi mật khẩu và theo dõi Silk.</p>
+          <a class="btn ghost full" href="#dangky">Đi tới đăng ký</a>
+        </div>
+      </div>
+
+      <div id="memberAccount" class="member-area hidden">
+        <div class="account-summary">
+          <div><small>TÀI KHOẢN</small><strong id="meId">-</strong></div>
+          <div><small>EMAIL</small><strong id="meEmail">-</strong></div>
+          <div><small>SILK</small><strong class="gold" id="meSilk">0</strong></div>
+          <div><small>GAME SYNC</small><strong id="meSync">Chưa đồng bộ</strong></div>
+        </div>
+        <div class="account-actions">
+          <a class="btn primary" href="/play">Vào game</a>
+          <button class="btn ghost" id="logoutBtn" type="button">Đăng xuất</button>
+        </div>
+
+        <div class="account-grid member-grid">
+          <div class="account-panel">
+            <span class="panel-kicker">BẢO MẬT</span>
+            <h3>Đổi mật khẩu</h3>
+            <form id="passwordForm" class="stack-form">
+              <label>Mật khẩu hiện tại<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+              <label>Mật khẩu mới<input name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="72" required></label>
+              <label>Nhập lại mật khẩu mới<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="72" required></label>
+              <button class="btn primary full" id="passwordBtn" type="submit">Đổi mật khẩu</button>
+              <div class="form-message" id="passwordMessage" aria-live="polite"></div>
+            </form>
+          </div>
+
+          <div class="account-panel">
+            <span class="panel-kicker">NẠP SILK</span>
+            <h3>Ví Silk & nạp thẻ</h3>
+            <div class="silk-balance"><span>Số dư hiện tại</span><strong><span id="silkBalance">0</span> Silk</strong></div>
+            <div class="topup-disabled" id="topupNotice">Đang kiểm tra cổng nạp...</div>
+            <div class="topup-preview">
+              <label>Phương thức<select disabled><option>Thẻ điện thoại</option><option>Chuyển khoản QR</option></select></label>
+              <label>Mệnh giá<select disabled><option>Chọn mệnh giá</option></select></label>
+              <button class="btn ghost full" type="button" disabled>Chưa mở cổng nạp</button>
+            </div>
+            <p class="safe-note">Không nhập mã thẻ thật cho tới khi hệ thống hiển thị “Cổng nạp đã mở”.</p>
+          </div>
+        </div>
+
+        <div class="account-panel topup-history-panel">
+          <div class="history-head"><div><span class="panel-kicker">LỊCH SỬ NẠP</span><h3>Giao dịch Silk</h3></div><small id="memberCreated">-</small></div>
+          <div id="topupHistory" class="empty-history">Chưa có giao dịch nạp Silk.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="section news-section" id="tintuc">
       <div class="section-heading left">
         <p>TIN TỨC</p>
@@ -86,7 +157,7 @@
       </div>
       <div class="news-list">
         <article><time>12.10.2026</time><div><h3>Client WebGPU đã chạy được trên iPhone</h3><p>Hoàn tất deploy client thử nghiệm và tải asset runtime thành công.</p></div></article>
-        <article><time>12.10.2026</time><div><h3>Cổng tài khoản tiếng Việt</h3><p>Bổ sung hệ thống đăng ký, hash mật khẩu bằng bcrypt và chuẩn bị kết nối Agent provisioning API.</p></div></article>
+        <article><time>12.10.2026</time><div><h3>Trung tâm tài khoản tiếng Việt</h3><p>Đăng ký, đăng nhập, xem tài khoản, đổi mật khẩu và ví Silk đã được bổ sung.</p></div></article>
         <article><time>SẮP TỚI</time><div><h3>Máy chủ HieuSRO riêng</h3><p>Thay backend public bằng Agent + GameWorld + database nhân vật riêng.</p></div></article>
       </div>
     </section>
@@ -95,7 +166,7 @@
       <div class="register-copy">
         <p class="eyebrow">TẠO TÀI KHOẢN</p>
         <h2>Bắt đầu hành trình</h2>
-        <p>Tài khoản được lưu bằng mật khẩu đã mã hóa. Khi GameWorld riêng được nối, cùng tài khoản này sẽ được đồng bộ sang hệ thống đăng nhập game.</p>
+        <p>Tài khoản được lưu bằng mật khẩu đã mã hóa. Sau khi đăng ký anh có thể đăng nhập Trung tâm tài khoản ngay trên website.</p>
         <ul>
           <li>Mật khẩu được hash bằng bcrypt</li>
           <li>Không lưu mật khẩu dạng văn bản</li>

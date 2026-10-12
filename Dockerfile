@@ -1,9 +1,8 @@
 FROM node:24-bookworm AS build
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl python3 python3-pil python3-pip fonts-liberation2 \
- && rm -rf /var/lib/apt/lists/* \
- && python3 -m pip install --break-system-packages --no-cache-dir gdown
+ && apt-get install -y --no-install-recommends git ca-certificates python3 python3-pil fonts-liberation2 \
+ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /work
 ARG OPENSRO_REF=4f6919d6900d169b89e75647e56c99ca8ebd5cfb
@@ -12,46 +11,61 @@ RUN git clone https://github.com/opensro-dev/opensro.git upstream \
  && git checkout "$OPENSRO_REF" \
  && corepack pnpm install --frozen-lockfile
 
-COPY client-build-patch.py /work/client-build-patch.py
-COPY client-font-hybrid-patch.py /work/client-font-hybrid-patch.py
-COPY client-font-runtime-patch.py /work/client-font-runtime-patch.py
-RUN python3 /work/client-build-patch.py \
- && python3 /work/client-font-hybrid-patch.py \
- && python3 /work/client-font-runtime-patch.py
+# The upstream atlas covers Western/central European Latin only. Extend it with
+# Vietnamese precomposed code points and combining marks so both NFC and NFD
+# strings render instead of falling back to the '?' replacement glyph.
+RUN python3 - <<'PY'
+from pathlib import Path
+p = Path('/work/upstream/scripts/build/native_ui_font_atlas.py')
+s = p.read_text(encoding='utf-8')
+old = 'LATIN_CODEPOINTS = range(0xA0, 0x180)'
+new = 'LATIN_CODEPOINTS = tuple(range(0xA0, 0x250)) + tuple(range(0x300, 0x370)) + tuple(range(0x1E00, 0x1F00))'
+if old not in s:
+    raise SystemExit('native atlas coverage declaration changed upstream')
+p.write_text(s.replace(old, new), encoding='utf-8')
+PY
 
-# HieuSRO font contract:
-# - VNARIAL is always the base face, preserving original English/ASCII.
-# - VNTAHOMA is an overlay for every Vietnamese Unicode glyph plus private-use
-#   A-Z/a-z aliases used only by Vietnamese strings.
-# - Both language atlases contain the hybrid coverage so Vietnamese player/NPC
-#   names still render correctly even when the UI language is English.
-RUN mkdir -p /work/fonts \
- && python3 -m gdown 1SBqo5JNUSVocPrJrdr3gmhLYM-NT5U0i -O /work/fonts/VNARIAL.ttf \
- && python3 -m gdown 19F_QwaiCm80TF-qJJ8j9uRnTIQvxFYBP -O /work/fonts/VNTAHOMA.TTF \
- && test "$(stat -c%s /work/fonts/VNARIAL.ttf)" = "52108" \
- && test "$(stat -c%s /work/fonts/VNTAHOMA.TTF)" = "316388"
+# HieuSRO localization and font atlas are served as same-origin loose resources
+# by our edge. English text remains native OpenSRO data inside verified packs.
+# The worker first tries loose HieuSRO resources and falls back to the original
+# pack reader on 404. This is important for English catalogs while keeping the
+# expanded Vietnamese font atlas active for both languages.
+RUN python3 - <<'PY'
+from pathlib import Path
+p = Path('/work/upstream/apps/client-next/src/engine/runtime/assets/worker/loader.ts')
+s = p.read_text(encoding='utf-8')
+anchor = 'const DOWNLOAD_NO_PROGRESS_MS = 15000;\n'
+insert = anchor + 'const HIEUSRO_LOOSE_ASSET = /^(?:\\/assets\\/text\\/(?:textuisystem|textzonename|textdataname|texthelp|messagetips)\\.en\\.json|\\/assets\\/fonts\\/native-ui-font-atlas\\.(?:json|png))$/;\n'
+if anchor not in s:
+    raise SystemExit('asset loader timing anchor changed upstream')
+s = s.replace(anchor, insert, 1)
+old_credentials = 'credentials: "omit",'
+if old_credentials not in s:
+    raise SystemExit('asset loader credentials declaration changed upstream')
+s = s.replace(old_credentials, 'credentials: "same-origin",', 1)
+
+packs_anchor = '\tconst packs = createPacks( download, activity );\n'
+helper = packs_anchor + '''\tasync function hieusroLooseBytes( url: URL, limit: number, signal: AbortSignal ) {\n\t\ttry {\n\t\t\treturn await download( url.href, limit, signal );\n\t\t} catch ( error ) {\n\t\t\tif ( error instanceof Error && "status" in error && Number( error.status ) === 404 ) {\n\t\t\t\treturn await packs.read( url, limit, signal );\n\t\t\t}\n\t\t\tthrow error;\n\t\t}\n\t}\n'''
+if packs_anchor not in s:
+    raise SystemExit('asset loader packs anchor changed upstream')
+s = s.replace(packs_anchor, helper, 1)
+
+old_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\tawait packs.read( url, request.limit, controller.signal ) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
+new_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\t\t(HIEUSRO_LOOSE_ASSET.test( url.pathname ) ?\n\t\t\t\t\t\tawait hieusroLooseBytes( url, request.limit, controller.signal ) :\n\t\t\t\t\t\tawait packs.read( url, request.limit, controller.signal )) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
+if old_read not in s:
+    raise SystemExit('asset loader pack dispatch changed upstream')
+s = s.replace(old_read, new_read, 1)
+p.write_text(s, encoding='utf-8')
+PY
 
 RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \
- && HIEUSRO_FONT_COVERAGE=vi \
-    SRO_FONT_ARIAL=/work/fonts/VNARIAL.ttf \
-    SRO_FONT_ARIAL_BOLD=/work/fonts/VNARIAL.ttf \
-    HIEUSRO_VIET_FONT=/work/fonts/VNTAHOMA.TTF \
-    HIEUSRO_VIET_FONT_BOLD=/work/fonts/VNTAHOMA.TTF \
+ && SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf \
+    SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf \
     python3 scripts/build/native_ui_font_atlas.py \
-      apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.json \
-      apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.png \
- && HIEUSRO_FONT_COVERAGE=vi \
-    SRO_FONT_ARIAL=/work/fonts/VNARIAL.ttf \
-    SRO_FONT_ARIAL_BOLD=/work/fonts/VNARIAL.ttf \
-    HIEUSRO_VIET_FONT=/work/fonts/VNTAHOMA.TTF \
-    HIEUSRO_VIET_FONT_BOLD=/work/fonts/VNTAHOMA.TTF \
-    python3 scripts/build/native_ui_font_atlas.py \
-      apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.vi.json \
-      apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.vi.png \
- && test -s apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.json \
- && test -s apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.vi.json
+      apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.json \
+      apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.png
 
 FROM node:24-bookworm-slim
 WORKDIR /app
@@ -62,8 +76,6 @@ COPY --from=build /work/upstream/apps/client-next/temp/artifacts/dist /app/publi
 COPY hieusro-language.js /app/public/hieusro-language.js
 RUN grep -q '</body>' /app/public/index.html \
  && sed -i 's#</body>#<script src="/hieusro-language.js"></script></body>#' /app/public/index.html \
- && grep -q 'hieusro-language.js' /app/public/index.html \
- && test -s /app/public/assets/fonts/native-ui-font-atlas.en.png \
- && test -s /app/public/assets/fonts/native-ui-font-atlas.vi.png
+ && grep -q 'hieusro-language.js' /app/public/index.html
 EXPOSE 10000
 CMD ["node", "/app/edge.mjs"]

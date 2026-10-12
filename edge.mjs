@@ -13,7 +13,6 @@ const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-ga
 const LANGUAGE_COOKIE = "hieusro_lang";
 const LOCALIZED_TEXT = /^\/assets\/text\/(textuisystem|textzonename|textdataname|texthelp)\.en\.json$/;
 const MESSAGE_TIPS_PATH = "/assets/text/messagetips.en.json";
-const LOCALIZED_FONT = /^\/assets\/fonts\/native-ui-font-atlas\.(json|png)$/;
 const LOCALIZED_CATALOGUE_MAX_BYTES = 12 << 20;
 let localizedTipsCache = { body: null, expiresAt: 0 };
 
@@ -80,44 +79,6 @@ function localFileExists(pathname) {
   }
 }
 
-function serveLocalizedFont(req, res, pathname) {
-  const match = LOCALIZED_FONT.exec(pathname);
-  if (!match) return false;
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.writeHead(405, { Allow: "GET, HEAD" }).end();
-    return true;
-  }
-  const language = selectedLanguage(req);
-  const extension = match[1];
-  const sourcePath = `/assets/fonts/native-ui-font-atlas.${language}.${extension}`;
-  const candidate = localCandidate(sourcePath);
-  if (!candidate) {
-    res.writeHead(404).end();
-    return true;
-  }
-  let stat;
-  try {
-    stat = fs.statSync(candidate);
-  } catch {
-    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("Localized font atlas not found");
-    return true;
-  }
-  secureHeaders(res);
-  res.statusCode = 200;
-  res.setHeader("Content-Type", MIME.get(path.extname(candidate).toLowerCase()) || "application/octet-stream");
-  res.setHeader("Content-Length", stat.size);
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Vary", "Cookie");
-  res.setHeader("X-HieuSRO-Font", language === "vi" ? "VnTahoma" : "VnArial");
-  console.log(`[font] ${req.method} ${pathname} -> ${sourcePath} 200 lang=${language}`);
-  if (req.method === "HEAD") {
-    res.end();
-    return true;
-  }
-  fs.createReadStream(candidate).pipe(res);
-  return true;
-}
-
 function copyProxyHeaders(source, target) {
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
@@ -145,6 +106,9 @@ function proxyHttp(req, res) {
   headers["x-forwarded-proto"] = "https";
   delete headers.connection;
 
+  // The worker sends the language cookie only to this same-origin edge. Never
+  // forward it after language selection. Localized JSON is intentionally read
+  // as identity bytes so it can be normalized safely before it reaches WebGL UI.
   if (pathname.startsWith("/assets/")) delete headers.cookie;
   if (localized) {
     headers["accept-encoding"] = "identity";
@@ -300,8 +264,6 @@ const server = http.createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
 
-    if (serveLocalizedFont(req, res, pathname)) return;
-
     if (pathname.startsWith("/assets/") && localFileExists(pathname)) {
       serveStatic(req, res);
       return;
@@ -364,5 +326,5 @@ server.on("upgrade", (req, clientSocket, head) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`HieuSRO client edge listening on :${PORT}; assets=${ASSET_UPSTREAM_HOST}; game=${GAME_UPSTREAM_HOST}; defaultLang=vi; fonts=VnTahoma/VnArial`);
+  console.log(`HieuSRO client edge listening on :${PORT}; assets=${ASSET_UPSTREAM_HOST}; game=${GAME_UPSTREAM_HOST}; defaultLang=vi`);
 });

@@ -39,6 +39,10 @@ RUN corepack pnpm --version \
 # HieuSRO operator extension: flat EXP multiplier + independently adjustable
 # skill/drop/gold/rare rates while preserving native defaults at x1.
 COPY hieusro-growth.go /src/opensro/apps/server/internal/game/progression/growth.go
+# HieuSRO localization publisher. It reads the Vietnamese column already
+# shipped in the owner's v1.150 Media.pk2 and falls back to official English
+# only for untranslated/empty rows.
+COPY build-vietnamese-text.mjs /src/opensro/hieusro/build-vietnamese-text.mjs
 
 RUN set -eux; \
     mkdir -p "$SRO_GAME_ROOT/parts"; \
@@ -79,6 +83,7 @@ print('All licensed client input sizes match exactly.')
 PY
 
 RUN corepack pnpm assets prepare
+RUN node hieusro/build-vietnamese-text.mjs /out/i18n
 RUN corepack pnpm assets doctor
 RUN corepack pnpm assets build world-outdoor
 
@@ -130,6 +135,7 @@ RUN mkdir -p /opt/hieusro/server/config /opt/hieusro/server/ops/nomad/jobs /opt/
 COPY --from=builder /out/server.srogz /opt/hieusro/server.srogz
 COPY --from=builder /out/server.srogz.sha256 /opt/hieusro/server.srogz.sha256
 COPY --from=builder /out/opensro-commit.txt /opt/hieusro/opensro-commit.txt
+COPY --from=builder /out/i18n /opt/hieusro/i18n
 COPY --from=builder /out/agent /opt/hieusro/server/agent
 COPY --from=builder /out/gameworld /opt/hieusro/server/gameworld
 COPY --from=builder /out/sro-nomad /opt/hieusro/server/sro-nomad

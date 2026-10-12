@@ -74,12 +74,22 @@ for name, size in expected.items():
 print('All licensed client input sizes match exactly.')
 PY
 
-RUN corepack pnpm assets prepare \
- && corepack pnpm assets doctor \
- && corepack pnpm assets build full \
- && corepack pnpm assets ledger \
- && corepack pnpm task build server-game-data \
- && corepack pnpm assets check integrity
+# Extract the licensed retail data and validate every authoritative input.
+RUN corepack pnpm assets prepare
+RUN corepack pnpm assets doctor
+
+# server.srogz needs the real outdoor movement/navmesh bundles, but it does not
+# need browser presentation GLBs. Building this lane separately avoids making
+# optional event-pet meshes a dependency of authoritative server data.
+RUN corepack pnpm assets build world-outdoor
+
+COPY build-server-world.mjs /tmp/build-server-world.mjs
+RUN node /tmp/build-server-world.mjs
+
+# Build the immutable GameWorld projection directly, then make the server's own
+# item loader read it as an independent validation pass.
+RUN node scripts/build/server/buildServerGameDataBundle.mjs \
+ && node apps/server-observatory/tools/item-catalog.mjs
 
 RUN set -eux; \
     mkdir -p /out; \
@@ -92,6 +102,8 @@ RUN set -eux; \
     cd /src/opensro/apps/server; \
     CGO_ENABLED=0 GOOS=linux go build -o /out/sro-agent ./cmd/services/sro-agent; \
     CGO_ENABLED=0 GOOS=linux go build -o /out/sro-gameworld ./cmd/services/sro-gameworld; \
+    test -s /out/sro-agent; \
+    test -s /out/sro-gameworld; \
     ls -lh /out/server.srogz /out/sro-agent /out/sro-gameworld
 
 FROM python:3.12-slim-bookworm AS runtime

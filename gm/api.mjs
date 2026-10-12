@@ -1,7 +1,7 @@
 import { issueSession, loginEnabled, passwordMatches, sessionCookie, validSession } from './auth.mjs';
-import { rollbackVersion, VersionError, versionSnapshot } from './versions.mjs';
 
 const CONTROL_URL = (process.env.GAME_CONTROL_URL || 'https://hieusro-game-server.onrender.com/gm-api').replace(/\/$/, '');
+const VERSION_CONTROL_URL = (process.env.GAME_VERSION_CONTROL_URL || 'https://hieusro-game-server.onrender.com/gm-version-api').replace(/\/$/, '');
 const CONTROL_TOKEN = String(process.env.GM_CONTROL_TOKEN || '');
 if (Buffer.byteLength(CONTROL_TOKEN, 'utf8') < 32) throw new Error('GM_CONTROL_TOKEN must be at least 32 bytes');
 
@@ -62,8 +62,8 @@ function allowLogin(ip) {
   return true;
 }
 
-async function control(path, method = 'GET', body) {
-  const response = await fetch(`${CONTROL_URL}${path}`, {
+async function remote(base, path, method = 'GET', body) {
+  const response = await fetch(`${base}${path}`, {
     method,
     headers: {
       'Authorization': `Bearer ${CONTROL_TOKEN}`,
@@ -76,6 +76,14 @@ async function control(path, method = 'GET', body) {
   let data = null;
   try { data = await response.json(); } catch {}
   return { status: response.status, data: data ?? { ok: response.ok } };
+}
+
+function control(path, method = 'GET', body) {
+  return remote(CONTROL_URL, path, method, body);
+}
+
+function versionControl(path, method = 'GET', body) {
+  return remote(VERSION_CONTROL_URL, path, method, body);
 }
 
 function authenticated(req, res) {
@@ -133,28 +141,16 @@ export async function handleApi(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/versions') {
-    return json(res, 200, await versionSnapshot());
+    const out = await versionControl('/v1/versions');
+    return json(res, out.status, out.data);
   }
-  let versionMatch = url.pathname.match(/^\/api\/versions\/(v\d+\.\d+\.\d+)\/rollback$/);
+  const versionMatch = url.pathname.match(/^\/api\/versions\/(v\d+\.\d+\.\d+)\/rollback$/);
   if (req.method === 'POST' && versionMatch) {
-    try {
-      const body = await readJson(req);
-      let onlinePlayers = 0;
-      let controlHealthy = false;
-      try {
-        const state = await control('/v1/status');
-        controlHealthy = state.status === 200;
-        onlinePlayers = Number(state.data?.onlinePlayers) || 0;
-      } catch {}
-      if (!controlHealthy && body.force !== true) {
-        return json(res, 503, { ok: false, code: 'STATUS_UNKNOWN', message: 'Không đọc được trạng thái Game Server. Chỉ Super Admin mới được cưỡng bức rollback.' });
-      }
-      const job = await rollbackVersion(versionMatch[1], { force: body.force === true, onlinePlayers });
-      return json(res, 202, { ok: true, job });
-    } catch (error) {
-      if (error instanceof VersionError) return json(res, error.status, { ok: false, code: error.code, message: error.message });
-      return json(res, 503, { ok: false, code: 'ROLLBACK_FAILED', message: String(error?.message || error) });
-    }
+    const body = await readJson(req);
+    const out = await versionControl(`/v1/versions/${encodeURIComponent(versionMatch[1])}/rollback`, 'POST', {
+      force: body.force === true
+    });
+    return json(res, out.status, out.data);
   }
 
   let m = url.pathname.match(/^\/api\/accounts\/([^/]+)$/);

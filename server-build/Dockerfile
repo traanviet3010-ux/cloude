@@ -39,10 +39,6 @@ RUN corepack pnpm --version \
 # HieuSRO operator extension: flat EXP multiplier + independently adjustable
 # skill/drop/gold/rare rates while preserving native defaults at x1.
 COPY hieusro-growth.go /src/opensro/apps/server/internal/game/progression/growth.go
-# HieuSRO localization publisher. It reads the Vietnamese column already
-# shipped in the owner's v1.150 Media.pk2 and falls back to official English
-# only for untranslated/empty rows.
-COPY build-vietnamese-text.mjs /src/opensro/hieusro/build-vietnamese-text.mjs
 
 RUN set -eux; \
     mkdir -p "$SRO_GAME_ROOT/parts"; \
@@ -83,6 +79,9 @@ print('All licensed client input sizes match exactly.')
 PY
 
 RUN corepack pnpm assets prepare
+# Keep this COPY after the expensive licensed-input and extraction layers so
+# localization changes do not force multi-GB client inputs to download again.
+COPY build-vietnamese-text.mjs /src/opensro/hieusro/build-vietnamese-text.mjs
 RUN node hieusro/build-vietnamese-text.mjs /out/i18n
 RUN corepack pnpm assets doctor
 RUN corepack pnpm assets build world-outdoor

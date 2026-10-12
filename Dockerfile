@@ -11,10 +11,7 @@ RUN git clone https://github.com/opensro-dev/opensro.git upstream \
  && git checkout "$OPENSRO_REF" \
  && corepack pnpm install --frozen-lockfile
 
-# Expand native UI font coverage for Vietnamese and lightly embolden the
-# normal bitmap style. The embolden keeps original advances/line metrics so
-# legacy CIF layouts do not grow, but adds one horizontal pixel of ink for
-# much better readability at the retail 8-12 px sizes.
+# Keep full Vietnamese Unicode coverage, but do not synthesize extra stroke width.
 RUN python3 - <<'PY'
 from pathlib import Path
 p = Path('/work/upstream/scripts/build/native_ui_font_atlas.py')
@@ -23,20 +20,11 @@ old = 'LATIN_CODEPOINTS = range(0xA0, 0x180)'
 new = 'LATIN_CODEPOINTS = tuple(range(0xA0, 0x250)) + tuple(range(0x300, 0x370)) + tuple(range(0x1E00, 0x1F00))'
 if old not in s:
     raise SystemExit('native atlas coverage declaration changed upstream')
-s = s.replace(old, new, 1)
-old_pixels = '''\t\t\tif pixels:\n\t\t\t\txs = [x for x, _ in pixels]\n\t\t\t\tys = [y for _, y in pixels]\n\t\t\t\tx0, y0 = min(xs), min(ys)\n\t\t\t\tpixels = [(x - x0, y - y0) for x, y in pixels]\n\t\t\t\twidth, height = max(xs) - x0 + 1, max(ys) - y0 + 1\n\t\t\t\tleft, top = left + x0, top + y0\n'''
-new_pixels = '''\t\t\tif pixels:\n\t\t\t\txs = [x for x, _ in pixels]\n\t\t\t\tys = [y for _, y in pixels]\n\t\t\t\tx0, y0 = min(xs), min(ys)\n\t\t\t\tpixels = [(x - x0, y - y0) for x, y in pixels]\n\t\t\t\twidth, height = max(xs) - x0 + 1, max(ys) - y0 + 1\n\t\t\t\tleft, top = left + x0, top + y0\n\t\t\t\tif style["name"] == "normal":\n\t\t\t\t\tbase = set(pixels)\n\t\t\t\t\tbase.update((x + 1, y) for x, y in pixels)\n\t\t\t\t\tpixels = sorted(base)\n\t\t\t\t\twidth = max(x for x, _ in pixels) + 1\n'''
-if old_pixels not in s:
-    raise SystemExit('FreeType glyph raster block changed upstream')
-s = s.replace(old_pixels, new_pixels, 1)
-p.write_text(s, encoding='utf-8')
+p.write_text(s.replace(old, new, 1), encoding='utf-8')
 PY
 
-# HieuSRO localization and font atlas are served as same-origin loose resources
-# by our edge. English text remains native OpenSRO data inside verified packs.
-# The worker first tries loose HieuSRO resources and falls back to the original
-# pack reader on 404. This is important for English catalogs while keeping the
-# expanded Vietnamese font atlas active for both languages.
+# Localized text and the expanded font atlas are same-origin loose resources.
+# English text falls back to the original verified pack when no loose file exists.
 RUN python3 - <<'PY'
 from pathlib import Path
 p = Path('/work/upstream/apps/client-next/src/engine/runtime/assets/worker/loader.ts')
@@ -50,19 +38,77 @@ old_credentials = 'credentials: "omit",'
 if old_credentials not in s:
     raise SystemExit('asset loader credentials declaration changed upstream')
 s = s.replace(old_credentials, 'credentials: "same-origin",', 1)
-
 packs_anchor = '\tconst packs = createPacks( download, activity );\n'
 helper = packs_anchor + '''\tasync function hieusroLooseBytes( url: URL, limit: number, signal: AbortSignal ) {\n\t\ttry {\n\t\t\treturn await download( url.href, limit, signal );\n\t\t} catch ( error ) {\n\t\t\tif ( error instanceof Error && "status" in error && Number( error.status ) === 404 ) {\n\t\t\t\treturn await packs.read( url, limit, signal );\n\t\t\t}\n\t\t\tthrow error;\n\t\t}\n\t}\n'''
 if packs_anchor not in s:
     raise SystemExit('asset loader packs anchor changed upstream')
 s = s.replace(packs_anchor, helper, 1)
-
 old_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\tawait packs.read( url, request.limit, controller.signal ) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
 new_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\t\t(HIEUSRO_LOOSE_ASSET.test( url.pathname ) ?\n\t\t\t\t\t\tawait hieusroLooseBytes( url, request.limit, controller.signal ) :\n\t\t\t\t\t\tawait packs.read( url, request.limit, controller.signal )) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
 if old_read not in s:
     raise SystemExit('asset loader pack dispatch changed upstream')
-s = s.replace(old_read, new_read, 1)
-p.write_text(s, encoding='utf-8')
+p.write_text(s.replace(old_read, new_read, 1), encoding='utf-8')
+PY
+
+# Game references contain English display names. Replace only their presentation
+# names after the signed/static reference bytes pass digest verification, using
+# the currently selected textdataname catalogue. Switching language therefore
+# keeps both monster/NPC and item/equipment names in sync without touching IDs.
+RUN python3 - <<'PY'
+from pathlib import Path
+p = Path('/work/upstream/apps/client-next/src/engine/runtime/simulation/worker/session/http/http.ts')
+s = p.read_text(encoding='utf-8')
+const_anchor = 'const REFERENCE_ROWS_LIMIT = 65536;\n'
+helpers = const_anchor + r'''
+const HIEUSRO_NAMES_BYTES = 8 * 1024 * 1024;
+
+async function hieusroLocalizedNames( signal: AbortSignal ): Promise<ReadonlyMap<string, string>> {
+	try {
+		const response = await fetch( "/assets/text/textdataname.en.json", {
+			signal,
+			cache: "no-store",
+			credentials: "same-origin",
+			redirect: "error"
+		} );
+		if ( !response.ok || !response.body ) return new Map();
+		const bytes = await readBytes( response.body, HIEUSRO_NAMES_BYTES );
+		const value = JSON.parse( new TextDecoder( "utf-8", { fatal: true } ).decode( bytes ) ) as unknown;
+		if ( !value || typeof value !== "object" || Array.isArray( value ) ) return new Map();
+		const entries = (value as { entries?: unknown; }).entries;
+		if ( !entries || typeof entries !== "object" || Array.isArray( entries ) ) return new Map();
+		return new Map(
+			Object.entries( entries as Record<string, unknown> )
+				.filter( ( row ): row is [ string, string ] => typeof row[1] === "string" )
+		);
+	} catch {
+		return new Map();
+	}
+}
+
+function hieusroLocalizedReferences(
+	rows: unknown[],
+	names: ReadonlyMap<string, string>,
+	item: boolean
+): unknown[] {
+	return rows.map( row => {
+		if ( !row || typeof row !== "object" || Array.isArray( row ) ) return row;
+		const record = row as Record<string, unknown>;
+		const symbol = typeof record.nameStrId === "string" ?
+			record.nameStrId :
+			item && typeof record.codename === "string" ? "SN_" + record.codename : "";
+		const name = symbol ? names.get( symbol ) : undefined;
+		return name ? { ...record, name } : row;
+	} );
+}
+'''
+if const_anchor not in s:
+    raise SystemExit('session HTTP constants changed upstream')
+s = s.replace(const_anchor, helpers, 1)
+return_anchor = '''\tconst reverseMapPoints = decodeReverseMapPoints( parsed.reverseMapPoints );\n\treturn {\n\t\trefSkillSnapshot: parsed.refSkillSnapshot,\n\t\trefItemSnapshot: parsed.refItemSnapshot,\n\t\trefObjSnapshot: parsed.refObjSnapshot,'''
+return_replacement = '''\tconst localizedNames = await hieusroLocalizedNames( signal );\n\tconst refItemSnapshot = hieusroLocalizedReferences( parsed.refItemSnapshot, localizedNames, true );\n\tconst refObjSnapshot = hieusroLocalizedReferences( parsed.refObjSnapshot, localizedNames, false );\n\tconst reverseMapPoints = decodeReverseMapPoints( parsed.reverseMapPoints );\n\treturn {\n\t\trefSkillSnapshot: parsed.refSkillSnapshot,\n\t\trefItemSnapshot,\n\t\trefObjSnapshot,'''
+if return_anchor not in s:
+    raise SystemExit('world references return block changed upstream')
+p.write_text(s.replace(return_anchor, return_replacement, 1), encoding='utf-8')
 PY
 
 RUN cd /work/upstream \

@@ -110,6 +110,28 @@ s = s.replace(old_video, new_video, 1)
 p.write_text(s, encoding='utf-8')
 PY
 
+# OpenSRO already keeps verified pack members in Cache Storage. Ask browsers
+# that support persistent storage to retain that verified cache, and make the
+# loading line distinguish processed bytes from actual network bytes/cache hits.
+RUN python3 - <<'PY'
+from pathlib import Path
+platform = Path('/work/upstream/apps/client-next/src/engine/runtime/platform/platform.ts')
+s = platform.read_text(encoding='utf-8')
+anchor = '''\tconst lifetime = new AbortController();\n'''
+insert = '''\tconst lifetime = new AbortController();\n\tconst storage = navigator.storage;\n\tif ( storage?.persisted && storage?.persist ) {\n\t\tvoid storage.persisted().then( kept => kept || storage.persist() ).catch( () => false );\n\t}\n'''
+if anchor not in s:
+    raise SystemExit('platform lifetime anchor changed upstream')
+platform.write_text(s.replace(anchor, insert, 1), encoding='utf-8')
+
+loading = Path('/work/upstream/apps/client-next/src/engine/foundation/ui/loading-detail.ts')
+s = loading.read_text(encoding='utf-8')
+old = '''\tif ( progress.bytesRead !== undefined ) {\n\t\tparts.push( `${(progress.bytesRead / BYTES_PER_MB).toFixed( 1 )} MB read` );\n\t\tparts.push( `${progress.filesReady} files ready` );\n\t}\n'''
+new = '''\tif ( progress.bytesRead !== undefined ) {\n\t\tparts.push( `${(progress.bytesRead / BYTES_PER_MB).toFixed( 1 )} MB processed` );\n\t\tif ( progress.bytesReceived > 0 ) {\n\t\t\tparts.push( `${(progress.bytesReceived / BYTES_PER_MB).toFixed( 1 )} MB network` );\n\t\t}\n\t\tif ( progress.cacheHits > 0 ) parts.push( `${progress.cacheHits} cache hits` );\n\t\tparts.push( `${progress.filesReady} files ready` );\n\t}\n'''
+if old not in s:
+    raise SystemExit('loading detail byte display changed upstream')
+loading.write_text(s.replace(old, new, 1), encoding='utf-8')
+PY
+
 RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \

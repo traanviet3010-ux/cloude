@@ -154,11 +154,15 @@ function allowRegistration(ip) {
   return true;
 }
 
+function provisioningHeaders() {
+  return { 'content-type': 'application/json', 'authorization': `Bearer ${SRO_PROVISIONING_TOKEN}` };
+}
+
 async function provisionGameAccount(id, password) {
   if (!SRO_PROVISIONING_URL || !SRO_PROVISIONING_TOKEN) return { synced: false };
   const response = await fetch(`${SRO_PROVISIONING_URL}/v1/accounts`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'authorization': `Bearer ${SRO_PROVISIONING_TOKEN}` },
+    headers: provisioningHeaders(),
     body: JSON.stringify({ id, password }),
     signal: AbortSignal.timeout(10000)
   });
@@ -167,6 +171,7 @@ async function provisionGameAccount(id, password) {
   if (!response.ok) {
     const error = new Error(body?.message || `Provisioning failed (${response.status})`);
     error.code = body?.code || 'PROVISIONING_FAILED';
+    error.status = response.status;
     throw error;
   }
   return { synced: true, account: body };
@@ -176,11 +181,51 @@ async function updateGamePassword(id, password) {
   if (!SRO_PROVISIONING_URL || !SRO_PROVISIONING_TOKEN) throw new Error('GAME_SERVER_OFFLINE');
   const response = await fetch(`${SRO_PROVISIONING_URL}/v1/accounts/${encodeURIComponent(id)}/password`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json', 'authorization': `Bearer ${SRO_PROVISIONING_TOKEN}` },
+    headers: provisioningHeaders(),
     body: JSON.stringify({ password }),
     signal: AbortSignal.timeout(10000)
   });
-  if (!response.ok) throw new Error('GAME_PASSWORD_UPDATE_FAILED');
+  if (!response.ok) {
+    const error = new Error(response.status === 404 ? 'GAME_ACCOUNT_MISSING' : 'GAME_PASSWORD_UPDATE_FAILED');
+    error.status = response.status;
+    throw error;
+  }
+}
+
+async function syncGameAccount(id, password) {
+  if (!SRO_PROVISIONING_URL || !SRO_PROVISIONING_TOKEN) return { synced: false, restored: false };
+  try {
+    await updateGamePassword(id, password);
+    return { synced: true, restored: false };
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+
+  try {
+    const created = await provisionGameAccount(id, password);
+    return { synced: created.synced, restored: created.synced };
+  } catch (error) {
+    if (error.status === 409 || error.code === 'ACCOUNT_EXISTS') {
+      await updateGamePassword(id, password);
+      return { synced: true, restored: false };
+    }
+    throw error;
+  }
+}
+
+async function markGameSync(folded, synced) {
+  const encoded = Buffer.from(folded).toString('base64url');
+  if (synced) {
+    await registry.multi()
+      .hSet(accountKey(folded), { gameSynced: '1', gameSyncedAtMs: String(Date.now()) })
+      .sAdd(SYNCED_SET, encoded)
+      .exec();
+  } else {
+    await registry.multi()
+      .hSet(accountKey(folded), { gameSynced: '0' })
+      .sRem(SYNCED_SET, encoded)
+      .exec();
+  }
 }
 
 const reserveAccountScript = `
@@ -253,12 +298,7 @@ async function handleRegister(req, res) {
     return json(res, 503, { ok: false, code: error.code || 'GAME_SERVER_OFFLINE', message: 'Máy chủ tài khoản game chưa sẵn sàng. Vui lòng thử lại sau.' });
   }
 
-  if (provisioned.synced) {
-    await registry.multi()
-      .hSet(accountKey(folded), { gameSynced: '1', gameSyncedAtMs: String(Date.now()) })
-      .sAdd(SYNCED_SET, encoded)
-      .exec();
-  }
+  if (provisioned.synced) await markGameSync(folded, true);
 
   return json(res, 201, {
     ok: true,
@@ -280,9 +320,27 @@ async function handleLogin(req, res) {
   const account = await registry.hGetAll(accountKey(folded));
   const valid = Boolean(account?.id && account.disabled !== '1' && account.passwordHash && await bcrypt.compare(password, account.passwordHash));
   if (!valid) return json(res, 401, { ok: false, code: 'INVALID_LOGIN', message: 'Tài khoản hoặc mật khẩu không đúng.' });
+
+  let restored = false;
+  if (SRO_PROVISIONING_URL && SRO_PROVISIONING_TOKEN) {
+    try {
+      const sync = await syncGameAccount(account.id, password);
+      if (sync.synced) {
+        await markGameSync(folded, true);
+        account.gameSynced = '1';
+        restored = sync.restored;
+        if (restored) console.log(`restored missing game account from portal login: ${account.id}`);
+      }
+    } catch (error) {
+      console.error(`game account sync on login failed for ${account.id}:`, error.message);
+      await markGameSync(folded, false).catch(() => {});
+      account.gameSynced = '0';
+    }
+  }
+
   const token = crypto.randomBytes(32).toString('base64url');
   await registry.set(sessionKey(token), folded, { EX: SESSION_TTL_SECONDS });
-  return json(res, 200, { ok: true, account: accountView(account) }, { 'Set-Cookie': sessionCookie(token) });
+  return json(res, 200, { ok: true, account: accountView(account), gameAccountRestored: restored }, { 'Set-Cookie': sessionCookie(token) });
 }
 
 async function handleLogout(req, res) {
@@ -310,13 +368,20 @@ async function handleChangePassword(req, res) {
   if (newPassword !== confirmPassword) return json(res, 400, { ok: false, message: 'Mật khẩu nhập lại không khớp.' });
   if (!await bcrypt.compare(String(currentPassword || ''), auth.account.passwordHash || '')) return json(res, 401, { ok: false, message: 'Mật khẩu hiện tại không đúng.' });
 
-  if (auth.account.gameSynced === '1') {
-    try { await updateGamePassword(auth.account.id, newPassword); }
-    catch { return json(res, 503, { ok: false, message: 'Chưa thể đồng bộ mật khẩu sang máy chủ game. Vui lòng thử lại sau.' }); }
+  let synced = false;
+  if (SRO_PROVISIONING_URL && SRO_PROVISIONING_TOKEN) {
+    try {
+      const sync = await syncGameAccount(auth.account.id, newPassword);
+      synced = sync.synced;
+    } catch {
+      return json(res, 503, { ok: false, message: 'Chưa thể đồng bộ mật khẩu sang máy chủ game. Vui lòng thử lại sau.' });
+    }
   }
+
   const passwordHash = await bcrypt.hash(newPassword, 12);
   await registry.hSet(accountKey(auth.folded), { passwordHash });
-  return json(res, 200, { ok: true, message: 'Đổi mật khẩu thành công.' });
+  await markGameSync(auth.folded, synced).catch(() => {});
+  return json(res, 200, { ok: true, message: synced ? 'Đổi mật khẩu và đồng bộ game thành công.' : 'Đổi mật khẩu thành công.' });
 }
 
 async function handleTopups(req, res) {

@@ -25,6 +25,31 @@ if old not in s:
 p.write_text(s.replace(old, new), encoding='utf-8')
 PY
 
+# HieuSRO localization: OpenSRO normally resolves text catalogues from packed
+# game-data binaries. Force only the five language catalogues through ordinary
+# same-origin HTTP so the HieuSRO edge can serve Vietnamese/English per player.
+# Other assets continue to use the verified pack reader unchanged.
+RUN python3 - <<'PY'
+from pathlib import Path
+p = Path('/work/upstream/apps/client-next/src/engine/runtime/assets/worker/loader.ts')
+s = p.read_text(encoding='utf-8')
+anchor = 'const DOWNLOAD_NO_PROGRESS_MS = 15000;\n'
+insert = anchor + 'const HIEUSRO_LOOSE_LOCALIZED_TEXT = /^\\/assets\\/text\\/(?:textuisystem|textzonename|textdataname|texthelp|messagetips)\\.en\\.json$/;\n'
+if anchor not in s:
+    raise SystemExit('asset loader timing anchor changed upstream')
+s = s.replace(anchor, insert, 1)
+old_credentials = 'credentials: "omit",'
+if old_credentials not in s:
+    raise SystemExit('asset loader credentials declaration changed upstream')
+s = s.replace(old_credentials, 'credentials: "same-origin",', 1)
+old_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\tawait packs.read( url, request.limit, controller.signal ) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
+new_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) && !HIEUSRO_LOOSE_LOCALIZED_TEXT.test( url.pathname ) ?\n\t\t\t\tawait packs.read( url, request.limit, controller.signal ) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
+if old_read not in s:
+    raise SystemExit('asset loader pack dispatch changed upstream')
+s = s.replace(old_read, new_read, 1)
+p.write_text(s, encoding='utf-8')
+PY
+
 RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \

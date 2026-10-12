@@ -9,6 +9,8 @@ const PORT = Number(process.env.PORT || 10000);
 const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
 const ASSET_UPSTREAM_HOST = process.env.OPENSRO_ASSET_UPSTREAM_HOST || "opensro.online";
 const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-game-server.onrender.com";
+const LANGUAGE_COOKIE = "hieusro_lang";
+const LOCALIZED_TEXT = /^\/assets\/text\/(textuisystem|textzonename|textdataname|texthelp|messagetips)\.en\.json$/;
 
 const MIME = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -29,6 +31,31 @@ function secureHeaders(res) {
   res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
+}
+
+function cookie(req, name) {
+  for (const part of String(req.headers.cookie || "").split(";")) {
+    const at = part.indexOf("=");
+    if (at < 1) continue;
+    if (part.slice(0, at).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(at + 1).trim()); }
+    catch { return part.slice(at + 1).trim(); }
+  }
+  return "";
+}
+
+function selectedLanguage(req) {
+  return cookie(req, LANGUAGE_COOKIE) === "en" ? "en" : "vi";
+}
+
+function localizedRoute(req, pathname) {
+  const match = LOCALIZED_TEXT.exec(pathname);
+  if (!match || selectedLanguage(req) !== "vi") return null;
+  return {
+    host: GAME_UPSTREAM_HOST,
+    path: `/i18n/${match[1]}.vi.json`,
+    localized: true
+  };
 }
 
 function localCandidate(pathname) {
@@ -65,8 +92,11 @@ function upstreamFor(pathname) {
 }
 
 function proxyHttp(req, res) {
-  const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
-  const upstreamHost = upstreamFor(pathname);
+  const parsed = new URL(req.url, "http://local");
+  const pathname = decodeURIComponent(parsed.pathname);
+  const localized = localizedRoute(req, pathname);
+  const upstreamHost = localized?.host || upstreamFor(pathname);
+  const upstreamPath = localized?.path || req.url;
   const headers = { ...req.headers, host: upstreamHost };
   headers["x-forwarded-host"] = req.headers.host || "";
   headers["x-forwarded-proto"] = "https";
@@ -77,7 +107,7 @@ function proxyHttp(req, res) {
     hostname: upstreamHost,
     port: 443,
     method: req.method,
-    path: req.url,
+    path: upstreamPath,
     headers
   }, upstreamRes => {
     res.statusCode = upstreamRes.statusCode || 502;
@@ -85,7 +115,11 @@ function proxyHttp(req, res) {
     if (pathname.startsWith("/assets/")) {
       res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     }
-    console.log(`[proxy] ${req.method} ${req.url} -> ${upstreamHost} ${res.statusCode}`);
+    if (LOCALIZED_TEXT.test(pathname)) {
+      res.setHeader("Vary", "Cookie");
+      res.setHeader("Cache-Control", "no-cache");
+    }
+    console.log(`[proxy] ${req.method} ${req.url} -> ${upstreamHost}${localized ? upstreamPath : ""} ${res.statusCode} lang=${selectedLanguage(req)}`);
     upstreamRes.pipe(res);
   });
   upstream.on("error", error => {
@@ -200,5 +234,5 @@ server.on("upgrade", (req, clientSocket, head) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`HieuSRO client edge listening on :${PORT}; assets=${ASSET_UPSTREAM_HOST}; game=${GAME_UPSTREAM_HOST}`);
+  console.log(`HieuSRO client edge listening on :${PORT}; assets=${ASSET_UPSTREAM_HOST}; game=${GAME_UPSTREAM_HOST}; defaultLang=vi`);
 });

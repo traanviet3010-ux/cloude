@@ -4,6 +4,7 @@ import tls from "node:tls";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeVietnameseCatalogue } from "./tcvn3.mjs";
 
 const PORT = Number(process.env.PORT || 10000);
 const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
@@ -12,6 +13,7 @@ const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-ga
 const LANGUAGE_COOKIE = "hieusro_lang";
 const LOCALIZED_TEXT = /^\/assets\/text\/(textuisystem|textzonename|textdataname|texthelp)\.en\.json$/;
 const MESSAGE_TIPS_PATH = "/assets/text/messagetips.en.json";
+const LOCALIZED_CATALOGUE_MAX_BYTES = 12 << 20;
 let localizedTipsCache = { body: null, expiresAt: 0 };
 
 const MIME = new Map([
@@ -104,10 +106,15 @@ function proxyHttp(req, res) {
   headers["x-forwarded-proto"] = "https";
   delete headers.connection;
 
-  // The asset worker now sends the language cookie to this same-origin edge so
-  // localized catalogues can be selected here. Never forward that cookie to
-  // the public asset host or game runtime after the selection has been made.
+  // The worker sends the language cookie only to this same-origin edge. Never
+  // forward it after language selection. Localized JSON is intentionally read
+  // as identity bytes so it can be normalized safely before it reaches WebGL UI.
   if (pathname.startsWith("/assets/")) delete headers.cookie;
+  if (localized) {
+    headers["accept-encoding"] = "identity";
+    delete headers["if-none-match"];
+    delete headers["if-modified-since"];
+  }
 
   const upstream = https.request({
     protocol: "https:",
@@ -127,6 +134,38 @@ function proxyHttp(req, res) {
       res.setHeader("Cache-Control", "no-cache");
     }
     console.log(`[proxy] ${req.method} ${req.url} -> ${upstreamHost}${localized ? upstreamPath : ""} ${res.statusCode} lang=${selectedLanguage(req)}`);
+
+    if (localized && req.method === "GET" && res.statusCode === 200) {
+      const chunks = [];
+      let size = 0;
+      upstreamRes.on("data", chunk => {
+        size += chunk.length;
+        if (size > LOCALIZED_CATALOGUE_MAX_BYTES) {
+          upstream.destroy(new Error("Localized catalogue exceeds edge budget"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      upstreamRes.on("end", () => {
+        try {
+          const document = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          const normalized = normalizeVietnameseCatalogue(document);
+          const body = Buffer.from(JSON.stringify(normalized), "utf8");
+          res.removeHeader("content-encoding");
+          res.removeHeader("etag");
+          res.removeHeader("last-modified");
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.setHeader("Content-Length", body.length);
+          res.end(body);
+        } catch (error) {
+          console.error(`[i18n:error] ${pathname}: ${error.message}`);
+          if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Invalid HieuSRO localized catalogue");
+        }
+      });
+      return;
+    }
+
     upstreamRes.pipe(res);
   });
   upstream.on("error", error => {
@@ -149,7 +188,7 @@ async function localizedMessageTips(req, res) {
       if (!tipsResponse.ok) throw new Error(`English message tips ${tipsResponse.status}`);
       if (!helpResponse.ok) throw new Error(`Vietnamese help text ${helpResponse.status}`);
       const tips = await tipsResponse.json();
-      const help = await helpResponse.json();
+      const help = normalizeVietnameseCatalogue(await helpResponse.json());
       const entries = help?.entries && typeof help.entries === "object" ? help.entries : {};
       const apply = row => {
         if (!row || typeof row !== "object" || typeof row.textKey !== "string") return;
@@ -175,7 +214,7 @@ async function localizedMessageTips(req, res) {
     console.log(`[i18n] GET ${MESSAGE_TIPS_PATH} -> merged vi catalogue 200`);
     return true;
   } catch (error) {
-    console.error(`[i18n:error] message tips: ${error.message}; falling back to English`);
+    console.error(`[i18n:error] message tips: ${error.message}; falling back to packed English`);
     return false;
   }
 }

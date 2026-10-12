@@ -1,0 +1,96 @@
+{
+  "defaultVersion": "v0.7.0",
+  "versions": [
+    {
+      "id": "v0.7.0",
+      "commit": "3f844e8e4544892547e65885b3d2dc633fde085e",
+      "title": "Item localization hiện tại",
+      "score": 100,
+      "risk": "green",
+      "summary": "Bản runtime hiện tại, giữ patch tên vật phẩm và catalog tiếng Việt mới nhất.",
+      "client": "Tương thích client HieuSRO hiện tại.",
+      "gm": "Tương thích Web GM hiện tại.",
+      "database": "Không rollback database; dữ liệu người chơi giữ nguyên.",
+      "rollbackSupported": true,
+      "snapshot": "v0.7.0"
+    },
+    {
+      "id": "v0.6.0",
+      "commit": "cd554604fd157c85e99238a0bffd01574f0e5a3f",
+      "title": "Exact item localization symbols",
+      "score": 100,
+      "risk": "green",
+      "summary": "Cùng runtime với v0.7, khác mốc phát hành; snapshot catalog tương thích hoàn toàn.",
+      "client": "Tương thích client hiện tại.",
+      "gm": "Tương thích Web GM hiện tại.",
+      "database": "Không rollback database; dữ liệu người chơi giữ nguyên.",
+      "rollbackSupported": true,
+      "snapshot": "v0.6.0"
+    },
+    {
+      "id": "v0.5.0",
+      "commit": "ab590807955596f130cbc321a24cb96e04461087",
+      "title": "TCVN3 → Unicode",
+      "score": 96,
+      "risk": "yellow",
+      "summary": "Rollback lớp catalog tiếng Việt về mốc TCVN3 → Unicode.",
+      "client": "Client hiện tại vẫn dùng được; tên item mới hơn có thể mất.",
+      "gm": "Tương thích Web GM hiện tại.",
+      "database": "Không rollback database; dữ liệu người chơi giữ nguyên.",
+      "rollbackSupported": true,
+      "snapshot": "v0.5.0"
+    },
+    {
+      "id": "v0.4.0",
+      "commit": "b655d7ecb554719f0c6f627de8442ea7fad32581",
+      "title": "Nền i18n tiếng Việt",
+      "score": 90,
+      "risk": "yellow",
+      "summary": "Rollback catalog về nền i18n ban đầu, trước các sửa TCVN3/item mới.",
+      "client": "Có thể chạy với client hiện tại; chất lượng text tiếng Việt thấp hơn.",
+      "gm": "Tương thích Web GM hiện tại.",
+      "database": "Không rollback database; dữ liệu người chơi giữ nguyên.",
+      "rollbackSupported": true,
+      "snapshot": "v0.4.0"
+    },
+    {
+      "id": "v0.3.0",
+      "commit": "d34bfcb97515a427480e89e4e55daeb51f6dd3ce",
+      "title": "GameWorld qua GM supervisor",
+      "score": 55,
+      "risk": "orange",
+      "summary": "Bản này thay đổi kiến trúc container/nginx và không có pipeline i18n hiện tại.",
+      "client": "Client tiếng Việt hiện tại có thể dừng khi tải catalog.",
+      "gm": "GM cơ bản còn tương thích nhưng không thể hot rollback an toàn.",
+      "database": "Database không rollback.",
+      "rollbackSupported": false,
+      "unsupportedReason": "Cần full image deploy; không thể đổi an toàn bên trong container đang chạy."
+    },
+    {
+      "id": "v0.2.0",
+      "commit": "a8a26a2df5d537488395e9f3c903a43d18ea7f13",
+      "title": "Managed provisioning entrypoint",
+      "score": 30,
+      "risk": "red",
+      "summary": "Bản trước GM supervisor/rate control và trước i18n.",
+      "client": "Không phù hợp client tiếng Việt hiện tại.",
+      "gm": "Không tương thích đầy đủ Web GM hiện tại.",
+      "database": "Database không rollback.",
+      "rollbackSupported": false,
+      "unsupportedReason": "Cần full image deploy; snapshot runtime nội bộ không đủ để tái tạo bản này."
+    },
+    {
+      "id": "v0.1.0",
+      "commit": "573649da402a7c4c738d4c06dde57026b24485a4",
+      "title": "Runtime thành công đầu tiên",
+      "score": 20,
+      "risk": "red",
+      "summary": "Mốc server HieuSRO đầu tiên chạy thành công.",
+      "client": "Không khuyến nghị với client hiện tại.",
+      "gm": "Không tương thích đầy đủ Web GM hiện tại.",
+      "database": "Database không rollback.",
+      "rollbackSupported": false,
+      "unsupportedReason": "Cần full image deploy; chỉ giữ để tham chiếu lịch sử."
+    }
+  ]
+}

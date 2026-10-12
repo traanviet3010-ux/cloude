@@ -36,6 +36,10 @@ RUN corepack pnpm --version \
  && corepack pnpm install --frozen-lockfile \
  && python -m pip install --no-cache-dir -r requirements-build.txt
 
+# HieuSRO operator extension: flat EXP multiplier + independently adjustable
+# skill/drop/gold/rare rates while preserving native defaults at x1.
+COPY hieusro-growth.go /src/opensro/apps/server/internal/game/progression/growth.go
+
 RUN set -eux; \
     mkdir -p "$SRO_GAME_ROOT/parts"; \
     python -m gdown 1a9nxRMoQTWoGK-ALioDeMKb4oHmiyhHV -O "$SRO_GAME_ROOT/parts/Data.pk2.part001"; \
@@ -138,6 +142,7 @@ COPY runtime-dev-account.env /opt/hieusro/server/config/dev-account.env
 COPY runtime-nginx.conf /opt/hieusro/runtime-nginx.conf
 COPY runtime-start.sh /opt/hieusro/runtime-start.sh
 COPY runtime-entrypoint.sh /opt/hieusro/runtime-entrypoint.sh
+COPY runtime-gm.py /opt/hieusro/runtime-gm.py
 
 RUN set -eux; \
     chmod +x \
@@ -146,7 +151,8 @@ RUN set -eux; \
       /opt/hieusro/server/sro-nomad \
       /opt/hieusro/server/sro-bootstrap-development \
       /opt/hieusro/runtime-start.sh \
-      /opt/hieusro/runtime-entrypoint.sh; \
+      /opt/hieusro/runtime-entrypoint.sh \
+      /opt/hieusro/runtime-gm.py; \
     EXPECTED="$(awk '{print $1}' /opt/hieusro/server.srogz.sha256)"; \
     ACTUAL="$(sha256sum /opt/hieusro/server.srogz | awk '{print $1}')"; \
     test "$ACTUAL" = "$EXPECTED"; \

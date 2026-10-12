@@ -68,11 +68,9 @@ shard = sys.argv[3]
 cluster = state / 'cluster'
 cluster.mkdir(parents=True, exist_ok=True)
 
-
 def b64u(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b'=').decode()
 
-# GameWorld needs the public projection of Agent's Ed25519 session key ring.
 private_ring = json.loads((cluster / 'agent-session-keys.json').read_text())
 public_keys = []
 for row in private_ring['keys']:
@@ -88,8 +86,6 @@ for row in private_ring['keys']:
     json.dumps({'keys': public_keys}, separators=(',', ':')) + '\n'
 )
 
-# A private development OIDC/JWKS authority replaces Nomad workload identity
-# only inside this Render container. Nothing is exposed by nginx.
 key = cluster / 'render-oidc-rsa.pem'
 if not key.exists():
     subprocess.run([
@@ -143,7 +139,6 @@ print('Prepared local workload identity and Agent session public keys', flush=Tr
 PY
 
 python - "$STATE_ROOT/cluster/render-oidc-jwks.json" <<'PY' >/tmp/hieusro-oidc.log 2>&1 &
-import json
 import pathlib
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -185,7 +180,7 @@ export SRO_AGENT_ACCOUNTS_PATH="$STATE_ROOT/cluster/accounts.json"
 export SRO_AGENT_ACCOUNTS_DB_PATH="$STATE_ROOT/cluster/accounts.db"
 export SRO_AGENT_API_ADDR="$AGENT_ADDR"
 export SRO_AGENT_DIRECTORY_STATE_PATH="$STATE_ROOT/cluster/shard-leases.json"
-export SRO_AGENT_PROVISIONING_TOKEN_PATH="$STATE_ROOT/cluster/provisioning-token"
+export SRO_AGENT_PROVISIONING_TOKEN_PATH="$STATE_ROOT/cluster/agent-provisioning-token"
 export SRO_AGENT_PROVISIONING_ADDR=127.0.0.1:8789
 export SRO_AGENT_ALLOWED_ORIGINS="$SRO_ALLOWED_ORIGINS"
 export SRO_NOMAD_IDENTITY_ISSUER="$OIDC_ISSUER"
@@ -237,8 +232,6 @@ for i in $(seq 1 180); do
   if [ "$i" = 180 ]; then fail_with_logs; fi
 done
 
-# Verify the Agent now publishes the HieuSRO shard after GameWorld acquired
-# its authenticated lease. Browser routes require OpenSRO release protocol 6.
 if ! curl -fsS -H 'X-OpenSRO-Protocol: 6' "http://$AGENT_ADDR/title/servers" | tee /tmp/hieusro-servers.json; then
   fail_with_logs
 fi

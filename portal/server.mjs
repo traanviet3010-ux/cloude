@@ -273,8 +273,14 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', async () => {
   console.log(`HieuSRO portal listening on :${PORT}`);
   console.log('Account registry: Render Key Value connected');
   console.log(`Game account provisioning: ${SRO_PROVISIONING_URL ? 'enabled' : 'pending'}`);
+  try {
+    const status = await statusPayload();
+    console.log(`Account counts: total=${status.totalAccounts}, synced=${status.syncedAccounts}`);
+  } catch (error) {
+    console.error('Unable to read account counts:', error.message);
+  }
 });

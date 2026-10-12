@@ -10,6 +10,7 @@ GAME_ADDR=127.0.0.1:8788
 CONTROL_ADDR=127.0.0.1:8791
 OIDC_ADDR=127.0.0.1:8792
 OIDC_ISSUER="http://$OIDC_ADDR"
+VERSION_ADDR=127.0.0.1:8794
 
 export SRO_SERVER_GAME_DATA_ROOT=/opt/hieusro/server.srogz
 export SRO_ALLOWED_ORIGINS=${SRO_ALLOWED_ORIGINS:-https://opensro-mobile-test.onrender.com,https://hieusro-private-client-test.onrender.com,https://hieusro-portal.onrender.com}
@@ -28,7 +29,7 @@ trap cleanup TERM INT EXIT
 
 fail_with_logs() {
   echo "===== HIEUSRO DIRECT RUNTIME DIAGNOSTICS ====="
-  for f in /tmp/hieusro-agent.log /tmp/hieusro-gameworld.log /tmp/hieusro-gm.log /tmp/hieusro-oidc.log; do
+  for f in /tmp/hieusro-agent.log /tmp/hieusro-gameworld.log /tmp/hieusro-gm.log /tmp/hieusro-version.log /tmp/hieusro-oidc.log; do
     echo "--- $f ---"
     tail -n 250 "$f" 2>/dev/null || true
   done
@@ -216,6 +217,20 @@ export GOMEMLIMIT=${GOMEMLIMIT:-320MiB}
 python /opt/hieusro/runtime-gm.py > >(tee /tmp/hieusro-gm.log) 2>&1 &
 GM_PID=$!
 PIDS+=("$GM_PID")
+
+python /opt/hieusro/runtime-version-control.py > >(tee /tmp/hieusro-version.log) 2>&1 &
+VERSION_PID=$!
+PIDS+=("$VERSION_PID")
+
+for i in $(seq 1 40); do
+  if curl -fsS -H "Authorization: Bearer ${HIEUSRO_GM_CONTROL_TOKEN:-}" "http://$VERSION_ADDR/v1/versions" >/dev/null 2>&1; then
+    echo "READY: Version control http://$VERSION_ADDR/v1/versions"
+    break
+  fi
+  if ! kill -0 "$VERSION_PID" >/dev/null 2>&1; then fail_with_logs; fi
+  sleep 0.5
+  if [ "$i" = 40 ]; then fail_with_logs; fi
+done
 
 for i in $(seq 1 240); do
   if curl -fsS "http://$GAME_ADDR/transport/readyz" >/dev/null 2>&1; then

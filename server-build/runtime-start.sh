@@ -28,7 +28,7 @@ trap cleanup TERM INT EXIT
 
 fail_with_logs() {
   echo "===== HIEUSRO DIRECT RUNTIME DIAGNOSTICS ====="
-  for f in /tmp/hieusro-agent.log /tmp/hieusro-gameworld.log /tmp/hieusro-oidc.log; do
+  for f in /tmp/hieusro-agent.log /tmp/hieusro-gameworld.log /tmp/hieusro-gm.log /tmp/hieusro-oidc.log; do
     echo "--- $f ---"
     tail -n 250 "$f" 2>/dev/null || true
   done
@@ -36,11 +36,6 @@ fail_with_logs() {
   exit 1
 }
 
-# Render's container exposes cgroup v2 read-only, so a Nomad client cannot
-# create allocation cgroups. Run the two OpenSRO services directly instead.
-# The Agent still expects a Nomad-style workload identity for GameWorld
-# control calls. For this single-container development deployment we mint a
-# loopback-only RS256 identity and expose its JWKS on 127.0.0.1.
 if ! command -v openssl >/dev/null 2>&1; then
   echo "Installing openssl for loopback workload identity bootstrap"
   apt-get update >/tmp/hieusro-apt.log 2>&1
@@ -218,18 +213,18 @@ export TRANSPORT_CERT_DIR="$STATE_ROOT/dev-certs"
 export TRANSPORT_ALLOWED_ORIGINS="$SRO_ALLOWED_ORIGINS"
 export GOMEMLIMIT=${GOMEMLIMIT:-320MiB}
 
-"$ROOT/gameworld" > >(tee /tmp/hieusro-gameworld.log) 2>&1 &
-GAME_PID=$!
-PIDS+=("$GAME_PID")
+python /opt/hieusro/runtime-gm.py > >(tee /tmp/hieusro-gm.log) 2>&1 &
+GM_PID=$!
+PIDS+=("$GM_PID")
 
-for i in $(seq 1 180); do
+for i in $(seq 1 240); do
   if curl -fsS "http://$GAME_ADDR/transport/readyz" >/dev/null 2>&1; then
     echo "READY: GameWorld http://$GAME_ADDR/transport/readyz"
     break
   fi
-  if ! kill -0 "$GAME_PID" >/dev/null 2>&1; then fail_with_logs; fi
+  if ! kill -0 "$GM_PID" >/dev/null 2>&1; then fail_with_logs; fi
   sleep 1
-  if [ "$i" = 180 ]; then fail_with_logs; fi
+  if [ "$i" = 240 ]; then fail_with_logs; fi
 done
 
 if ! curl -fsS -H 'X-OpenSRO-Protocol: 6' "http://$AGENT_ADDR/title/servers" | tee /tmp/hieusro-servers.json; then

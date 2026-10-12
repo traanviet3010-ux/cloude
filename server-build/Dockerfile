@@ -79,10 +79,19 @@ print('All licensed client input sizes match exactly.')
 PY
 
 RUN corepack pnpm assets prepare
-# Keep this COPY after the expensive licensed-input and extraction layers so
-# localization changes do not force multi-GB client inputs to download again.
+# Build pinned localization snapshots for the versions that share the current
+# runtime architecture. They can be switched by the internal GM controller
+# without a Render API key or rebuilding the container.
 COPY build-vietnamese-text.mjs /src/opensro/hieusro/build-vietnamese-text.mjs
-RUN node hieusro/build-vietnamese-text.mjs /out/i18n
+RUN set -eux; \
+    curl -fsSL https://raw.githubusercontent.com/traanviet3010-ux/cloude/b655d7ecb554719f0c6f627de8442ea7fad32581/server-build/build-vietnamese-text.mjs -o /src/opensro/hieusro/build-v0.4.0.mjs; \
+    curl -fsSL https://raw.githubusercontent.com/traanviet3010-ux/cloude/ab590807955596f130cbc321a24cb96e04461087/server-build/build-vietnamese-text.mjs -o /src/opensro/hieusro/build-v0.5.0.mjs; \
+    curl -fsSL https://raw.githubusercontent.com/traanviet3010-ux/cloude/cd554604fd157c85e99238a0bffd01574f0e5a3f/server-build/build-vietnamese-text.mjs -o /src/opensro/hieusro/build-v0.6.0.mjs; \
+    mkdir -p /out/versions/v0.4.0/i18n /out/versions/v0.5.0/i18n /out/versions/v0.6.0/i18n /out/versions/v0.7.0/i18n; \
+    node hieusro/build-v0.4.0.mjs /out/versions/v0.4.0/i18n; \
+    node hieusro/build-v0.5.0.mjs /out/versions/v0.5.0/i18n; \
+    node hieusro/build-v0.6.0.mjs /out/versions/v0.6.0/i18n; \
+    node hieusro/build-vietnamese-text.mjs /out/versions/v0.7.0/i18n
 RUN corepack pnpm assets doctor
 RUN corepack pnpm assets build world-outdoor
 
@@ -134,7 +143,9 @@ RUN mkdir -p /opt/hieusro/server/config /opt/hieusro/server/ops/nomad/jobs /opt/
 COPY --from=builder /out/server.srogz /opt/hieusro/server.srogz
 COPY --from=builder /out/server.srogz.sha256 /opt/hieusro/server.srogz.sha256
 COPY --from=builder /out/opensro-commit.txt /opt/hieusro/opensro-commit.txt
-COPY --from=builder /out/i18n /opt/hieusro/i18n
+COPY --from=builder /out/versions /opt/hieusro/versions
+COPY runtime-versions.json /opt/hieusro/versions/manifest.json
+RUN ln -s /opt/hieusro/versions/v0.7.0/i18n /opt/hieusro/i18n
 COPY --from=builder /out/agent /opt/hieusro/server/agent
 COPY --from=builder /out/gameworld /opt/hieusro/server/gameworld
 COPY --from=builder /out/sro-nomad /opt/hieusro/server/sro-nomad
@@ -148,6 +159,7 @@ COPY runtime-nginx.conf /opt/hieusro/runtime-nginx.conf
 COPY runtime-start.sh /opt/hieusro/runtime-start.sh
 COPY runtime-entrypoint.sh /opt/hieusro/runtime-entrypoint.sh
 COPY runtime-gm.py /opt/hieusro/runtime-gm.py
+COPY runtime-version-control.py /opt/hieusro/runtime-version-control.py
 
 RUN set -eux; \
     chmod +x \
@@ -157,7 +169,8 @@ RUN set -eux; \
       /opt/hieusro/server/sro-bootstrap-development \
       /opt/hieusro/runtime-start.sh \
       /opt/hieusro/runtime-entrypoint.sh \
-      /opt/hieusro/runtime-gm.py; \
+      /opt/hieusro/runtime-gm.py \
+      /opt/hieusro/runtime-version-control.py; \
     EXPECTED="$(awk '{print $1}' /opt/hieusro/server.srogz.sha256)"; \
     ACTUAL="$(sha256sum /opt/hieusro/server.srogz | awk '{print $1}')"; \
     test "$ACTUAL" = "$EXPECTED"; \

@@ -70,6 +70,7 @@ FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY edge.mjs /app/edge.mjs
+COPY tcvn3.mjs /app/tcvn3.mjs
 COPY --from=build /work/upstream/apps/client-next/temp/artifacts/dist /app/public
 COPY hieusro-language.js /app/public/hieusro-language.js
 RUN grep -q '</body>' /app/public/index.html \

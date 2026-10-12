@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>HieuSRO GM Control</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <section id="loginView" class="login-card">
+      <div class="mark">GM</div>
+      <p class="eyebrow">HIEUSRO CONTROL CENTER</p>
+      <h1>Đăng nhập GM</h1>
+      <p class="muted">Khu vực quản trị riêng. Không chia sẻ mật khẩu GM.</p>
+      <form id="loginForm">
+        <label>Mật khẩu quản trị
+          <input id="loginPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="primary">Đăng nhập</button>
+        <p id="loginMessage" class="message"></p>
+      </form>
+    </section>
+
+    <section id="dashboard" class="dashboard hidden">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">HIEUSRO</p>
+          <h1>GM Control Center</h1>
+        </div>
+        <div class="top-actions">
+          <span id="liveBadge" class="badge warn">Đang kiểm tra</span>
+          <button id="refreshBtn" class="ghost">Làm mới</button>
+          <button id="logoutBtn" class="ghost">Đăng xuất</button>
+        </div>
+      </header>
+
+      <section class="metrics">
+        <article><span>Trạng thái</span><strong id="serverState">—</strong></article>
+        <article><span>Online</span><strong><b id="onlinePlayers">0</b>/<b id="capacity">0</b></strong></article>
+        <article><span>GameWorld</span><strong id="gameReady">—</strong></article>
+        <article><span>Số lần restart</span><strong id="restartCount">0</strong></article>
+      </section>
+
+      <div class="grid">
+        <section class="panel wide">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">GAMEPLAY</p>
+              <h2>Tỷ lệ server</h2>
+            </div>
+            <span class="hint">Lưu rate sẽ restart GameWorld ngắn</span>
+          </div>
+          <form id="rateForm" class="rate-grid">
+            <label>EXP x
+              <input id="expRate" type="number" min="1" max="1000" required />
+              <small>1–1000</small>
+            </label>
+            <label>Skill EXP x
+              <input id="skillExpRate" type="number" min="1" max="10000" required />
+              <small>1–10000</small>
+            </label>
+            <label>Drop x
+              <input id="dropRate" type="number" min="1" max="100" required />
+              <small>1–100</small>
+            </label>
+            <label>Gold x
+              <input id="goldRate" type="number" min="1" max="10000" required />
+              <small>1–10000</small>
+            </label>
+            <label>Rare / SoX x
+              <input id="rareRate" type="number" min="1" max="1000" required />
+              <small>1–1000</small>
+            </label>
+            <label>Drop cap
+              <input id="dropCap" type="number" min="0" max="1000" required />
+              <small>0 = không giới hạn thêm</small>
+            </label>
+            <label class="toggle-row">
+              <span><b>Beta Growth</b><small>Nén tốc độ lên cấp theo level</small></span>
+              <input id="betaGrowth" type="checkbox" />
+            </label>
+            <div class="form-actions">
+              <button class="primary" type="submit">Lưu & áp dụng</button>
+              <span id="rateMessage" class="message"></span>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">SERVER NOTICE</p>
+              <h2>Thông báo toàn server</h2>
+            </div>
+          </div>
+          <form id="noticeForm">
+            <label>Nội dung
+              <textarea id="noticeMessage" maxlength="100" rows="5" placeholder="VD: Server bảo trì sau 10 phút."></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="primary" type="submit">Phát thông báo</button>
+              <span id="noticeStatus" class="message"></span>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">ACCOUNT</p>
+              <h2>Quản lý tài khoản</h2>
+            </div>
+          </div>
+          <form id="accountLookupForm" class="inline-form">
+            <input id="accountId" placeholder="Tên tài khoản" required />
+            <button type="submit" class="ghost">Tìm</button>
+          </form>
+          <div id="accountCard" class="account-card hidden">
+            <div><span>ID</span><strong id="accountName"></strong></div>
+            <div><span>Tạo lúc</span><strong id="accountCreated"></strong></div>
+            <div><span>Trạng thái</span><strong id="accountState"></strong></div>
+            <div class="account-actions">
+              <button id="toggleDisabledBtn" class="danger"></button>
+            </div>
+            <form id="passwordForm">
+              <label>Đặt mật khẩu mới
+                <input id="newPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" />
+              </label>
+              <button type="submit" class="ghost">Đổi mật khẩu</button>
+            </form>
+          </div>
+          <p id="accountMessage" class="message"></p>
+        </section>
+      </div>
+
+      <footer>
+        <span>HieuSRO • GM only</span>
+        <span id="lastRefresh">—</span>
+      </footer>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

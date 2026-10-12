@@ -11,9 +11,10 @@ RUN git clone https://github.com/opensro-dev/opensro.git upstream \
  && git checkout "$OPENSRO_REF" \
  && corepack pnpm install --frozen-lockfile
 
-# The upstream atlas covers Western/central European Latin only. Extend it with
-# Vietnamese precomposed code points and combining marks so both NFC and NFD
-# strings render instead of falling back to the '?' replacement glyph.
+# Expand native UI font coverage for Vietnamese and lightly embolden the
+# normal bitmap style. The embolden keeps original advances/line metrics so
+# legacy CIF layouts do not grow, but adds one horizontal pixel of ink for
+# much better readability at the retail 8-12 px sizes.
 RUN python3 - <<'PY'
 from pathlib import Path
 p = Path('/work/upstream/scripts/build/native_ui_font_atlas.py')
@@ -22,7 +23,13 @@ old = 'LATIN_CODEPOINTS = range(0xA0, 0x180)'
 new = 'LATIN_CODEPOINTS = tuple(range(0xA0, 0x250)) + tuple(range(0x300, 0x370)) + tuple(range(0x1E00, 0x1F00))'
 if old not in s:
     raise SystemExit('native atlas coverage declaration changed upstream')
-p.write_text(s.replace(old, new), encoding='utf-8')
+s = s.replace(old, new, 1)
+old_pixels = '''\t\t\tif pixels:\n\t\t\t\txs = [x for x, _ in pixels]\n\t\t\t\tys = [y for _, y in pixels]\n\t\t\t\tx0, y0 = min(xs), min(ys)\n\t\t\t\tpixels = [(x - x0, y - y0) for x, y in pixels]\n\t\t\t\twidth, height = max(xs) - x0 + 1, max(ys) - y0 + 1\n\t\t\t\tleft, top = left + x0, top + y0\n'''
+new_pixels = '''\t\t\tif pixels:\n\t\t\t\txs = [x for x, _ in pixels]\n\t\t\t\tys = [y for _, y in pixels]\n\t\t\t\tx0, y0 = min(xs), min(ys)\n\t\t\t\tpixels = [(x - x0, y - y0) for x, y in pixels]\n\t\t\t\twidth, height = max(xs) - x0 + 1, max(ys) - y0 + 1\n\t\t\t\tleft, top = left + x0, top + y0\n\t\t\t\tif style["name"] == "normal":\n\t\t\t\t\tbase = set(pixels)\n\t\t\t\t\tbase.update((x + 1, y) for x, y in pixels)\n\t\t\t\t\tpixels = sorted(base)\n\t\t\t\t\twidth = max(x for x, _ in pixels) + 1\n'''
+if old_pixels not in s:
+    raise SystemExit('FreeType glyph raster block changed upstream')
+s = s.replace(old_pixels, new_pixels, 1)
+p.write_text(s, encoding='utf-8')
 PY
 
 # HieuSRO localization and font atlas are served as same-origin loose resources

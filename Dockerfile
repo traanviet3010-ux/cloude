@@ -58,6 +58,32 @@ s = s.replace(old_read, new_read, 1)
 p.write_text(s, encoding='utf-8')
 PY
 
+# Safari/iOS can expose a WebGPU adapter and then transiently invalidate the
+# device while the first scene is being prepared. Upstream already has a
+# bounded three-generation recovery path for recoverable device failures, but
+# a synchronous createCommandEncoder InvalidStateError bypasses it. Mark that
+# failure recoverable and let the next frame recreate GPU state instead of
+# terminating the whole runtime.
+RUN python3 - <<'PY'
+from pathlib import Path
+
+device = Path('/work/upstream/apps/client-next/src/engine/runtime/renderer/device/device.ts')
+s = device.read_text(encoding='utf-8')
+old = '''\t\t\t\tcreateEncoder: () => current().createCommandEncoder( { label: "sro-frame" } ),'''
+new = '''\t\t\t\tcreateEncoder: () => {\n\t\t\t\t\ttry {\n\t\t\t\t\t\treturn current().createCommandEncoder( { label: "sro-frame" } );\n\t\t\t\t\t} catch ( error ) {\n\t\t\t\t\t\tfail( error, true );\n\t\t\t\t\t\tthrow error;\n\t\t\t\t\t}\n\t\t\t\t},'''
+if old not in s:
+    raise SystemExit('renderer command encoder anchor changed upstream')
+device.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+renderer = Path('/work/upstream/apps/client-next/src/engine/runtime/renderer/renderer.ts')
+s = renderer.read_text(encoding='utf-8')
+old = '''\t\t\t} catch ( error ) {\n\t\t\t\tfailure = String( error );\n\t\t\t} finally {\n\t\t\t\topen?.endFrame();\n\t\t\t}'''
+new = '''\t\t\t} catch ( error ) {\n\t\t\t\t// A synchronous WebGPU operation can invalidate the device before\n\t\t\t\t// device.lost settles (observed on Safari/iOS). If the device owner\n\t\t\t\t// marked it recoverable, keep the runtime alive so the next frame\n\t\t\t\t// enters the normal bounded recovery path above.\n\t\t\t\tif ( !(device.phase() === "failed" && device.recoverable()) ) {\n\t\t\t\t\tfailure = String( error );\n\t\t\t\t}\n\t\t\t} finally {\n\t\t\t\topen?.endFrame();\n\t\t\t}'''
+if old not in s:
+    raise SystemExit('renderer frame failure anchor changed upstream')
+renderer.write_text(s.replace(old, new, 1), encoding='utf-8')
+PY
+
 RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \

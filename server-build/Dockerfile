@@ -137,6 +137,7 @@ COPY runtime-shards.json /opt/hieusro/server/config/shards.json
 COPY runtime-dev-account.env /opt/hieusro/server/config/dev-account.env
 COPY runtime-nginx.conf /opt/hieusro/runtime-nginx.conf
 COPY runtime-start.sh /opt/hieusro/runtime-start.sh
+COPY runtime-entrypoint.sh /opt/hieusro/runtime-entrypoint.sh
 
 RUN set -eux; \
     chmod +x \
@@ -144,7 +145,8 @@ RUN set -eux; \
       /opt/hieusro/server/gameworld \
       /opt/hieusro/server/sro-nomad \
       /opt/hieusro/server/sro-bootstrap-development \
-      /opt/hieusro/runtime-start.sh; \
+      /opt/hieusro/runtime-start.sh \
+      /opt/hieusro/runtime-entrypoint.sh; \
     EXPECTED="$(awk '{print $1}' /opt/hieusro/server.srogz.sha256)"; \
     ACTUAL="$(sha256sum /opt/hieusro/server.srogz | awk '{print $1}')"; \
     test "$ACTUAL" = "$EXPECTED"; \
@@ -155,4 +157,4 @@ ENV PORT=10000 \
     SRO_ALLOWED_ORIGINS=https://opensro-mobile-test.onrender.com,https://hieusro-private-client-test.onrender.com,https://hieusro-portal.onrender.com
 
 EXPOSE 10000
-CMD ["/opt/hieusro/runtime-start.sh"]
+CMD ["/opt/hieusro/runtime-entrypoint.sh"]

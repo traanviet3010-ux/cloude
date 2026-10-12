@@ -25,10 +25,10 @@ if old not in s:
 p.write_text(s.replace(old, new), encoding='utf-8')
 PY
 
-# HieuSRO localization: OpenSRO normally resolves text catalogues from packed
-# game-data binaries. Force only the five language catalogues through ordinary
-# same-origin HTTP so the HieuSRO edge can serve Vietnamese/English per player.
-# Other assets continue to use the verified pack reader unchanged.
+# HieuSRO localization: Vietnamese catalogs are served as same-origin loose
+# resources by our edge. English remains native OpenSRO data inside verified
+# packs. The worker first tries the loose route and, on a 404 (English), falls
+# back to the original pack reader. This keeps both languages switchable.
 RUN python3 - <<'PY'
 from pathlib import Path
 p = Path('/work/upstream/apps/client-next/src/engine/runtime/assets/worker/loader.ts')
@@ -42,8 +42,15 @@ old_credentials = 'credentials: "omit",'
 if old_credentials not in s:
     raise SystemExit('asset loader credentials declaration changed upstream')
 s = s.replace(old_credentials, 'credentials: "same-origin",', 1)
+
+packs_anchor = '\tconst packs = createPacks( download, activity );\n'
+helper = packs_anchor + '''\tasync function hieusroLocalizedBytes( url: URL, limit: number, signal: AbortSignal ) {\n\t\ttry {\n\t\t\treturn await download( url.href, limit, signal );\n\t\t} catch ( error ) {\n\t\t\tif ( error instanceof Error && "status" in error && Number( error.status ) === 404 ) {\n\t\t\t\treturn await packs.read( url, limit, signal );\n\t\t\t}\n\t\t\tthrow error;\n\t\t}\n\t}\n'''
+if packs_anchor not in s:
+    raise SystemExit('asset loader packs anchor changed upstream')
+s = s.replace(packs_anchor, helper, 1)
+
 old_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\tawait packs.read( url, request.limit, controller.signal ) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
-new_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) && !HIEUSRO_LOOSE_LOCALIZED_TEXT.test( url.pathname ) ?\n\t\t\t\tawait packs.read( url, request.limit, controller.signal ) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
+new_read = '''\t\t\t\turl.pathname.startsWith( "/assets/" ) ?\n\t\t\t\t\t(HIEUSRO_LOOSE_LOCALIZED_TEXT.test( url.pathname ) ?\n\t\t\t\t\t\tawait hieusroLocalizedBytes( url, request.limit, controller.signal ) :\n\t\t\t\t\t\tawait packs.read( url, request.limit, controller.signal )) :\n\t\t\t\tawait download( url.href, request.limit, controller.signal );'''
 if old_read not in s:
     raise SystemExit('asset loader pack dispatch changed upstream')
 s = s.replace(old_read, new_read, 1)

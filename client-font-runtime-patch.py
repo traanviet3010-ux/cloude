@@ -46,16 +46,30 @@ if anchor not in s:
     raise SystemExit('ui-glyphs GlyphStyle anchor changed upstream')
 s = s.replace(anchor, helper, 1)
 
-# Map before every public text layout path so direct callers (title screen,
-# banners, panels) and boxed/colored text all use the same glyph decision.
+# Plain text paths may be mapped at function entry. Do NOT map the complete
+# titleColoredText source because it may contain <sml2>/<font> markup; changing
+# ASCII letters inside tag names would make the parser reject valid markup.
 for signature in (
-    '''export function titleColoredText(\n\tatlas: FontAtlas,\n\tvalue: string,\n\trect: UiRect,\n\tclip: UiRect,\n\tcolor: UiQuad["color"],\n\tstyle: GlyphStyle = {}\n): UiQuad[] {\n''',
     '''export function titleTextBox(\n\tatlas: FontAtlas,\n\tvalue: string,\n\trect: UiRect,\n\tclip: UiRect,\n\tcolor: UiQuad["color"],\n\tstyle: GlyphStyle = {}\n): UiQuad[] {\n''',
     '''export function titleText(\n\tatlas: FontAtlas,\n\tvalue: string,\n\trect: UiRect,\n\tclip: UiRect,\n\tcolor: UiQuad["color"],\n\tstyle: GlyphStyle = {}\n): UiQuad[] {\n''',
 ):
     if signature not in s:
         raise SystemExit('ui-glyphs public text signature changed upstream')
     s = s.replace(signature, signature + '\tvalue = hieusroFontText( value );\n', 1)
+
+# Colored-title markup is parsed first. Only real text tokens are mapped, and
+# their width is measured from the same mapped glyph sequence used to draw.
+old_colored_width = '''\t\tconst width = Array.from( token ).reduce(\n\t\t\t( sum, c ) => sum + (drawableGlyph( font.glyphs, c )?.advanceX ?? 0),\n\t\t\t0\n\t\t);'''
+new_colored_width = '''\t\tconst mappedToken = hieusroFontText( token );\n\t\tconst width = Array.from( mappedToken ).reduce(\n\t\t\t( sum, c ) => sum + (drawableGlyph( font.glyphs, c )?.advanceX ?? 0),\n\t\t\t0\n\t\t);'''
+if old_colored_width not in s:
+    raise SystemExit('titleColoredText width path changed upstream')
+s = s.replace(old_colored_width, new_colored_width, 1)
+
+old_colored_draw = '''\t\t\t...titleText( atlas, token, [ x, y, width, font.recordHeight + 5 ], clip, colors.at( -1 )!, {'''
+new_colored_draw = '''\t\t\t...titleText( atlas, mappedToken, [ x, y, width, font.recordHeight + 5 ], clip, colors.at( -1 )!, {'''
+if old_colored_draw not in s:
+    raise SystemExit('titleColoredText draw path changed upstream')
+s = s.replace(old_colored_draw, new_colored_draw, 1)
 
 p.write_text(s, encoding='utf-8')
 
@@ -84,4 +98,4 @@ if old_guide not in s:
 s = s.replace(old_guide, new_guide, 1)
 
 p.write_text(s, encoding='utf-8')
-print('HieuSRO Vietnamese runtime font routing installed')
+print('HieuSRO Vietnamese runtime font routing installed (markup-safe)')

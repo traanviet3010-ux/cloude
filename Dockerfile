@@ -84,6 +84,32 @@ if old not in s:
 renderer.write_text(s.replace(old, new, 1), encoding='utf-8')
 PY
 
+# First-run iPhone/iPad sessions start from a conservative presentation profile.
+# This reduces scene residency and GPU pressure on Safari/Metal while leaving
+# desktop defaults untouched. Once the player saves Video/Experimental options,
+# their explicit choices win on following sessions.
+RUN python3 - <<'PY'
+from pathlib import Path
+p = Path('/work/upstream/apps/client-next/src/engine/runtime/platform/platform.ts')
+s = p.read_text(encoding='utf-8')
+old_exp = '''\tconst experimentalKey = "sro:v1150:experimental-options:1";\n\tlet experimental = experimentalOptions();\n\ttry {\n\t\tconst stored = localStorage.getItem( experimentalKey );\n\t\tconst value = stored === null ? null : JSON.parse( stored );\n\t\texperimental = experimentalOptions( value );'''
+new_exp = '''\tconst isIos = /iPad|iPhone|iPod/.test( navigator.userAgent ) ||\n\t\t(navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);\n\tconst experimentalKey = "sro:v1150:experimental-options:1";\n\tlet experimental = experimentalOptions(), hasStoredExperimental = false;\n\ttry {\n\t\tconst stored = localStorage.getItem( experimentalKey );\n\t\thasStoredExperimental = stored !== null;\n\t\tconst value = stored === null ? null : JSON.parse( stored );\n\t\texperimental = experimentalOptions( value );'''
+if old_exp not in s:
+    raise SystemExit('experimental preference anchor changed upstream')
+s = s.replace(old_exp, new_exp, 1)
+old_exp_end = '''\t} catch ( error ) {\n\t\tstatus.value = "Experimental options could not be restored: " + String( error );\n\t}\n\tonUi( { kind: "experimental-preferences", value: experimental } );'''
+new_exp_end = '''\t} catch ( error ) {\n\t\tstatus.value = "Experimental options could not be restored: " + String( error );\n\t}\n\tif ( isIos && !hasStoredExperimental ) {\n\t\texperimental = experimentalOptions( { renderScale: 75 } );\n\t}\n\tonUi( { kind: "experimental-preferences", value: experimental } );'''
+if old_exp_end not in s:
+    raise SystemExit('experimental preference end anchor changed upstream')
+s = s.replace(old_exp_end, new_exp_end, 1)
+old_video = '''\tconst videoKey = "sro:v1150:video-options:1";\n\tlet video = defaultVideoOptions();\n\ttry {\n\t\tconst stored = localStorage.getItem( videoKey );\n\t\tif ( stored !== null ) video = videoOptions( JSON.parse( stored ) );\n\t} catch ( error ) {\n\t\tstatus.value = "Video options could not be restored: " + String( error );\n\t}\n\tonUi( { kind: "video-preferences", value: video } );'''
+new_video = '''\tconst videoKey = "sro:v1150:video-options:1";\n\tlet video = defaultVideoOptions(), hasStoredVideo = false;\n\ttry {\n\t\tconst stored = localStorage.getItem( videoKey );\n\t\thasStoredVideo = stored !== null;\n\t\tif ( stored !== null ) video = videoOptions( JSON.parse( stored ) );\n\t} catch ( error ) {\n\t\tstatus.value = "Video options could not be restored: " + String( error );\n\t}\n\tif ( isIos && !hasStoredVideo ) {\n\t\tconst records = video.records.map( row => {\n\t\t\tconst next = [ ...row ];\n\t\t\tnext[2] = 0;  // scenery sight range\n\t\t\tnext[6] = 0;  // metal detail\n\t\t\tnext[7] = 0;  // light effect\n\t\t\tnext[9] = 0;  // texture detail\n\t\t\tnext[10] = 0; // lens flare\n\t\t\tnext[12] = 0; // dynamic cloth\n\t\t\tnext[13] = 1; // damage effects only\n\t\t\treturn next;\n\t\t} ) as [number[], number[]];\n\t\tvideo = videoOptions( { ...video, frameLimit: 60, records } );\n\t}\n\tonUi( { kind: "video-preferences", value: video } );'''
+if old_video not in s:
+    raise SystemExit('video preference anchor changed upstream')
+s = s.replace(old_video, new_video, 1)
+p.write_text(s, encoding='utf-8')
+PY
+
 RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \

@@ -1,4 +1,5 @@
 import { issueSession, loginEnabled, passwordMatches, sessionCookie, validSession } from './auth.mjs';
+import { rollbackVersion, VersionError, versionSnapshot } from './versions.mjs';
 
 const CONTROL_URL = (process.env.GAME_CONTROL_URL || 'https://hieusro-game-server.onrender.com/gm-api').replace(/\/$/, '');
 const CONTROL_TOKEN = String(process.env.GM_CONTROL_TOKEN || '');
@@ -109,7 +110,7 @@ export async function handleApi(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/me') {
     const ok = validSession(req);
-    return json(res, ok ? 200 : 401, { ok, role: ok ? 'gm' : null });
+    return json(res, ok ? 200 : 401, { ok, role: ok ? 'superadmin' : null });
   }
 
   if (!authenticated(req, res)) return;
@@ -129,6 +130,31 @@ export async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/notice') {
     const out = await control('/v1/notice', 'POST', await readJson(req));
     return json(res, out.status, out.data);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/versions') {
+    return json(res, 200, await versionSnapshot());
+  }
+  let versionMatch = url.pathname.match(/^\/api\/versions\/(v\d+\.\d+\.\d+)\/rollback$/);
+  if (req.method === 'POST' && versionMatch) {
+    try {
+      const body = await readJson(req);
+      let onlinePlayers = 0;
+      let controlHealthy = false;
+      try {
+        const state = await control('/v1/status');
+        controlHealthy = state.status === 200;
+        onlinePlayers = Number(state.data?.onlinePlayers) || 0;
+      } catch {}
+      if (!controlHealthy && body.force !== true) {
+        return json(res, 503, { ok: false, code: 'STATUS_UNKNOWN', message: 'Không đọc được trạng thái Game Server. Chỉ Super Admin mới được cưỡng bức rollback.' });
+      }
+      const job = await rollbackVersion(versionMatch[1], { force: body.force === true, onlinePlayers });
+      return json(res, 202, { ok: true, job });
+    } catch (error) {
+      if (error instanceof VersionError) return json(res, error.status, { ok: false, code: error.code, message: error.message });
+      return json(res, 503, { ok: false, code: 'ROLLBACK_FAILED', message: String(error?.message || error) });
+    }
   }
 
   let m = url.pathname.match(/^\/api\/accounts\/([^/]+)$/);

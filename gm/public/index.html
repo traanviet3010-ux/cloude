@@ -88,6 +88,30 @@
           </form>
         </section>
 
+        <section class="panel wide">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">VERSION CONTROL</p>
+              <h2>Version Manager & Rollback</h2>
+              <p class="muted version-intro">Rollback chỉ đổi build Game Server. Web GM, Client và database được giữ độc lập.</p>
+            </div>
+            <div class="version-head-meta">
+              <span id="versionControlBadge" class="badge warn">Đang kiểm tra</span>
+              <span class="current-version">Server <b id="currentVersion">—</b></span>
+            </div>
+          </div>
+          <div class="rollback-policy">
+            <span>🟢 An toàn</span>
+            <span>🟡 Rủi ro thấp</span>
+            <span>🟠 Phụ thuộc</span>
+            <span>🔴 Không khuyến nghị</span>
+            <span>DB: không tự rollback</span>
+          </div>
+          <div id="versionList" class="version-list"></div>
+          <div class="version-job"><span>Tác vụ:</span><b id="versionJob">Không có tác vụ rollback.</b></div>
+          <p id="versionMessage" class="message"></p>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <div>
@@ -136,7 +160,7 @@
       </div>
 
       <footer>
-        <span>HieuSRO • GM only</span>
+        <span>HieuSRO • Super Admin</span>
         <span id="lastRefresh">—</span>
       </footer>
     </section>

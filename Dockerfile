@@ -14,11 +14,17 @@ RUN git clone https://github.com/opensro-dev/opensro.git upstream \
 
 COPY client-build-patch.py /work/client-build-patch.py
 COPY client-font-hybrid-patch.py /work/client-font-hybrid-patch.py
+COPY client-font-runtime-patch.py /work/client-font-runtime-patch.py
 RUN python3 /work/client-build-patch.py \
- && python3 /work/client-font-hybrid-patch.py
+ && python3 /work/client-font-hybrid-patch.py \
+ && python3 /work/client-font-runtime-patch.py
 
-# User-supplied Silkroad fonts. English uses VNARIAL; Vietnamese uses the
-# Unicode-capable VNTAHOMA for the whole atlas. No synthetic embolden pass.
+# HieuSRO font contract:
+# - VNARIAL is always the base face, preserving original English/ASCII.
+# - VNTAHOMA is an overlay for every Vietnamese Unicode glyph plus private-use
+#   A-Z/a-z aliases used only by Vietnamese strings.
+# - Both language atlases contain the hybrid coverage so Vietnamese player/NPC
+#   names still render correctly even when the UI language is English.
 RUN mkdir -p /work/fonts \
  && python3 -m gdown 1SBqo5JNUSVocPrJrdr3gmhLYM-NT5U0i -O /work/fonts/VNARIAL.ttf \
  && python3 -m gdown 19F_QwaiCm80TF-qJJ8j9uRnTIQvxFYBP -O /work/fonts/VNTAHOMA.TTF \
@@ -28,15 +34,17 @@ RUN mkdir -p /work/fonts \
 RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \
- && HIEUSRO_FONT_COVERAGE=en \
+ && HIEUSRO_FONT_COVERAGE=vi \
     SRO_FONT_ARIAL=/work/fonts/VNARIAL.ttf \
     SRO_FONT_ARIAL_BOLD=/work/fonts/VNARIAL.ttf \
+    HIEUSRO_VIET_FONT=/work/fonts/VNTAHOMA.TTF \
+    HIEUSRO_VIET_FONT_BOLD=/work/fonts/VNTAHOMA.TTF \
     python3 scripts/build/native_ui_font_atlas.py \
       apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.json \
       apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.png \
  && HIEUSRO_FONT_COVERAGE=vi \
-    SRO_FONT_ARIAL=/work/fonts/VNTAHOMA.TTF \
-    SRO_FONT_ARIAL_BOLD=/work/fonts/VNTAHOMA.TTF \
+    SRO_FONT_ARIAL=/work/fonts/VNARIAL.ttf \
+    SRO_FONT_ARIAL_BOLD=/work/fonts/VNARIAL.ttf \
     HIEUSRO_VIET_FONT=/work/fonts/VNTAHOMA.TTF \
     HIEUSRO_VIET_FONT_BOLD=/work/fonts/VNTAHOMA.TTF \
     python3 scripts/build/native_ui_font_atlas.py \

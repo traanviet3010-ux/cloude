@@ -104,6 +104,11 @@ function proxyHttp(req, res) {
   headers["x-forwarded-proto"] = "https";
   delete headers.connection;
 
+  // The asset worker now sends the language cookie to this same-origin edge so
+  // localized catalogues can be selected here. Never forward that cookie to
+  // the public asset host or game runtime after the selection has been made.
+  if (pathname.startsWith("/assets/")) delete headers.cookie;
+
   const upstream = https.request({
     protocol: "https:",
     hostname: upstreamHost,

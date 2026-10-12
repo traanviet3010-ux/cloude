@@ -1,0 +1,17 @@
+{
+  "shards": [
+    {
+      "id": "global-official",
+      "name": "HieuSRO",
+      "nativeServerId": 1,
+      "nativeFarmId": 0,
+      "capacity": 200,
+      "default": true,
+      "test": false,
+      "enabled": true,
+      "controlUrl": "http://127.0.0.1:8791",
+      "transportUrl": "http://127.0.0.1:8788",
+      "publicTransportUrl": "/shards/global-official"
+    }
+  ]
+}

@@ -2,34 +2,27 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
 import bcrypt from 'bcryptjs';
+import { createClient } from 'redis';
 
 const PORT = Number(process.env.PORT || 10000);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const GAME_URL = process.env.GAME_URL || 'https://opensro-mobile-test.onrender.com';
+const REDIS_URL = process.env.REDIS_URL || '';
 const SRO_PROVISIONING_URL = (process.env.SRO_PROVISIONING_URL || '').replace(/\/$/, '');
 const SRO_PROVISIONING_TOKEN = process.env.SRO_PROVISIONING_TOKEN || '';
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-const db = new DatabaseSync(path.join(DATA_DIR, 'accounts.sqlite'));
-db.exec(`
-  PRAGMA journal_mode=WAL;
-  PRAGMA synchronous=FULL;
-  CREATE TABLE IF NOT EXISTS accounts (
-    id TEXT NOT NULL PRIMARY KEY,
-    email TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at_ms INTEGER NOT NULL,
-    disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0,1)),
-    game_synced INTEGER NOT NULL DEFAULT 0 CHECK (game_synced IN (0,1)),
-    game_synced_at_ms INTEGER
-  ) STRICT;
-  CREATE UNIQUE INDEX IF NOT EXISTS accounts_folded_id ON accounts(lower(id));
-  CREATE UNIQUE INDEX IF NOT EXISTS accounts_folded_email ON accounts(lower(email));
-`);
+if (!REDIS_URL) throw new Error('REDIS_URL is required for the account registry');
+const registry = createClient({ url: REDIS_URL });
+registry.on('error', error => console.error('account registry error:', error.message));
+await registry.connect();
+
+const ACCOUNT_SET = 'hieusro:accounts';
+const SYNCED_SET = 'hieusro:accounts:synced';
+const accountKey = folded => `hieusro:account:${Buffer.from(folded).toString('base64url')}`;
+const emailKey = email => `hieusro:email:${Buffer.from(email).toString('base64url')}`;
+const foldId = id => id.replace(/[A-Z]/g, c => c.toLowerCase());
 
 const MIME = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -132,6 +125,32 @@ async function provisionGameAccount(id, password) {
   return { synced: true, account: body };
 }
 
+const reserveAccountScript = `
+if redis.call('EXISTS', KEYS[1]) == 1 or redis.call('EXISTS', KEYS[2]) == 1 then
+  return 0
+end
+redis.call('HSET', KEYS[1],
+  'id', ARGV[1],
+  'email', ARGV[2],
+  'passwordHash', ARGV[3],
+  'createdAtMs', ARGV[4],
+  'disabled', '0',
+  'gameSynced', '0')
+redis.call('SET', KEYS[2], ARGV[5])
+redis.call('SADD', KEYS[3], ARGV[5])
+return 1
+`;
+
+async function removeLocalAccount(folded, email) {
+  const encoded = Buffer.from(folded).toString('base64url');
+  await registry.multi()
+    .del(accountKey(folded))
+    .del(emailKey(email))
+    .sRem(ACCOUNT_SET, encoded)
+    .sRem(SYNCED_SET, encoded)
+    .exec();
+}
+
 async function handleRegister(req, res) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   if (!allowRegistration(ip)) return json(res, 429, { ok: false, code: 'RATE_LIMIT', message: 'Bạn thao tác quá nhanh. Vui lòng thử lại sau.' });
@@ -152,24 +171,37 @@ async function handleRegister(req, res) {
   if (!validPassword(password)) return json(res, 400, { ok: false, code: 'INVALID_PASSWORD', message: 'Mật khẩu phải từ 8 đến 72 byte.' });
   if (password !== confirmPassword) return json(res, 400, { ok: false, code: 'PASSWORD_MISMATCH', message: 'Mật khẩu nhập lại không khớp.' });
 
-  const duplicate = db.prepare('SELECT id FROM accounts WHERE lower(id)=lower(?) OR lower(email)=lower(?) LIMIT 1').get(id, email);
-  if (duplicate) return json(res, 409, { ok: false, code: 'ACCOUNT_EXISTS', message: 'Tên tài khoản hoặc email đã được sử dụng.' });
+  const folded = foldId(id);
+  const encoded = Buffer.from(folded).toString('base64url');
+  const passwordHash = await bcrypt.hash(password, 12);
+  const now = Date.now();
+
+  let reserved;
+  try {
+    reserved = await registry.eval(reserveAccountScript, {
+      keys: [accountKey(folded), emailKey(email), ACCOUNT_SET],
+      arguments: [id, email, passwordHash, String(now), encoded]
+    });
+  } catch (error) {
+    console.error('account reserve failed:', error.message);
+    return json(res, 503, { ok: false, code: 'DATABASE_UNAVAILABLE', message: 'Database tài khoản đang bận. Vui lòng thử lại.' });
+  }
+  if (Number(reserved) !== 1) return json(res, 409, { ok: false, code: 'ACCOUNT_EXISTS', message: 'Tên tài khoản hoặc email đã được sử dụng.' });
 
   let provisioned = { synced: false };
   try {
     provisioned = await provisionGameAccount(id, password);
   } catch (error) {
+    await removeLocalAccount(folded, email).catch(() => {});
     if (error.code === 'ACCOUNT_EXISTS') return json(res, 409, { ok: false, code: 'ACCOUNT_EXISTS', message: 'Tài khoản game đã tồn tại.' });
     return json(res, 503, { ok: false, code: error.code || 'GAME_SERVER_OFFLINE', message: 'Máy chủ tài khoản game chưa sẵn sàng. Vui lòng thử lại sau.' });
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-  const now = Date.now();
-  try {
-    db.prepare(`INSERT INTO accounts(id,email,password_hash,created_at_ms,game_synced,game_synced_at_ms)
-                VALUES(?,?,?,?,?,?)`).run(id, email, passwordHash, now, provisioned.synced ? 1 : 0, provisioned.synced ? now : null);
-  } catch {
-    return json(res, 409, { ok: false, code: 'ACCOUNT_EXISTS', message: 'Tên tài khoản hoặc email đã được sử dụng.' });
+  if (provisioned.synced) {
+    await registry.multi()
+      .hSet(accountKey(folded), { gameSynced: '1', gameSyncedAtMs: String(Date.now()) })
+      .sAdd(SYNCED_SET, encoded)
+      .exec();
   }
 
   return json(res, 201, {
@@ -181,13 +213,16 @@ async function handleRegister(req, res) {
   });
 }
 
-function statusPayload() {
-  const total = db.prepare('SELECT count(*) AS n FROM accounts').get().n;
-  const synced = db.prepare('SELECT count(*) AS n FROM accounts WHERE game_synced=1').get().n;
+async function statusPayload() {
+  const [total, synced] = await Promise.all([
+    registry.sCard(ACCOUNT_SET),
+    registry.sCard(SYNCED_SET)
+  ]);
   return {
     ok: true,
     server: 'HieuSRO',
     portalOnline: true,
+    registry: 'Render Key Value',
     gameAccountSync: Boolean(SRO_PROVISIONING_URL && SRO_PROVISIONING_TOKEN),
     totalAccounts: Number(total),
     syncedAccounts: Number(synced),
@@ -219,17 +254,27 @@ function serveFile(req, res) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
-  if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true });
-  if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, statusPayload());
-  if (req.method === 'POST' && url.pathname === '/api/register') return handleRegister(req, res);
-  if (req.method === 'GET' && url.pathname === '/play') {
-    res.writeHead(302, { Location: GAME_URL });
-    return res.end();
+  try {
+    if (req.method === 'GET' && url.pathname === '/healthz') {
+      await registry.ping();
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, await statusPayload());
+    if (req.method === 'POST' && url.pathname === '/api/register') return handleRegister(req, res);
+    if (req.method === 'GET' && url.pathname === '/play') {
+      res.writeHead(302, { Location: GAME_URL });
+      return res.end();
+    }
+    serveFile(req, res);
+  } catch (error) {
+    console.error('request failed:', error.message);
+    if (!res.headersSent) return json(res, 500, { ok: false, message: 'Có lỗi hệ thống. Vui lòng thử lại.' });
+    res.end();
   }
-  serveFile(req, res);
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`HieuSRO portal listening on :${PORT}`);
+  console.log('Account registry: Render Key Value connected');
   console.log(`Game account provisioning: ${SRO_PROVISIONING_URL ? 'enabled' : 'pending'}`);
 });

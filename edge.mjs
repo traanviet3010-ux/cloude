@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT || 10000);
 const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
-const UPSTREAM_HOST = process.env.OPENSRO_UPSTREAM_HOST || "opensro.online";
-const UPSTREAM_ORIGIN = `https://${UPSTREAM_HOST}`;
+const ASSET_UPSTREAM_HOST = process.env.OPENSRO_ASSET_UPSTREAM_HOST || "opensro.online";
+const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-game-server.onrender.com";
 
 const MIME = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -57,15 +57,24 @@ function copyProxyHeaders(source, target) {
   }
 }
 
+function upstreamFor(pathname) {
+  if (pathname.startsWith("/assets/") || pathname === "/assets") {
+    return ASSET_UPSTREAM_HOST;
+  }
+  return GAME_UPSTREAM_HOST;
+}
+
 function proxyHttp(req, res) {
-  const headers = { ...req.headers, host: UPSTREAM_HOST };
+  const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
+  const upstreamHost = upstreamFor(pathname);
+  const headers = { ...req.headers, host: upstreamHost };
   headers["x-forwarded-host"] = req.headers.host || "";
   headers["x-forwarded-proto"] = "https";
   delete headers.connection;
 
   const upstream = https.request({
     protocol: "https:",
-    hostname: UPSTREAM_HOST,
+    hostname: upstreamHost,
     port: 443,
     method: req.method,
     path: req.url,
@@ -73,16 +82,16 @@ function proxyHttp(req, res) {
   }, upstreamRes => {
     res.statusCode = upstreamRes.statusCode || 502;
     copyProxyHeaders(upstreamRes.headers, res);
-    if (req.url.startsWith("/assets/")) {
+    if (pathname.startsWith("/assets/")) {
       res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     }
-    console.log(`[proxy] ${req.method} ${req.url} -> ${res.statusCode}`);
+    console.log(`[proxy] ${req.method} ${req.url} -> ${upstreamHost} ${res.statusCode}`);
     upstreamRes.pipe(res);
   });
   upstream.on("error", error => {
-    console.error(`[proxy:error] ${req.method} ${req.url}: ${error.message}`);
+    console.error(`[proxy:error] ${req.method} ${req.url} -> ${upstreamHost}: ${error.message}`);
     if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-    res.end(`OpenSRO upstream error: ${error.message}`);
+    res.end(`HieuSRO upstream error: ${error.message}`);
   });
   req.pipe(upstream);
 }
@@ -132,9 +141,6 @@ const server = http.createServer((req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
 
-    // Vite emits the application JS/CSS under /assets. Serve those files from
-    // this deployment first. Only missing /assets paths are retail/runtime
-    // game data and should be fetched from the public OpenSRO asset authority.
     if (pathname.startsWith("/assets/") && localFileExists(pathname)) {
       serveStatic(req, res);
       return;
@@ -168,12 +174,13 @@ server.on("upgrade", (req, clientSocket, head) => {
     return;
   }
 
-  const upstream = tls.connect({ host: UPSTREAM_HOST, port: 443, servername: UPSTREAM_HOST }, () => {
+  const upstreamHost = GAME_UPSTREAM_HOST;
+  const upstream = tls.connect({ host: upstreamHost, port: 443, servername: upstreamHost }, () => {
     const requestLines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
     for (const [key, value] of Object.entries(req.headers)) {
       if (value === undefined) continue;
       const lower = key.toLowerCase();
-      if (lower === "host") requestLines.push(`Host: ${UPSTREAM_HOST}`);
+      if (lower === "host") requestLines.push(`Host: ${upstreamHost}`);
       else if (Array.isArray(value)) for (const v of value) requestLines.push(`${key}: ${v}`);
       else requestLines.push(`${key}: ${value}`);
     }
@@ -193,5 +200,5 @@ server.on("upgrade", (req, clientSocket, head) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`OpenSRO test edge listening on :${PORT}, upstream ${UPSTREAM_ORIGIN}`);
+  console.log(`HieuSRO client edge listening on :${PORT}; assets=${ASSET_UPSTREAM_HOST}; game=${GAME_UPSTREAM_HOST}`);
 });

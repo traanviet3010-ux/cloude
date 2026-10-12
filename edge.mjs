@@ -1,6 +1,5 @@
 import http from "node:http";
 import https from "node:https";
-import net from "node:net";
 import tls from "node:tls";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,6 +31,23 @@ function secureHeaders(res) {
   res.setHeader("Referrer-Policy", "no-referrer");
 }
 
+function localCandidate(pathname) {
+  const candidate = path.resolve(PUBLIC, "." + pathname);
+  const relative = path.relative(PUBLIC, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+  return candidate;
+}
+
+function localFileExists(pathname) {
+  const candidate = localCandidate(pathname);
+  if (!candidate) return false;
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function copyProxyHeaders(source, target) {
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
@@ -60,9 +76,11 @@ function proxyHttp(req, res) {
     if (req.url.startsWith("/assets/")) {
       res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     }
+    console.log(`[proxy] ${req.method} ${req.url} -> ${res.statusCode}`);
     upstreamRes.pipe(res);
   });
   upstream.on("error", error => {
+    console.error(`[proxy:error] ${req.method} ${req.url}: ${error.message}`);
     if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
     res.end(`OpenSRO upstream error: ${error.message}`);
   });
@@ -73,9 +91,8 @@ function serveStatic(req, res) {
   const parsed = new URL(req.url, "http://local");
   let pathname = decodeURIComponent(parsed.pathname);
   if (pathname === "/") pathname = "/index.html";
-  const candidate = path.resolve(PUBLIC, "." + pathname);
-  const relative = path.relative(PUBLIC, candidate);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  const candidate = localCandidate(pathname);
+  if (!candidate) {
     res.writeHead(403).end();
     return;
   }
@@ -99,11 +116,11 @@ function serveStatic(req, res) {
       return;
     }
 
-    // SPA fallback. Do not use it for asset-looking paths.
     if (!path.extname(pathname)) {
       const index = path.join(PUBLIC, "index.html");
       secureHeaders(res);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
       fs.createReadStream(index).pipe(res);
       return;
     }
@@ -113,8 +130,21 @@ function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   try {
-    const pathname = new URL(req.url, "http://local").pathname;
-    if (pathname.startsWith("/assets/") || pathname === "/assets" || pathname.startsWith("/api/") || pathname === "/api" || pathname.startsWith("/shards/")) {
+    const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
+
+    // Vite emits the application JS/CSS under /assets. Serve those files from
+    // this deployment first. Only missing /assets paths are retail/runtime
+    // game data and should be fetched from the public OpenSRO asset authority.
+    if (pathname.startsWith("/assets/") && localFileExists(pathname)) {
+      serveStatic(req, res);
+      return;
+    }
+
+    if (
+      pathname.startsWith("/assets/") || pathname === "/assets" ||
+      pathname.startsWith("/api/") || pathname === "/api" ||
+      pathname.startsWith("/shards/")
+    ) {
       proxyHttp(req, res);
       return;
     }

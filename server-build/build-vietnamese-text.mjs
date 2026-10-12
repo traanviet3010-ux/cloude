@@ -8,6 +8,53 @@ const outputRoot = path.resolve(process.argv[2] || "/out/i18n");
 const VI_COLUMN = 9; // SRO language index 5 (Vietnamese); English is column 8.
 const EN_COLUMN = 8;
 
+// Silkroad v1.150 Vietnamese resources use the legacy TCVN3/ABC character map.
+// Convert only strings that actually came from the Vietnamese column; English
+// fallback rows are already Unicode/ASCII and must not be touched.
+const UNICODE = [
+  "À","Á","Â","Ã","È","É","Ê","Ì","Í","Ò","Ó","Ô","Õ","Ù","Ú","Ý",
+  "à","á","â","ã","è","é","ê","ì","í","ò","ó","ô","õ","ù","ú","ý",
+  "Ă","ă","Đ","đ","Ĩ","ĩ","Ũ","ũ","Ơ","ơ","Ư","ư","Ạ","ạ","Ả","ả",
+  "Ấ","ấ","Ầ","ầ","Ẩ","ẩ","Ẫ","ẫ","Ậ","ậ","Ắ","ắ","Ằ","ằ","Ẳ","ẳ",
+  "Ẵ","ẵ","Ặ","ặ","Ẹ","ẹ","Ẻ","ẻ","Ẽ","ẽ","Ế","ế","Ề","ề","Ể","ể",
+  "Ễ","ễ","Ệ","ệ","Ỉ","ỉ","Ị","ị","Ọ","ọ","Ỏ","ỏ","Ố","ố","Ồ","ồ",
+  "Ổ","ổ","Ỗ","ỗ","Ộ","ộ","Ớ","ớ","Ờ","ờ","Ở","ở","Ỡ","ỡ","Ợ","ợ",
+  "Ụ","ụ","Ủ","ủ","Ứ","ứ","Ừ","ừ","Ử","ử","Ữ","ữ","Ự","ự","Ỳ","ỳ",
+  "Ỵ","ỵ","Ỷ","ỷ","Ỹ","ỹ"
+];
+const TCVN3 = [
+  "Aµ","A¸","¢","A·","EÌ","EÐ","£","I×","IÝ","Oß","Oã","¤","Oâ","Uï","Uó","Yý",
+  "µ","¸","©","·","Ì","Ð","ª","×","Ý","ß","ã","«","â","ï","ó","ý",
+  "¡","¨","§","®","IÜ","Ü","Uò","ò","¥","¬","¦","­","A¹","¹","A¶","¶",
+  "¢Ê","Ê","¢Ç","Ç","¢È","È","¢É","É","¢Ë","Ë","¡¾","¾","¡»","»","¡¼","¼",
+  "¡½","½","¡Æ","Æ","EÑ","Ñ","EÎ","Î","EÏ","Ï","£Õ","Õ","£Ò","Ò","£Ó","Ó",
+  "£Ô","Ô","£Ö","Ö","IØ","Ø","IÞ","Þ","Oä","ä","Oá","á","¤è","è","¤å","å",
+  "¤æ","æ","¤ç","ç","¤é","é","¥í","í","¥ê","ê","¥ë","ë","¥ì","ì","¥î","î",
+  "Uô","ô","Uñ","ñ","¦ø","ø","¦õ","õ","¦ö","ö","¦÷","÷","¦ù","ù","Yú","ú",
+  "Yþ","þ","Yû","û","Yü","ü"
+];
+if (UNICODE.length !== TCVN3.length) throw new Error("TCVN3 map length mismatch");
+const TCVN3_ONE = new Map();
+const TCVN3_TWO = new Map();
+for (let i = 0; i < TCVN3.length; i++) {
+  (TCVN3[i].length === 2 ? TCVN3_TWO : TCVN3_ONE).set(TCVN3[i], UNICODE[i]);
+}
+function tcvn3ToUnicode(value) {
+  let out = "";
+  for (let i = 0; i < value.length;) {
+    const pair = i + 1 < value.length ? value.slice(i, i + 2) : "";
+    if (pair && TCVN3_TWO.has(pair)) {
+      out += TCVN3_TWO.get(pair);
+      i += 2;
+      continue;
+    }
+    const one = value[i];
+    out += TCVN3_ONE.get(one) ?? one;
+    i += 1;
+  }
+  return out.normalize("NFC");
+}
+
 function usable(value) {
   const text = String(value ?? "").trim();
   return text && text !== "0" ? text : "";
@@ -26,11 +73,11 @@ async function catalog(stem) {
     const key = columns[1]?.trim();
     if (!key || key.startsWith("//")) continue;
 
-    const vi = usable(columns[VI_COLUMN]);
+    const viRaw = usable(columns[VI_COLUMN]);
     const en = usable(columns[EN_COLUMN]);
-    const value = (vi || en).replaceAll("\\n", "\n");
+    const value = (viRaw ? tcvn3ToUnicode(viRaw) : en).replaceAll("\\n", "\n");
     entries[key] = value;
-    if (vi) vietnamese++;
+    if (viRaw) vietnamese++;
     else if (en) englishFallback++;
   }
 

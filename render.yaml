@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: opensro-mobile-test
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: OPENSRO_UPSTREAM_HOST
+        value: opensro.online
+    healthCheckPath: /

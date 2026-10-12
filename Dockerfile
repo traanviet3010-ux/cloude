@@ -17,9 +17,8 @@ COPY client-font-hybrid-patch.py /work/client-font-hybrid-patch.py
 RUN python3 /work/client-build-patch.py \
  && python3 /work/client-font-hybrid-patch.py
 
-# User-supplied Silkroad Vietnamese fonts stay outside the public source tree.
-# VnTahoma contributes ONLY Vietnamese-only glyphs in the vi atlas.  Existing
-# English/Latin/numbers/punctuation continue to use the original browser face.
+# User-supplied Silkroad fonts. English uses VNARIAL; Vietnamese uses the
+# Unicode-capable VNTAHOMA for the whole atlas. No synthetic embolden pass.
 RUN mkdir -p /work/fonts \
  && python3 -m gdown 1SBqo5JNUSVocPrJrdr3gmhLYM-NT5U0i -O /work/fonts/VNARIAL.ttf \
  && python3 -m gdown 19F_QwaiCm80TF-qJJ8j9uRnTIQvxFYBP -O /work/fonts/VNTAHOMA.TTF \
@@ -30,14 +29,14 @@ RUN cd /work/upstream \
  && corepack pnpm --filter @sro/client-next build \
  && mkdir -p apps/client-next/temp/artifacts/dist/assets/fonts \
  && HIEUSRO_FONT_COVERAGE=en \
-    SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf \
-    SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf \
+    SRO_FONT_ARIAL=/work/fonts/VNARIAL.ttf \
+    SRO_FONT_ARIAL_BOLD=/work/fonts/VNARIAL.ttf \
     python3 scripts/build/native_ui_font_atlas.py \
       apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.json \
       apps/client-next/temp/artifacts/dist/assets/fonts/native-ui-font-atlas.en.png \
  && HIEUSRO_FONT_COVERAGE=vi \
-    SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf \
-    SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf \
+    SRO_FONT_ARIAL=/work/fonts/VNTAHOMA.TTF \
+    SRO_FONT_ARIAL_BOLD=/work/fonts/VNTAHOMA.TTF \
     HIEUSRO_VIET_FONT=/work/fonts/VNTAHOMA.TTF \
     HIEUSRO_VIET_FONT_BOLD=/work/fonts/VNTAHOMA.TTF \
     python3 scripts/build/native_ui_font_atlas.py \

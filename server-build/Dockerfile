@@ -138,17 +138,21 @@ COPY runtime-dev-account.env /opt/hieusro/server/config/dev-account.env
 COPY runtime-nginx.conf /opt/hieusro/runtime-nginx.conf
 COPY runtime-start.sh /opt/hieusro/runtime-start.sh
 
-RUN chmod +x \
-    /opt/hieusro/server/agent \
-    /opt/hieusro/server/gameworld \
-    /opt/hieusro/server/sro-nomad \
-    /opt/hieusro/server/sro-bootstrap-development \
-    /opt/hieusro/runtime-start.sh \
- && sha256sum -c /opt/hieusro/server.srogz.sha256
+RUN set -eux; \
+    chmod +x \
+      /opt/hieusro/server/agent \
+      /opt/hieusro/server/gameworld \
+      /opt/hieusro/server/sro-nomad \
+      /opt/hieusro/server/sro-bootstrap-development \
+      /opt/hieusro/runtime-start.sh; \
+    EXPECTED="$(awk '{print $1}' /opt/hieusro/server.srogz.sha256)"; \
+    ACTUAL="$(sha256sum /opt/hieusro/server.srogz | awk '{print $1}')"; \
+    test "$ACTUAL" = "$EXPECTED"; \
+    echo "server.srogz checksum verified: $ACTUAL"
 
 ENV PORT=10000 \
     SRO_STATE_ROOT=/opt/hieusro/server/.state \
-    SRO_ALLOWED_ORIGINS=https://opensro-mobile-test.onrender.com,https://hieusro-portal.onrender.com
+    SRO_ALLOWED_ORIGINS=https://opensro-mobile-test.onrender.com,https://hieusro-private-client-test.onrender.com,https://hieusro-portal.onrender.com
 
 EXPOSE 10000
 CMD ["/opt/hieusro/runtime-start.sh"]

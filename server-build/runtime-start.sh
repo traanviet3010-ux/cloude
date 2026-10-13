@@ -4,10 +4,13 @@ set -euo pipefail
 ROOT=/opt/hieusro/server
 STATE_ROOT=${SRO_STATE_ROOT:-$ROOT/.state}
 BOOTSTRAP="$ROOT/sro-bootstrap-development"
-SHARD_ID=global-official
+LIVE_SHARD_ID=global-official
+TEST_SHARD_ID=hieusro-test
 AGENT_ADDR=127.0.0.1:8787
-GAME_ADDR=127.0.0.1:8788
-CONTROL_ADDR=127.0.0.1:8791
+LIVE_GAME_ADDR=127.0.0.1:8788
+LIVE_CONTROL_ADDR=127.0.0.1:8791
+TEST_GAME_ADDR=127.0.0.1:8797
+TEST_CONTROL_ADDR=127.0.0.1:8798
 OIDC_ADDR=127.0.0.1:8792
 OIDC_ISSUER="http://$OIDC_ADDR"
 VERSION_ADDR=127.0.0.1:8794
@@ -29,7 +32,7 @@ trap cleanup TERM INT EXIT
 
 fail_with_logs() {
   echo "===== HIEUSRO DIRECT RUNTIME DIAGNOSTICS ====="
-  for f in /tmp/hieusro-agent.log /tmp/hieusro-gameworld.log /tmp/hieusro-gm.log /tmp/hieusro-version.log /tmp/hieusro-oidc.log; do
+  for f in /tmp/hieusro-agent.log /tmp/hieusro-gameworld.log /tmp/hieusro-test-gameworld.log /tmp/hieusro-gm.log /tmp/hieusro-version.log /tmp/hieusro-oidc.log; do
     echo "--- $f ---"
     tail -n 250 "$f" 2>/dev/null || true
   done
@@ -50,7 +53,9 @@ fi
   -shard-catalog "$ROOT/config/shards.json" \
   -shard-state-root "$STATE_ROOT/shards"
 
-python - "$STATE_ROOT" "$OIDC_ISSUER" "$SHARD_ID" <<'PY'
+# Build one workload identity per enabled GameWorld. The Agent is shared, while
+# every shard has a distinct authority directory, control endpoint and lease.
+python - "$STATE_ROOT" "$OIDC_ISSUER" "$LIVE_SHARD_ID" "$TEST_SHARD_ID" <<'PY'
 import base64
 import json
 import pathlib
@@ -60,7 +65,7 @@ import time
 
 state = pathlib.Path(sys.argv[1])
 issuer = sys.argv[2]
-shard = sys.argv[3]
+shards = sys.argv[3:]
 cluster = state / 'cluster'
 cluster.mkdir(parents=True, exist_ok=True)
 
@@ -104,34 +109,38 @@ kid = 'hieusro-render-local'
     }]
 }, separators=(',', ':')) + '\n')
 
-now = int(time.time())
 header = {'alg': 'RS256', 'typ': 'JWT', 'kid': kid}
-payload = {
-    'iss': issuer,
-    'aud': 'sro-agent',
-    'iat': now,
-    'nbf': now - 5,
-    'exp': now + 30 * 24 * 60 * 60,
-    'nomad_namespace': 'default',
-    'nomad_job_id': f'sro-gameworld-{shard}',
-    'nomad_allocation_id': 'render-single-container',
-    'nomad_task': 'gameworld',
-}
-part1 = b64u(json.dumps(header, separators=(',', ':')).encode())
-part2 = b64u(json.dumps(payload, separators=(',', ':')).encode())
-signing = f'{part1}.{part2}'.encode()
-signing_path = cluster / 'render-identity-signing.txt'
-sig_path = cluster / 'render-identity-signature.bin'
-signing_path.write_bytes(signing)
-subprocess.run([
-    'openssl', 'dgst', '-sha256', '-sign', str(key),
-    '-out', str(sig_path), str(signing_path)
-], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-token = f'{part1}.{part2}.{b64u(sig_path.read_bytes())}'
-(cluster / 'gameworld-identity.jwt').write_text(token + '\n')
-signing_path.unlink(missing_ok=True)
-sig_path.unlink(missing_ok=True)
-print('Prepared local workload identity and Agent session public keys', flush=True)
+for shard in shards:
+    now = int(time.time())
+    payload = {
+        'iss': issuer,
+        'aud': 'sro-agent',
+        'iat': now,
+        'nbf': now - 5,
+        'exp': now + 30 * 24 * 60 * 60,
+        'nomad_namespace': 'default',
+        'nomad_job_id': f'sro-gameworld-{shard}',
+        'nomad_allocation_id': f'hieusro-single-container-{shard}',
+        'nomad_task': 'gameworld',
+    }
+    part1 = b64u(json.dumps(header, separators=(',', ':')).encode())
+    part2 = b64u(json.dumps(payload, separators=(',', ':')).encode())
+    signing = f'{part1}.{part2}'.encode()
+    signing_path = cluster / f'render-identity-signing-{shard}.txt'
+    sig_path = cluster / f'render-identity-signature-{shard}.bin'
+    signing_path.write_bytes(signing)
+    subprocess.run([
+        'openssl', 'dgst', '-sha256', '-sign', str(key),
+        '-out', str(sig_path), str(signing_path)
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    token = f'{part1}.{part2}.{b64u(sig_path.read_bytes())}'
+    identity = cluster / f'gameworld-identity-{shard}.jwt'
+    identity.write_text(token + '\n')
+    identity.chmod(0o600)
+    signing_path.unlink(missing_ok=True)
+    sig_path.unlink(missing_ok=True)
+
+print('Prepared local workload identities for: ' + ', '.join(shards), flush=True)
 PY
 
 python - "$STATE_ROOT/cluster/render-oidc-jwks.json" <<'PY' >/tmp/hieusro-oidc.log 2>&1 &
@@ -199,17 +208,19 @@ for i in $(seq 1 60); do
   if [ "$i" = 60 ]; then fail_with_logs; fi
 done
 
-export SRO_SHARD_ID="$SHARD_ID"
+# LIVE remains owned by the existing GM supervisor, preserving current GM
+# controls and its separate global-official authority database.
+export SRO_SHARD_ID="$LIVE_SHARD_ID"
 export SRO_AGENT_URL="http://$AGENT_ADDR"
 export SRO_AGENT_URL_REQUIRE=1
-export SRO_AGENT_IDENTITY_FILE="$STATE_ROOT/cluster/gameworld-identity.jwt"
+export SRO_AGENT_IDENTITY_FILE="$STATE_ROOT/cluster/gameworld-identity-$LIVE_SHARD_ID.jwt"
 export SRO_AGENT_SESSION_PUBLIC_KEYS_PATH="$STATE_ROOT/cluster/agent-session-public-keys.json"
-export SRO_AUTHORITY_STATE_DIR="$STATE_ROOT/shards/$SHARD_ID/authority"
+export SRO_AUTHORITY_STATE_DIR="$STATE_ROOT/shards/$LIVE_SHARD_ID/authority"
 export SRO_AUTHORITY_REQUIRE=1
-export SRO_GAMEWORLD_CONTROL_ADDR="$CONTROL_ADDR"
+export SRO_GAMEWORLD_CONTROL_ADDR="$LIVE_CONTROL_ADDR"
 export SRO_PUBLIC_API_ADDR=off
-export TRANSPORT_WT_ADDR="$GAME_ADDR"
-export TRANSPORT_WS_ADDR="$GAME_ADDR"
+export TRANSPORT_WT_ADDR="$LIVE_GAME_ADDR"
+export TRANSPORT_WS_ADDR="$LIVE_GAME_ADDR"
 export TRANSPORT_CERT_DIR="$STATE_ROOT/dev-certs"
 export TRANSPORT_ALLOWED_ORIGINS="$SRO_ALLOWED_ORIGINS"
 export GOMEMLIMIT=${GOMEMLIMIT:-320MiB}
@@ -222,6 +233,46 @@ python /opt/hieusro/runtime-version-control.py > >(tee /tmp/hieusro-version.log)
 VERSION_PID=$!
 PIDS+=("$VERSION_PID")
 
+# TEST has a dedicated GameWorld process, authority DB and transport/control
+# ports. It intentionally does not share LIVE character state. A small restart
+# loop keeps the test shard available without changing LIVE's GM supervisor.
+supervise_test_world() {
+  set +e
+  while true; do
+    echo "TEST supervisor: starting $TEST_SHARD_ID"
+    env \
+      SRO_SHARD_ID="$TEST_SHARD_ID" \
+      SRO_AGENT_URL="http://$AGENT_ADDR" \
+      SRO_AGENT_URL_REQUIRE=1 \
+      SRO_AGENT_IDENTITY_FILE="$STATE_ROOT/cluster/gameworld-identity-$TEST_SHARD_ID.jwt" \
+      SRO_AGENT_SESSION_PUBLIC_KEYS_PATH="$STATE_ROOT/cluster/agent-session-public-keys.json" \
+      SRO_AUTHORITY_STATE_DIR="$STATE_ROOT/shards/$TEST_SHARD_ID/authority" \
+      SRO_AUTHORITY_REQUIRE=1 \
+      SRO_GAMEWORLD_CONTROL_ADDR="$TEST_CONTROL_ADDR" \
+      SRO_PUBLIC_API_ADDR=off \
+      TRANSPORT_WT_ADDR="$TEST_GAME_ADDR" \
+      TRANSPORT_WS_ADDR="$TEST_GAME_ADDR" \
+      TRANSPORT_CERT_DIR="$STATE_ROOT/dev-certs" \
+      TRANSPORT_ALLOWED_ORIGINS="$SRO_ALLOWED_ORIGINS" \
+      GOMEMLIMIT="${HIEUSRO_TEST_GOMEMLIMIT:-256MiB}" \
+      SRO_HIEUSRO_EXP_RATE="${HIEUSRO_TEST_EXP_RATE:-50}" \
+      SRO_BETA_SKILL_EXP_RATE="${HIEUSRO_TEST_SKILL_EXP_RATE:-100}" \
+      SRO_BETA_DROP_RATE="${HIEUSRO_TEST_DROP_RATE:-20}" \
+      SRO_BETA_GOLD_RATE="${HIEUSRO_TEST_GOLD_RATE:-250}" \
+      SRO_BETA_RARE_RATE="${HIEUSRO_TEST_RARE_RATE:-5}" \
+      SRO_BETA_DROP_CAP="${HIEUSRO_TEST_DROP_CAP:-16}" \
+      SRO_BETA_GROWTH="${HIEUSRO_TEST_BETA_GROWTH:-on}" \
+      "$ROOT/gameworld"
+    code=$?
+    echo "TEST supervisor: GameWorld exited code=$code; restarting in 3s"
+    sleep 3
+  done
+}
+
+supervise_test_world > >(tee /tmp/hieusro-test-gameworld.log) 2>&1 &
+TEST_SUPERVISOR_PID=$!
+PIDS+=("$TEST_SUPERVISOR_PID")
+
 for i in $(seq 1 40); do
   if curl -fsS -H "Authorization: Bearer ${HIEUSRO_GM_CONTROL_TOKEN:-}" "http://$VERSION_ADDR/v1/versions" >/dev/null 2>&1; then
     echo "READY: Version control http://$VERSION_ADDR/v1/versions"
@@ -233,8 +284,8 @@ for i in $(seq 1 40); do
 done
 
 for i in $(seq 1 240); do
-  if curl -fsS "http://$GAME_ADDR/transport/readyz" >/dev/null 2>&1; then
-    echo "READY: GameWorld http://$GAME_ADDR/transport/readyz"
+  if curl -fsS "http://$LIVE_GAME_ADDR/transport/readyz" >/dev/null 2>&1; then
+    echo "READY: LIVE GameWorld http://$LIVE_GAME_ADDR/transport/readyz"
     break
   fi
   if ! kill -0 "$GM_PID" >/dev/null 2>&1; then fail_with_logs; fi
@@ -242,14 +293,35 @@ for i in $(seq 1 240); do
   if [ "$i" = 240 ]; then fail_with_logs; fi
 done
 
+for i in $(seq 1 240); do
+  if curl -fsS "http://$TEST_GAME_ADDR/transport/readyz" >/dev/null 2>&1; then
+    echo "READY: TEST GameWorld http://$TEST_GAME_ADDR/transport/readyz"
+    break
+  fi
+  if ! kill -0 "$TEST_SUPERVISOR_PID" >/dev/null 2>&1; then fail_with_logs; fi
+  sleep 1
+  if [ "$i" = 240 ]; then fail_with_logs; fi
+done
+
 if ! curl -fsS -H 'X-OpenSRO-Protocol: 6' "http://$AGENT_ADDR/title/servers" | tee /tmp/hieusro-servers.json; then
   fail_with_logs
 fi
-if ! grep -q 'HieuSRO' /tmp/hieusro-servers.json; then
-  echo "Agent server catalogue did not publish HieuSRO"
-  cat /tmp/hieusro-servers.json || true
-  fail_with_logs
-fi
+python - /tmp/hieusro-servers.json <<'PY'
+import json
+import pathlib
+import sys
+rows = json.loads(pathlib.Path(sys.argv[1]).read_text())
+by_id = {row.get('id'): row for row in rows if isinstance(row, dict)}
+expected = {
+    'global-official': 'HieuSRO',
+    'hieusro-test': 'HieuSRO TEST',
+}
+for shard, name in expected.items():
+    row = by_id.get(shard)
+    if not row or row.get('name') != name:
+        raise SystemExit(f'missing shard {shard} ({name}) in Agent catalogue: {rows!r}')
+print('Agent catalogue contains LIVE + TEST', flush=True)
+PY
 
 echo "HIEUSRO_RUNTIME_READY"
 trap - EXIT

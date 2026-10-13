@@ -17,6 +17,17 @@ apt-get update
 apt-get install -y docker.io docker-compose-v2 git curl openssl ufw ca-certificates
 systemctl enable --now docker
 
+# The OpenSRO world asset build can briefly exceed Node's default ~2 GB heap.
+# Keep the 4 GB Droplet responsive by adding swap and building assets with one
+# conversion worker plus a larger, bounded V8 heap.
+if ! swapon --show=NAME --noheadings | grep -q .; then
+  fallocate -l 4G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
@@ -33,6 +44,11 @@ else
 fi
 
 chmod +x "$DEPLOY_DIR/install.sh" "$DEPLOY_DIR/update.sh" "$DEPLOY_DIR/backup.sh"
+
+# Apply a VPS-safe build profile without changing gameplay/runtime limits.
+DOCKERFILE="$SRC_DIR/server-build/Dockerfile.allinone"
+sed -i 's/SRO_BUILD_JOBS=2/SRO_BUILD_JOBS=1/' "$DOCKERFILE"
+sed -i 's#RUN corepack pnpm assets build world-outdoor#RUN NODE_OPTIONS="--max-old-space-size=3072" corepack pnpm assets build world-outdoor#' "$DOCKERFILE"
 
 PUBLIC_IP="$(curl -fsS --max-time 3 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address || true)"
 if [ -z "$PUBLIC_IP" ]; then

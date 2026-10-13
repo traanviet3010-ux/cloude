@@ -1,0 +1,31 @@
+name: Probe HieuSRO DigitalOcean
+
+on:
+  push:
+    branches:
+      - hieusro-digitalocean
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Probe public services
+        run: |
+          set +e
+          echo "UTC: $(date -u +%FT%TZ)"
+          echo "--- TCP ---"
+          nc -vz -w 5 157.230.43.181 22
+          nc -vz -w 5 157.230.43.181 80
+          nc -vz -w 5 157.230.43.181 443
+          echo "--- Game ---"
+          curl -k -sS -o /tmp/game.body -D /tmp/game.headers --max-time 10 https://play.157-230-43-181.sslip.io/ || true
+          cat /tmp/game.headers 2>/dev/null || true
+          head -c 300 /tmp/game.body 2>/dev/null || true
+          echo
+          echo "--- Portal ---"
+          curl -k -sS -o /tmp/portal.body -D /tmp/portal.headers --max-time 10 https://portal.157-230-43-181.sslip.io/ || true
+          cat /tmp/portal.headers 2>/dev/null || true
+          head -c 300 /tmp/portal.body 2>/dev/null || true
+          echo

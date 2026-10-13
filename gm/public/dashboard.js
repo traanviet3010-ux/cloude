@@ -1,4 +1,5 @@
 import { initAccounts } from './accounts.js';
+import { initOperations, updateOperationsStatus } from './operations.js';
 
 const $ = id => document.getElementById(id);
 let pollTimer = null;
@@ -95,7 +96,7 @@ function createVersionCard(row, data, api) {
       const out = await api(`/api/versions/${encodeURIComponent(row.id)}/rollback`, {
         method: 'POST', body: JSON.stringify({ force })
       });
-      msg('versionMessage', `Đã bắt đầu rollback ${row.id}. Web GM sẽ tự theo dõi và khôi phục nếu deploy lỗi.`, 'ok');
+      msg('versionMessage', `Đã bắt đầu rollback ${row.id}. Controller nội bộ đang health-check và sẽ tự khôi phục khi cần.`, 'ok');
       $('versionJob').textContent = jobText(out.job);
       setTimeout(() => refreshVersions(api), 1200);
     } catch (error) {
@@ -114,14 +115,14 @@ async function refreshVersions(api) {
   try {
     const data = await api('/api/versions');
     $('currentVersion').textContent = data.current || 'unknown';
-    $('versionControlBadge').textContent = data.rollbackEnabled ? 'Rollback sẵn sàng' : 'Chưa nối Render API';
+    $('versionControlBadge').textContent = data.rollbackEnabled ? 'Rollback sẵn sàng' : 'Controller chưa sẵn sàng';
     $('versionControlBadge').className = `badge ${data.rollbackEnabled ? 'ok' : 'warn'}`;
     $('versionJob').textContent = jobText(data.activeJob);
     const list = $('versionList');
     list.textContent = '';
     for (const row of data.versions || []) list.append(createVersionCard(row, data, api));
     if (!data.rollbackEnabled) {
-      msg('versionMessage', 'Compatibility Analyzer đã hoạt động. Để bật rollback thật, cần đặt HIEUSRO_RENDER_API_KEY trực tiếp trong Render của Web GM.');
+      msg('versionMessage', 'Controller rollback nội bộ chưa sẵn sàng. Không cần Render API key.');
     } else if (!data.activeJob || ['live','restored','failed','restore-failed'].includes(data.activeJob.phase)) {
       msg('versionMessage', data.activeJob ? jobText(data.activeJob) : '', data.activeJob?.phase === 'live' ? 'ok' : '');
     }
@@ -149,6 +150,7 @@ export function initDashboard(api, showLogin) {
       $('liveBadge').textContent = data.gameReady && data.operating ? 'HieuSRO Online' : 'Đang khởi động';
       $('liveBadge').className = `badge ${data.gameReady && data.operating ? 'ok' : 'warn'}`;
       if (data.settings) fillSettings(data.settings);
+      updateOperationsStatus(data);
       $('lastRefresh').textContent = `Cập nhật ${new Date().toLocaleTimeString('vi-VN')}`;
     } catch {
       $('liveBadge').textContent = 'Mất kết nối';
@@ -210,6 +212,7 @@ export function initDashboard(api, showLogin) {
   };
 
   initAccounts(api, msg);
+  initOperations(api);
   refreshStatus();
   refreshVersions(api);
   pollTimer = setInterval(refreshStatus, 12000);

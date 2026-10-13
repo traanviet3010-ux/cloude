@@ -5,20 +5,38 @@ CLIENT_PORT=8795
 GM_WEB_PORT=8796
 PUBLIC_HOST=${HIEUSRO_PUBLIC_HOST:-hieusro-all-in-one.onrender.com}
 
+# Internal service-to-service credentials are generated inside the container
+# when Render secrets are not supplied. They are shared only by local child
+# processes and rotate on container replacement.
 if [ -z "${HIEUSRO_GM_CONTROL_TOKEN:-}" ] || [ "${#HIEUSRO_GM_CONTROL_TOKEN}" -lt 32 ]; then
-  echo "HIEUSRO_GM_CONTROL_TOKEN must be at least 32 characters" >&2
-  exit 1
+  export HIEUSRO_GM_CONTROL_TOKEN="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
+  echo "Generated ephemeral internal GM control token"
 fi
-if [ -z "${HIEUSRO_GM_ADMIN_PASSWORD:-}" ]; then
-  echo "HIEUSRO_GM_ADMIN_PASSWORD is required" >&2
-  exit 1
+if [ -z "${HIEUSRO_PROVISIONING_TOKEN:-}" ] || [ "${#HIEUSRO_PROVISIONING_TOKEN}" -lt 32 ]; then
+  export HIEUSRO_PROVISIONING_TOKEN="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
+  echo "Generated ephemeral provisioning token"
 fi
 if [ -z "${HIEUSRO_GM_SESSION_SECRET:-}" ] || [ "${#HIEUSRO_GM_SESSION_SECRET}" -lt 32 ]; then
-  echo "HIEUSRO_GM_SESSION_SECRET must be at least 32 characters" >&2
-  exit 1
+  export HIEUSRO_GM_SESSION_SECRET="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
+  echo "Generated ephemeral GM session secret"
+fi
+export HIEUSRO_GM_ADMIN_PASSWORD=${HIEUSRO_GM_ADMIN_PASSWORD:-DISABLED_UNTIL_OWNER_SETS_PASSWORD}
+if [ "$HIEUSRO_GM_ADMIN_PASSWORD" = "DISABLED_UNTIL_OWNER_SETS_PASSWORD" ]; then
+  echo "GM login is disabled until HIEUSRO_GM_ADMIN_PASSWORD is set in Render"
 fi
 
-PIDS=()
 CORE_PID=""
 CLIENT_PID=""
 GM_WEB_PID=""

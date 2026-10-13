@@ -14,6 +14,11 @@ fi
 git -C "$SRC_DIR" fetch origin "$BRANCH"
 git -C "$SRC_DIR" checkout "$BRANCH"
 git -C "$SRC_DIR" reset --hard "origin/$BRANCH"
+
+DOCKERFILE="$SRC_DIR/server-build/Dockerfile.allinone"
+sed -i 's/SRO_BUILD_JOBS=2/SRO_BUILD_JOBS=1/' "$DOCKERFILE"
+sed -i 's#RUN corepack pnpm assets build world-outdoor#RUN NODE_OPTIONS="--max-old-space-size=3072" corepack pnpm assets build world-outdoor#' "$DOCKERFILE"
+
 cd "$DEPLOY_DIR"
 docker compose --env-file .env -f compose.yml build
 docker compose --env-file .env -f compose.yml up -d --remove-orphans

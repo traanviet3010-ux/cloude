@@ -135,6 +135,14 @@ export async function handleApi(req, res, url) {
     const out = await control('/v1/settings', 'PUT', await readJson(req));
     return json(res, out.status, out.data);
   }
+  if (req.method === 'GET' && url.pathname === '/api/new-character-settings') {
+    const out = await control('/v1/new-character-settings');
+    return json(res, out.status, out.data);
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/new-character-settings') {
+    const out = await control('/v1/new-character-settings', 'PUT', await readJson(req));
+    return json(res, out.status, out.data);
+  }
   if (req.method === 'POST' && url.pathname === '/api/notice') {
     const out = await control('/v1/notice', 'POST', await readJson(req));
     return json(res, out.status, out.data);

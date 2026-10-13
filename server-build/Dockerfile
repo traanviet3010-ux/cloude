@@ -40,6 +40,21 @@ RUN corepack pnpm --version \
 # skill/drop/gold/rare rates while preserving native defaults at x1.
 COPY hieusro-growth.go /src/opensro/apps/server/internal/game/progression/growth.go
 
+# HieuSRO new-character policy. The JSON file is controlled by Web GM and is
+# read on each creation, so saving defaults does not require a GameWorld restart.
+RUN mkdir -p /src/opensro/apps/server/internal/hieusro/newcharacter
+COPY hieusro-new-character-config.go /src/opensro/apps/server/internal/hieusro/newcharacter/config.go
+COPY hieusro-agent-new-character.go /src/opensro/apps/server/internal/agent/api/hieusro_new_character.go
+COPY hieusro-gameworld-new-character.go /src/opensro/apps/server/cmd/services/sro-gameworld/hieusro_new_character.go
+COPY patch-new-character-go.py /tmp/patch-new-character-go.py
+RUN python /tmp/patch-new-character-go.py \
+ && gofmt -w \
+      /src/opensro/apps/server/internal/hieusro/newcharacter/config.go \
+      /src/opensro/apps/server/internal/agent/api/hieusro_new_character.go \
+      /src/opensro/apps/server/cmd/services/sro-gameworld/hieusro_new_character.go \
+      /src/opensro/apps/server/internal/agent/api/characters.go \
+      /src/opensro/apps/server/cmd/services/sro-gameworld/wiring_authority.go
+
 RUN set -eux; \
     mkdir -p "$SRO_GAME_ROOT/parts"; \
     python -m gdown 1a9nxRMoQTWoGK-ALioDeMKb4oHmiyhHV -O "$SRO_GAME_ROOT/parts/Data.pk2.part001"; \
@@ -159,6 +174,11 @@ COPY runtime-nginx.conf /opt/hieusro/runtime-nginx.conf
 COPY runtime-start.sh /opt/hieusro/runtime-start.sh
 COPY runtime-entrypoint.sh /opt/hieusro/runtime-entrypoint.sh
 COPY runtime-gm.py /opt/hieusro/runtime-gm.py
+COPY runtime_new_character.py /opt/hieusro/runtime_new_character.py
+COPY patch-runtime-new-character.py /tmp/patch-runtime-new-character.py
+RUN python /tmp/patch-runtime-new-character.py /opt/hieusro/runtime-gm.py \
+ && python -m py_compile /opt/hieusro/runtime-gm.py /opt/hieusro/runtime_new_character.py \
+ && rm -f /tmp/patch-runtime-new-character.py
 COPY runtime-version-control.py /opt/hieusro/runtime-version-control.py
 
 RUN set -eux; \

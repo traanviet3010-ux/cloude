@@ -11,11 +11,6 @@ on:
         options:
           - status
           - test-health
-          - deploy
-      confirmation:
-        description: "For deploy, type DEPLOY-TEST (otherwise leave empty)"
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -33,13 +28,12 @@ jobs:
       - name: Validate request
         env:
           OPERATION: ${{ inputs.operation }}
-          CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          if [[ "$OPERATION" == deploy && "$CONFIRMATION" != DEPLOY-TEST ]]; then
-            echo "::error::Deploy requires DEPLOY-TEST confirmation"
-            exit 1
-          fi
+          case "$OPERATION" in
+            status|test-health) ;;
+            *) echo "::error::Unsupported operation"; exit 1 ;;
+          esac
 
       - name: Configure pinned SSH trust
         env:
@@ -61,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$OPERATION" in
-            status|test-health|deploy) ;;
+            status|test-health) ;;
             *) exit 2 ;;
           esac
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \

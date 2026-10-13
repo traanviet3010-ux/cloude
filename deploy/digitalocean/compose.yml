@@ -1,0 +1,79 @@
+services:
+  game:
+    build:
+      context: ../../server-build
+      dockerfile: Dockerfile.allinone
+    restart: unless-stopped
+    environment:
+      PORT: "10000"
+      HIEUSRO_PUBLIC_HOST: "${HIEUSRO_HOST}"
+      SRO_ALLOWED_ORIGINS: "https://${HIEUSRO_HOST},https://${HIEUSRO_PORTAL_HOST}"
+      SRO_STATE_ROOT: /data/state
+      HIEUSRO_PROVISIONING_TOKEN: "${HIEUSRO_PROVISIONING_TOKEN}"
+      HIEUSRO_GM_ADMIN_PASSWORD: "${HIEUSRO_GM_ADMIN_PASSWORD}"
+      HIEUSRO_GM_SESSION_SECRET: "${HIEUSRO_GM_SESSION_SECRET}"
+    volumes:
+      - game_state:/data/state
+    expose:
+      - "10000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:10000/healthz >/dev/null || curl -fsS http://127.0.0.1:10000/ >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 8
+      start_period: 240s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "900", "1", "--save", "300", "10"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  portal:
+    build:
+      context: ../../portal
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      game:
+        condition: service_started
+    environment:
+      PORT: "10000"
+      REDIS_URL: redis://redis:6379
+      GAME_URL: "https://${HIEUSRO_HOST}"
+      SRO_PROVISIONING_URL: http://game:10000/provision
+      SRO_PROVISIONING_TOKEN: "${HIEUSRO_PROVISIONING_TOKEN}"
+    expose:
+      - "10000"
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - game
+      - portal
+    environment:
+      HIEUSRO_HOST: "${HIEUSRO_HOST}"
+      HIEUSRO_PORTAL_HOST: "${HIEUSRO_PORTAL_HOST}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  game_state:
+  redis_data:
+  caddy_data:
+  caddy_config:

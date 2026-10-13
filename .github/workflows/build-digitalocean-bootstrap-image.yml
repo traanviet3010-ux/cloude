@@ -37,7 +37,7 @@ jobs:
           LIBGUESTFS_BACKEND: direct
         run: |
           chmod +x deploy/digitalocean/bootstrap/hieusro-bootstrap.sh
-          sudo -E virt-customize -a hieusro-do-bootstrap.qcow2 \
+          sudo -E virt-customize --no-network -a hieusro-do-bootstrap.qcow2 \
             --copy-in deploy/digitalocean/bootstrap/hieusro-bootstrap.sh:/usr/local/sbin \
             --copy-in deploy/digitalocean/bootstrap/hieusro-bootstrap.service:/etc/systemd/system \
             --run-command 'chmod 0755 /usr/local/sbin/hieusro-bootstrap.sh' \

@@ -17,9 +17,8 @@ apt-get update
 apt-get install -y docker.io docker-compose-v2 git curl openssl ufw ca-certificates
 systemctl enable --now docker
 
-# The OpenSRO world asset build can briefly exceed Node's default ~2 GB heap.
-# Keep the 4 GB Droplet responsive by adding swap and building assets with one
-# conversion worker plus a larger, bounded V8 heap.
+# The OpenSRO world asset build can briefly exceed Node's default heap.
+# Keep the 4 GB Droplet responsive with swap and a low-memory build profile.
 if ! swapon --show=NAME --noheadings | grep -q .; then
   fallocate -l 4G /swapfile
   chmod 600 /swapfile
@@ -43,7 +42,11 @@ else
   git -C "$SRC_DIR" reset --hard "origin/$BRANCH"
 fi
 
-chmod +x "$DEPLOY_DIR/install.sh" "$DEPLOY_DIR/update.sh" "$DEPLOY_DIR/backup.sh"
+chmod +x \
+  "$DEPLOY_DIR/install.sh" \
+  "$DEPLOY_DIR/update.sh" \
+  "$DEPLOY_DIR/update-if-needed.sh" \
+  "$DEPLOY_DIR/backup.sh"
 
 # Apply a VPS-safe build profile without changing gameplay/runtime limits.
 DOCKERFILE="$SRC_DIR/server-build/Dockerfile.allinone"
@@ -79,8 +82,38 @@ cd "$DEPLOY_DIR"
 docker compose --env-file .env -f compose.yml build
 docker compose --env-file .env -f compose.yml up -d --remove-orphans
 
+# From now on pushes to the DigitalOcean branch are picked up automatically.
+cat >/etc/systemd/system/hieusro-autoupdate.service <<'EOF'
+[Unit]
+Description=HieuSRO GitHub auto-update
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hieusro/src/deploy/digitalocean/update-if-needed.sh
+EOF
+
+cat >/etc/systemd/system/hieusro-autoupdate.timer <<'EOF'
+[Unit]
+Description=Check HieuSRO GitHub branch for updates
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now hieusro-autoupdate.timer
+
 echo "HieuSRO deployment started."
 echo "Game:   https://$(grep '^HIEUSRO_HOST=' .env | cut -d= -f2-)"
 echo "Portal: https://$(grep '^HIEUSRO_PORTAL_HOST=' .env | cut -d= -f2-)"
 echo "GM:     https://$(grep '^HIEUSRO_HOST=' .env | cut -d= -f2-)/gm/"
+echo "Automatic GitHub updates are enabled every 5 minutes."
 echo "The GM password is stored only in $ENV_FILE on the server."

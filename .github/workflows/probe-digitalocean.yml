@@ -19,6 +19,8 @@ jobs:
           nc -vz -w 5 143.198.217.75 22
           nc -vz -w 5 143.198.217.75 80
           nc -vz -w 5 143.198.217.75 443
+          echo "--- SSH RSA host key ---"
+          ssh-keyscan -T 5 -t rsa 143.198.217.75 2>/dev/null || true
           echo "--- Game ---"
           curl -k -sS -o /tmp/game.body -D /tmp/game.headers --max-time 10 https://play.143-198-217-75.sslip.io/ || true
           cat /tmp/game.headers 2>/dev/null || true

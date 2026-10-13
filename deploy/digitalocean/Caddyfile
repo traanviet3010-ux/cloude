@@ -1,0 +1,19 @@
+{
+  email {$ACME_EMAIL:off}
+}
+
+{$HIEUSRO_HOST} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  }
+  reverse_proxy game:10000
+}
+
+{$HIEUSRO_PORTAL_HOST} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  }
+  reverse_proxy portal:10000
+}

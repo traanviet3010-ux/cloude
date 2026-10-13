@@ -1,0 +1,109 @@
+name: Build HieuSRO DigitalOcean image
+
+on:
+  push:
+    branches: [hieusro-digitalocean]
+    paths:
+      - '.github/workflows/build-hieusro-do-image.yml'
+      - 'deploy/digitalocean/install.sh'
+      - 'deploy/digitalocean/image-builder/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install image tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libguestfs-tools qemu-utils
+
+      - name: Download Ubuntu cloud image
+        run: |
+          curl -fL --retry 5 --retry-delay 3 \
+            https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img \
+            -o /tmp/hieusro-base.img
+          qemu-img info /tmp/hieusro-base.img
+
+      - name: Prepare first-boot files
+        run: |
+          mkdir -p /tmp/hieusro-image
+          cat >/tmp/hieusro-image/hieusro-firstboot.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec >>/var/log/hieusro-bootstrap.log 2>&1
+          echo "[$(date -Is)] HieuSRO first boot starting"
+          if [ -f /var/lib/hieusro-bootstrap.done ]; then
+            echo "bootstrap already completed"
+            exit 0
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 5 https://raw.githubusercontent.com/traanviet3010-ux/cloude/hieusro-digitalocean/deploy/digitalocean/install.sh -o /root/hieusro-install.sh; then
+              break
+            fi
+            sleep 5
+          done
+          test -s /root/hieusro-install.sh
+          chmod +x /root/hieusro-install.sh
+          /root/hieusro-install.sh
+          touch /var/lib/hieusro-bootstrap.done
+          echo "[$(date -Is)] HieuSRO first boot completed"
+          EOF
+          chmod +x /tmp/hieusro-image/hieusro-firstboot.sh
+
+          cat >/tmp/hieusro-image/hieusro-firstboot.service <<'EOF'
+          [Unit]
+          Description=HieuSRO autonomous first boot deployment
+          Wants=network-online.target
+          After=network-online.target cloud-final.service
+          ConditionPathExists=!/var/lib/hieusro-bootstrap.done
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/hieusro-firstboot.sh
+          RemainAfterExit=yes
+          StandardOutput=journal+console
+          StandardError=journal+console
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          cat >/tmp/hieusro-image/authorized_keys <<'EOF'
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKZ4KvkJ+ztiqY0/cPoajwq5PIUP/isBA7x8eU3RNMit chatgpt-hieusro-managed
+          EOF
+
+      - name: Bake autonomous image
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          sudo virt-customize -a /tmp/hieusro-base.img \
+            --copy-in /tmp/hieusro-image/hieusro-firstboot.sh:/usr/local/sbin \
+            --copy-in /tmp/hieusro-image/hieusro-firstboot.service:/etc/systemd/system \
+            --mkdir /root/.ssh \
+            --copy-in /tmp/hieusro-image/authorized_keys:/root/.ssh \
+            --chmod 0700:/root/.ssh \
+            --chmod 0600:/root/.ssh/authorized_keys \
+            --chmod 0755:/usr/local/sbin/hieusro-firstboot.sh \
+            --run-command 'ln -sf /etc/systemd/system/hieusro-firstboot.service /etc/systemd/system/multi-user.target.wants/hieusro-firstboot.service' \
+            --run-command 'sed -ri "s/^#?PermitRootLogin .*/PermitRootLogin prohibit-password/" /etc/ssh/sshd_config || true' \
+            --run-command 'cloud-init clean --logs || true'
+          qemu-img convert -p -O qcow2 -c /tmp/hieusro-base.img hieusro-do-bootstrap.qcow2
+          qemu-img info hieusro-do-bootstrap.qcow2
+
+      - name: Publish image release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: hieusro-do-bootstrap-${{ github.run_id }}
+        run: |
+          gh release create "$TAG" hieusro-do-bootstrap.qcow2 \
+            --title "HieuSRO DigitalOcean Bootstrap ${{ github.run_id }}" \
+            --notes "Autonomous Ubuntu 24.04 image for HieuSRO. Built from branch ${{ github.ref_name }} commit ${{ github.sha }}." 
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"

@@ -1,5 +1,5 @@
 name: DigitalOcean SSH relay
-# relay-trigger: 2026-10-13T09:26Z
+# relay-trigger: 2026-10-13T09:29Z
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
           git commit -m "Publish one-time DigitalOcean relay key"
           git push origin HEAD:hieusro-digitalocean
 
-      - name: Wait for encrypted SSH credential and inspect server
+      - name: Wait for encrypted SSH credential and manage server
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -57,16 +57,44 @@ jobs:
             -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
           chmod 600 /tmp/id_ed25519
 
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-            -i /tmp/id_ed25519 root@157.230.43.181 'bash -s' <<'REMOTE'
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            -i /tmp/id_ed25519 root@143.198.217.75 'bash -s' <<'REMOTE'
           set -u
-          echo "=== HieuSRO bootstrap service ==="
-          systemctl is-active hieusro-bootstrap.service || true
-          systemctl status --no-pager --lines=20 hieusro-bootstrap.service || true
-          echo "=== Bootstrap log ==="
-          tail -n 120 /var/log/hieusro-bootstrap.log 2>/dev/null || true
+          echo "=== Managed HieuSRO droplet ==="
+          hostname
+          uname -a
+          echo "=== Ensure installer service ==="
+          if [ ! -f /etc/systemd/system/hieusro-install.service ]; then
+            curl -fsSL --retry 10 --retry-delay 3 --retry-all-errors \
+              https://raw.githubusercontent.com/traanviet3010-ux/cloude/hieusro-digitalocean/deploy/digitalocean/install.sh \
+              -o /root/hieusro-install.sh
+            chmod 700 /root/hieusro-install.sh
+            cat >/etc/systemd/system/hieusro-install.service <<'UNIT'
+          [Unit]
+          Description=HieuSRO managed installer
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/root/hieusro-install.sh
+          RemainAfterExit=yes
+          StandardOutput=append:/var/log/hieusro-install.log
+          StandardError=append:/var/log/hieusro-install.log
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+            systemctl daemon-reload
+            systemctl enable hieusro-install.service
+          fi
+          if ! systemctl is-active --quiet hieusro-install.service; then
+            systemctl start --no-block hieusro-install.service
+          fi
+          echo "=== Install status ==="
+          systemctl status --no-pager --lines=30 hieusro-install.service || true
           echo "=== Install log ==="
-          tail -n 120 /var/log/hieusro-install.log 2>/dev/null || true
+          tail -n 100 /var/log/hieusro-install.log 2>/dev/null || true
           echo "=== Processes ==="
           ps -eo pid,ppid,%cpu,%mem,etime,cmd --sort=-%cpu | head -n 25 || true
           echo "=== Docker ==="
@@ -75,11 +103,6 @@ jobs:
           free -h || true
           df -h / || true
           swapon --show || true
-          if [ ! -f /var/lib/hieusro-bootstrap.complete ] && ! systemctl is-active --quiet hieusro-bootstrap.service; then
-            echo "Bootstrap is not active and not complete; restarting it."
-            systemctl daemon-reload
-            systemctl restart hieusro-bootstrap.service || true
-          fi
           REMOTE
 
       - name: Remove relay files from branch

@@ -32,6 +32,8 @@ else
   git -C "$SRC_DIR" reset --hard "origin/$BRANCH"
 fi
 
+chmod +x "$DEPLOY_DIR/install.sh" "$DEPLOY_DIR/update.sh" "$DEPLOY_DIR/backup.sh"
+
 PUBLIC_IP="$(curl -fsS --max-time 3 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address || true)"
 if [ -z "$PUBLIC_IP" ]; then
   PUBLIC_IP="$(hostname -I | awk '{print $1}')"
@@ -50,7 +52,6 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<EOF
 HIEUSRO_HOST=play.${IP_LABEL}.sslip.io
 HIEUSRO_PORTAL_HOST=portal.${IP_LABEL}.sslip.io
-ACME_EMAIL=off
 HIEUSRO_PROVISIONING_TOKEN=${PROVISIONING_TOKEN}
 HIEUSRO_GM_ADMIN_PASSWORD=${GM_ADMIN_PASSWORD}
 HIEUSRO_GM_SESSION_SECRET=${GM_SESSION_SECRET}

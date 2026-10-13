@@ -1,5 +1,6 @@
 name: HieuSRO secure VPS operations
 
+# Manual-only. No push trigger, arbitrary shell input, or one-time credentials in git.
 on:
   workflow_dispatch:
     inputs:
@@ -10,28 +11,23 @@ on:
         options:
           - status
           - test-health
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/hieusro-vps-ops.yml
-      - deploy/vps-trigger.txt
 
 permissions:
   contents: read
 
 concurrency:
   group: hieusro-vps-operations
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   operate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      OPERATION: ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'status' }}
+    environment: hieusro-vps
     steps:
       - name: Validate request
+        env:
+          OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
           case "$OPERATION" in
@@ -53,9 +49,15 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
           ssh-keygen -F 143.198.217.75 -f ~/.ssh/known_hosts >/dev/null
 
-      - name: Execute approved operation
+      - name: Execute allowlisted operation
+        env:
+          OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
+          case "$OPERATION" in
+            status|test-health) ;;
+            *) exit 2 ;;
+          esac
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 \
             "$OPERATION"

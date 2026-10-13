@@ -8,8 +8,9 @@ if len(sys.argv) != 2:
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 
-build_anchor = "RUN corepack pnpm assets doctor\nRUN corepack pnpm assets build world-outdoor"
-build_replacement = """RUN corepack pnpm assets doctor
+world_build = 'RUN NODE_OPTIONS="--max-old-space-size=3072" corepack pnpm assets build world-outdoor'
+build_anchor = "RUN corepack pnpm assets doctor\n" + world_build
+build_replacement = f"""RUN corepack pnpm assets doctor
 
 # HieuSRO mobile test: build the browser client from the exact same pinned
 # OpenSRO commit as the server, after lowering iOS asset concurrency. Desktop
@@ -18,7 +19,7 @@ COPY patch-mobile-client.py /tmp/patch-mobile-client.py
 RUN python /tmp/patch-mobile-client.py /src/opensro \\
  && corepack pnpm --filter @sro/client-next build
 
-RUN corepack pnpm assets build world-outdoor"""
+{world_build}"""
 if build_anchor not in text:
     raise SystemExit("mobile client build anchor changed")
 text = text.replace(build_anchor, build_replacement, 1)

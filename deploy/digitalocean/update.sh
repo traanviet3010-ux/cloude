@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRANCH="hieusro-digitalocean"
+SRC_DIR="/opt/hieusro/src"
+DEPLOY_DIR="$SRC_DIR/deploy/digitalocean"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run this script as root." >&2
+  exit 1
+fi
+
+"$DEPLOY_DIR/backup.sh"
+git -C "$SRC_DIR" fetch origin "$BRANCH"
+git -C "$SRC_DIR" checkout "$BRANCH"
+git -C "$SRC_DIR" reset --hard "origin/$BRANCH"
+cd "$DEPLOY_DIR"
+docker compose --env-file .env -f compose.yml build
+docker compose --env-file .env -f compose.yml up -d --remove-orphans
+
+docker image prune -f >/dev/null 2>&1 || true
+echo "HieuSRO updated to $(git -C "$SRC_DIR" rev-parse --short HEAD)."

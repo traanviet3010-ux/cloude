@@ -1,5 +1,13 @@
 const $ = id => document.getElementById(id);
 
+if (!document.querySelector('link[data-new-character-style]')) {
+  const style = document.createElement('link');
+  style.rel = 'stylesheet';
+  style.href = '/new-character.css';
+  style.dataset.newCharacterStyle = '1';
+  document.head.append(style);
+}
+
 const VANILLA = {
   enabled: false,
   level: 1,

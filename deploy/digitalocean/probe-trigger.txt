@@ -1,1 +1,1 @@
-probe rebuild 2026-10-13
+probe autonomous bootstrap 2026-10-13T09:25Z

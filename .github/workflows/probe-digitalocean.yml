@@ -24,6 +24,16 @@ jobs:
           cat /tmp/game.headers 2>/dev/null || true
           head -c 300 /tmp/game.body 2>/dev/null || true
           echo
+          echo "--- GM ---"
+          curl -k -sS -o /tmp/gm.body -D /tmp/gm.headers --max-time 10 https://play.143-198-217-75.sslip.io/gm/ || true
+          cat /tmp/gm.headers 2>/dev/null || true
+          head -c 500 /tmp/gm.body 2>/dev/null || true
+          echo
+          echo "--- GM session API ---"
+          curl -k -sS -o /tmp/gmapi.body -D /tmp/gmapi.headers --max-time 10 https://play.143-198-217-75.sslip.io/gm/api/session || true
+          cat /tmp/gmapi.headers 2>/dev/null || true
+          head -c 300 /tmp/gmapi.body 2>/dev/null || true
+          echo
           echo "--- Portal ---"
           curl -k -sS -o /tmp/portal.body -D /tmp/portal.headers --max-time 10 https://portal.143-198-217-75.sslip.io/ || true
           cat /tmp/portal.headers 2>/dev/null || true

@@ -84,7 +84,7 @@ jobs:
         env:
           LIBGUESTFS_BACKEND: direct
         run: |
-          sudo virt-customize -a /tmp/hieusro-base.img \
+          sudo -E virt-customize --no-network -a /tmp/hieusro-base.img \
             --copy-in /tmp/hieusro-image/hieusro-firstboot.sh:/usr/local/sbin \
             --copy-in /tmp/hieusro-image/hieusro-firstboot.service:/etc/systemd/system \
             --mkdir /root/.ssh \
@@ -105,5 +105,5 @@ jobs:
         run: |
           gh release create "$TAG" hieusro-do-bootstrap.qcow2 \
             --title "HieuSRO DigitalOcean Bootstrap ${{ github.run_id }}" \
-            --notes "Autonomous Ubuntu 24.04 image for HieuSRO. Built from branch ${{ github.ref_name }} commit ${{ github.sha }}." 
+            --notes "Autonomous Ubuntu 24.04 image for HieuSRO. Built from branch ${{ github.ref_name }} commit ${{ github.sha }}."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"

@@ -21,7 +21,7 @@ function json(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-function readJson(req, limit = 16384) {
+function readJson(req, limit = 32768) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
@@ -137,6 +137,46 @@ export async function handleApi(req, res, url) {
   }
   if (req.method === 'POST' && url.pathname === '/api/notice') {
     const out = await control('/v1/notice', 'POST', await readJson(req));
+    return json(res, out.status, out.data);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/economy') {
+    const out = await control('/v1/economy');
+    return json(res, out.status, out.data);
+  }
+  if (req.method === 'GET' && url.pathname === '/api/event') {
+    const out = await control('/v1/event');
+    return json(res, out.status, out.data);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/event/start') {
+    const out = await control('/v1/event/start', 'POST', await readJson(req));
+    return json(res, out.status, out.data);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/event/stop') {
+    const out = await control('/v1/event/stop', 'POST', {});
+    return json(res, out.status, out.data);
+  }
+  if (req.method === 'GET' && url.pathname === '/api/monsters') {
+    const ref = url.searchParams.get('ref') || '';
+    const out = await control(`/v1/monsters?ref=${encodeURIComponent(ref)}`);
+    return json(res, out.status, out.data);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/characters/search') {
+    const q = url.searchParams.get('q') || '';
+    const out = await control(`/v1/characters/search?q=${encodeURIComponent(q)}`);
+    return json(res, out.status, out.data);
+  }
+  let characterMatch = url.pathname.match(/^\/api\/characters\/([^/]+)$/);
+  if (req.method === 'GET' && characterMatch) {
+    const name = decodeURIComponent(characterMatch[1]);
+    const out = await control(`/v1/characters/${encodeURIComponent(name)}`);
+    return json(res, out.status, out.data);
+  }
+  characterMatch = url.pathname.match(/^\/api\/characters\/([^/]+)\/operation$/);
+  if (req.method === 'POST' && characterMatch) {
+    const name = decodeURIComponent(characterMatch[1]);
+    const out = await control(`/v1/characters/${encodeURIComponent(name)}/operation`, 'POST', await readJson(req));
     return json(res, out.status, out.data);
   }
 

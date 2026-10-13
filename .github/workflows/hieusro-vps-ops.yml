@@ -60,7 +60,7 @@ jobs:
           esac
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 \
-            "/usr/local/sbin/hieusro-ops $OPERATION"
+            "$OPERATION"
 
       - name: Remove key
         if: always()

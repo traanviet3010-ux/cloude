@@ -1,0 +1,98 @@
+name: DigitalOcean SSH relay
+
+on:
+  push:
+    branches:
+      - hieusro-digitalocean
+    paths:
+      - .github/workflows/digitalocean-ssh-relay.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: hieusro-digitalocean
+          fetch-depth: 1
+
+      - name: Publish one-time encryption key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /tmp/relay-private.pem
+          openssl pkey -in /tmp/relay-private.pem -pubout -out /tmp/relay-public.pem
+          mkdir -p deploy/digitalocean/relay
+          cp /tmp/relay-public.pem deploy/digitalocean/relay/runner-public.pem
+          git config user.name github-actions-hieusro
+          git config user.email actions@github.com
+          git add deploy/digitalocean/relay/runner-public.pem
+          git commit -m "Publish one-time DigitalOcean relay key"
+          git push origin HEAD:hieusro-digitalocean
+
+      - name: Wait for encrypted SSH credential and inspect server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/deploy/digitalocean/relay/ssh-key.enc?ref=hieusro-digitalocean"
+          for attempt in $(seq 1 90); do
+            if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" "$API" -o /tmp/ssh-key.enc.b64; then
+              break
+            fi
+            echo "Waiting for encrypted credential ($attempt/90)"
+            sleep 5
+          done
+          test -s /tmp/ssh-key.enc.b64
+          base64 -d /tmp/ssh-key.enc.b64 >/tmp/ssh-key.enc
+          openssl pkeyutl -decrypt -inkey /tmp/relay-private.pem -in /tmp/ssh-key.enc -out /tmp/id_ed25519 \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          chmod 600 /tmp/id_ed25519
+
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+            -i /tmp/id_ed25519 root@157.230.43.181 'bash -s' <<'REMOTE'
+          set -u
+          echo "=== HieuSRO bootstrap service ==="
+          systemctl is-active hieusro-bootstrap.service || true
+          systemctl status --no-pager --lines=20 hieusro-bootstrap.service || true
+          echo "=== Bootstrap log ==="
+          tail -n 120 /var/log/hieusro-bootstrap.log 2>/dev/null || true
+          echo "=== Install log ==="
+          tail -n 120 /var/log/hieusro-install.log 2>/dev/null || true
+          echo "=== Processes ==="
+          ps -eo pid,ppid,%cpu,%mem,etime,cmd --sort=-%cpu | head -n 25 || true
+          echo "=== Docker ==="
+          docker ps -a 2>/dev/null || true
+          echo "=== Disk and memory ==="
+          free -h || true
+          df -h / || true
+          swapon --show || true
+          if [ ! -f /var/lib/hieusro-bootstrap.complete ] && ! systemctl is-active --quiet hieusro-bootstrap.service; then
+            echo "Bootstrap is not active and not complete; restarting it."
+            systemctl daemon-reload
+            systemctl restart hieusro-bootstrap.service || true
+          fi
+          REMOTE
+
+      - name: Remove relay files from branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          git fetch origin hieusro-digitalocean
+          git reset --hard origin/hieusro-digitalocean
+          git config user.name github-actions-hieusro
+          git config user.email actions@github.com
+          git rm -f deploy/digitalocean/relay/runner-public.pem deploy/digitalocean/relay/ssh-key.enc 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Clean one-time DigitalOcean relay files"
+            git push origin HEAD:hieusro-digitalocean
+          fi

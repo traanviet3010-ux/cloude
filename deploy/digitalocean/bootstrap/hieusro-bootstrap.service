@@ -1,0 +1,13 @@
+[Unit]
+Description=Bootstrap HieuSRO on first boot
+After=network-online.target cloud-final.service
+Wants=network-online.target
+ConditionPathExists=!/var/lib/hieusro-bootstrap.complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hieusro-bootstrap.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,52 @@
+name: Validate HieuSRO TEST shard
+
+on:
+  push:
+    branches: [hieusro-test-shard]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate runtime shell
+        run: bash -n server-build/runtime-start.sh
+
+      - name: Validate shard catalogue
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('server-build/runtime-shards.json').read_text())
+          shards = {row['id']: row for row in data['shards']}
+          assert shards['global-official']['name'] == 'HieuSRO'
+          assert shards['global-official']['default'] is True
+          assert shards['hieusro-test']['name'] == 'HieuSRO TEST'
+          assert shards['hieusro-test']['test'] is True
+          assert shards['hieusro-test']['enabled'] is True
+          assert shards['hieusro-test']['nativeServerId'] != shards['global-official']['nativeServerId']
+          assert shards['hieusro-test']['controlUrl'] != shards['global-official']['controlUrl']
+          assert shards['hieusro-test']['transportUrl'] != shards['global-official']['transportUrl']
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Validate nginx routes
+        run: |
+          grep -q 'location /shards/global-official/' server-build/runtime-nginx.conf
+          grep -q 'location /shards/hieusro-test/' server-build/runtime-nginx.conf
+          docker run --rm \
+            -v "$PWD/server-build/runtime-nginx.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:1.27-alpine nginx -t
+
+      - name: Validate isolated authority paths and ports
+        run: |
+          grep -q 'TEST_SHARD_ID=hieusro-test' server-build/runtime-start.sh
+          grep -q 'TEST_GAME_ADDR=127.0.0.1:8797' server-build/runtime-start.sh
+          grep -q 'TEST_CONTROL_ADDR=127.0.0.1:8798' server-build/runtime-start.sh
+          grep -q 'shards/$TEST_SHARD_ID/authority' server-build/runtime-start.sh
+          grep -q 'gameworld-identity-$TEST_SHARD_ID.jwt' server-build/runtime-start.sh

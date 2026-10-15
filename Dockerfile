@@ -1,19 +1,13 @@
-FROM node:24-bookworm AS build
-
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
-WORKDIR /work
-ARG OPENSRO_REF=4f6919d6900d169b89e75647e56c99ca8ebd5cfb
-RUN git clone https://github.com/opensro-dev/opensro.git upstream \
- && cd upstream \
- && git checkout "$OPENSRO_REF" \
- && corepack pnpm install --frozen-lockfile \
- && corepack pnpm --filter @sro/client-next build
-
-FROM node:24-bookworm-slim
+FROM node:24-alpine
 WORKDIR /app
-ENV NODE_ENV=production
-COPY edge.mjs /app/edge.mjs
-COPY --from=build /work/upstream/apps/client-next/temp/artifacts/dist /app/public
+RUN printf '%s\n' \
+  "import http from 'node:http';" \
+  "const port = Number(process.env.PORT || 10000);" \
+  "http.createServer((req, res) => {" \
+  "  if (req.url === '/healthz') { res.writeHead(200, {'Content-Type':'text/plain','Cache-Control':'no-store'}); res.end('ok\\n'); return; }" \
+  "  res.writeHead(410, {'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'});" \
+  "  res.end('HieuSRO legacy TEST deployment retired.\\n');" \
+  "}).listen(port, '0.0.0.0');" \
+  > /app/server.mjs
 EXPOSE 10000
-CMD ["node", "/app/edge.mjs"]
+CMD ["node", "/app/server.mjs"]

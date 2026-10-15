@@ -1,0 +1,53 @@
+name: Apply HieuSRO LIVE-only cleanup now
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/apply-live-only-cleanup-now.yml']
+permissions:
+  contents: read
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    environment: hieusro-vps
+    timeout-minutes: 45
+    steps:
+      - name: Configure pinned SSH
+        env:
+          VPS_HOST_KEY: ${{ secrets.HIEUSRO_VPS_HOST_KEY }}
+          VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+      - name: Repair local executable bit and deploy branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 \
+            "sudo -n bash -lc 'chmod +x /opt/hieusro/src/deploy/digitalocean/update-if-needed.sh /opt/hieusro/src/deploy/digitalocean/update.sh /opt/hieusro/src/deploy/digitalocean/backup.sh /opt/hieusro/src/deploy/digitalocean/install.sh && /opt/hieusro/src/deploy/digitalocean/update-if-needed.sh'"
+      - name: Verify public LIVE-only surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE='https://play.143-198-217-75.sslip.io'
+          OLD='https://baseline-lite.143-198-217-75.sslip.io'
+          for attempt in $(seq 1 120); do
+            live_code=$(curl -k -sS -o /tmp/live -w '%{http_code}' --max-time 15 "$LIVE/" || true)
+            cat_code=$(curl -k -sS -H 'X-OpenSRO-Protocol: 6' -o /tmp/catalog -w '%{http_code}' --max-time 15 "$LIVE/api/title/servers" || true)
+            test_code=$(curl -k -sS -o /tmp/test -w '%{http_code}' --max-time 15 "$LIVE/shards/hieusro-test/transport/readyz" || true)
+            old_code=$(curl -k -sS -o /tmp/old -w '%{http_code}' --max-time 15 "$OLD/" || true)
+            echo "attempt=$attempt live=$live_code catalog=$cat_code test=$test_code baseline=$old_code"
+            if [ "$live_code" = 200 ] && [ "$cat_code" = 200 ] && ! grep -q 'hieusro-test' /tmp/catalog 2>/dev/null && [ "$test_code" = 404 ] && [ "$old_code" = 404 ]; then
+              cat /tmp/catalog
+              echo HIEUSRO_LIVE_ONLY_VERIFIED=1
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

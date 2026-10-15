@@ -1,4 +1,4 @@
-name: Audit PHUONGHOANG90 client archive
+name: Inspect exact PHUONGHOANG90 client
 
 on:
   push:
@@ -11,136 +11,192 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  inspect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      EXPECTED_SIZE: '1792674229'
+      EXPECTED_SHA256: b081c94d17f09897f6a2fde19b8d58cc18862490451c0325e65c845de5c3e595
+      PK2_TOOL_COMMIT: 9fd6191fdfb44cb1a7063ab0670b29036b9c1944
+
     steps:
       - name: Install tools
+        shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends p7zip-full unar binutils file python3-pip curl
-          python3 -m pip install --user --break-system-packages gdown pycryptodome
+          sudo apt-get install -y --no-install-recommends unrar cmake ninja-build g++ git file binutils python3-pip xxd
+          python3 -m pip install --user --break-system-packages gdown
 
-      - name: Download exact Drive archive
-        env:
-          DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      - name: Download only the exact Drive archive
+        shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/phuonghoang90"
-          cd "$RUNNER_TEMP/phuonghoang90"
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/phuonghoang90"
+          mkdir -p "$ROOT"
+          cd "$ROOT"
           ~/.local/bin/gdown "$DRIVE_FILE_ID" -O PHUONGHOANG90.rar
-          test -s PHUONGHOANG90.rar
-          stat -c 'ARCHIVE_SIZE=%s' PHUONGHOANG90.rar
-          sha256sum PHUONGHOANG90.rar | tee archive.sha256
-          grep -q '^b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595 ' archive.sha256
-          file PHUONGHOANG90.rar | tee archive.file
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$EXPECTED_SIZE"
+          ACTUAL_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
+          printf 'DRIVE_FILE_ID=%s\nARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$DRIVE_FILE_ID" "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
+          file PHUONGHOANG90.rar | tee -a provenance.txt
+          unrar lb PHUONGHOANG90.rar | tee archive-list.txt
 
-      - name: Extract exact client binaries and Media PK2
+      - name: Extract only inspection inputs from that archive
+        shell: bash
         run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/phuonghoang90"
-          7z l PHUONGHOANG90.rar | tee archive-list.txt
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/phuonghoang90"
+          cd "$ROOT"
           mkdir -p extracted
-          unar -f -o extracted PHUONGHOANG90.rar \
-            'PHUONGHOANG90/sro_client.exe' \
-            'PHUONGHOANG90/silkroad.exe' \
-            'PHUONGHOANG90/Silkroad_Api.dll' \
-            'PHUONGHOANG90/silkcfg.dat' \
-            'PHUONGHOANG90/Silkload.dat' \
-            'PHUONGHOANG90/Media.pk2' \
-            'PHUONGHOANG90/setting/gmwpfort.dat' \
-            'PHUONGHOANG90/setting/SROptionSet.dat' \
-            'PHUONGHOANG90/temppath/DNINF.dat' | tee extract.log
-          find extracted -maxdepth 4 -type f -printf '%P\t%s bytes\n' | sort | tee extracted-files.txt
-          test -f extracted/PHUONGHOANG90/sro_client.exe
-          test -f extracted/PHUONGHOANG90/silkroad.exe
-          test -f extracted/PHUONGHOANG90/Media.pk2
+          unrar x -o+ -idq PHUONGHOANG90.rar \
+            'New folder/Media.pk2' \
+            'New folder/sro_client.exe' \
+            'New folder/silkroad.exe' \
+            'New folder/version.dll' \
+            'New folder/version.dat' \
+            'New folder/Setting/server.dat' \
+            'New folder/Setting/setting.dat' \
+            'New folder/Settings/server.dat' \
+            'New folder/Settings/setting.dat' \
+            extracted/ || true
+          test -s 'extracted/New folder/Media.pk2'
+          test -s 'extracted/New folder/sro_client.exe'
+          test -s 'extracted/New folder/silkroad.exe'
+          find extracted -type f -printf '%P\t%s bytes\n' | sort | tee extracted-files.txt
+          sha256sum 'extracted/New folder/Media.pk2' 'extracted/New folder/sro_client.exe' 'extracted/New folder/silkroad.exe' | tee extracted.sha256
 
-      - name: Read division version gateway from exact Media PK2
+      - name: Build read-only PK2 inspection tool
+        shell: bash
         run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/phuonghoang90"
-          curl -fsSL 'https://raw.githubusercontent.com/opensro-dev/opensro/4f6919d6900d169b89e75647e56c99ca8ebd5cfb/scripts/sro_pk2.py' -o sro_pk2.py
-          cat > inspect_media.py <<'PY'
-          import mmap, os, sys
-          from sro_pk2 import read_directory, payload
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/phuonghoang90"
+          cd "$ROOT"
+          git clone --filter=blob:none https://github.com/kahme247/SRO-PK2.git pk2tool
+          cd pk2tool
+          git checkout "$PK2_TOOL_COMMIT"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target pk2cli pk2core -j2
+          ./build/pk2cli --help || true
 
-          media = 'extracted/PHUONGHOANG90/Media.pk2'
-          wanted_words = ('division', 'version', 'gateway', 'server', 'locale', 'patch', 'download')
-          exact_names = {
-              'divisioninfo.txt', 'version.txt', 'gateway.txt', 'serverinfo.txt',
-              'locale.txt', 'divisioninfo.dat', 'version.dat'
+      - name: Extract division version and gateway from Media.pk2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/phuonghoang90"
+          MEDIA="$ROOT/extracted/New folder/Media.pk2"
+          TOOL="$ROOT/pk2tool/build/pk2cli"
+          cd "$ROOT"
+
+          "$TOOL" list "$MEDIA" --password=169841 | tee media-tree.txt
+          grep -Ei 'DIVISIONINFO|GATEPORT|SV\.T|VERSION|SERVER|GATEWAY' media-tree.txt | head -n 1000 | tee media-network-files.txt || true
+
+          mkdir -p media-config
+          "$TOOL" extract "$MEDIA" 'DIVISIONINFO.TXT' media-config --overwrite --password=169841
+          "$TOOL" extract "$MEDIA" 'GATEPORT.TXT' media-config --overwrite --password=169841
+          "$TOOL" extract "$MEDIA" 'SV.T' media-config --overwrite --password=169841
+
+          find media-config -type f -printf '%P\t%s bytes\n' | sort | tee media-config-files.txt
+          find media-config -type f -maxdepth 2 -print0 | while IFS= read -r -d '' f; do
+            echo "===== $f ====="
+            xxd -g1 -l 1024 "$f" || true
+            strings -a -n 2 "$f" | head -n 200 || true
+          done | tee media-config-raw.txt
+
+          cat > inspect_server_config.cpp <<'CPP'
+          #include "pk2/server_config.h"
+          #include <cstdint>
+          #include <fstream>
+          #include <iostream>
+          #include <stdexcept>
+          #include <string>
+          #include <vector>
+
+          static std::vector<std::uint8_t> readAll(const std::string& p) {
+              std::ifstream f(p, std::ios::binary);
+              if (!f) throw std::runtime_error("cannot open " + p);
+              return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(f)), {});
           }
-          with open(media, 'rb') as f:
-              mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-              entries = read_directory(mm)
-              print(f'MEDIA_SIZE={len(mm)}')
-              print(f'MEDIA_ENTRY_COUNT={len(entries)}')
-              matches = []
-              for e in entries:
-                  low = e.path.lower()
-                  base = low.rsplit('/', 1)[-1]
-                  if base in exact_names or any(w in low for w in wanted_words):
-                      matches.append(e)
-              print('=== PATH MATCHES ===')
-              for e in matches[:500]:
-                  print(f'{e.path}\t{e.size}')
-              print('=== SMALL MATCH PAYLOADS ===')
-              for e in matches:
-                  if e.size > 1024 * 1024:
-                      continue
-                  data = bytes(payload(mm, e))
-                  print(f'--- {e.path} ({e.size} bytes)')
-                  print('HEX=' + data[:512].hex())
-                  for enc in ('utf-8', 'cp949', 'latin1', 'utf-16le'):
-                      try:
-                          text = data.decode(enc).replace('\x00', '\\0')
-                      except Exception:
-                          continue
-                      printable = sum(ch.isprintable() or ch in '\r\n\t' for ch in text)
-                      if text and printable / max(len(text), 1) > 0.6:
-                          print(f'TEXT[{enc}]={text[:3000]!r}')
-                          break
-              mm.close()
-          PY
-          python3 inspect_media.py | tee media-network-metadata.txt
+          int main() {
+              try {
+                  auto division = readAll("media-config/DIVISIONINFO.TXT");
+                  auto port = readAll("media-config/GATEPORT.TXT");
+                  auto version = readAll("media-config/SV.T");
+                  const auto cfg = pk2::parseServerConfig(division, port, version);
+                  std::cout << "CONTENT_ID=" << static_cast<unsigned>(cfg.contentId) << "\n";
+                  std::cout << "CLIENT_VERSION=" << cfg.version << "\n";
+                  std::cout << "GATEWAY_PORT=" << cfg.port << "\n";
+                  std::cout << "VERSION_ENDIAN=" << (cfg.versionEndian == pk2::BlockEndian::Little ? "little" : "big") << "\n";
+                  std::cout << "DIVISION_COUNT=" << cfg.divisions.size() << "\n";
+                  for (std::size_t i = 0; i < cfg.divisions.size(); ++i) {
+                      std::cout << "DIVISION[" << i << "].NAME=" << cfg.divisions[i].name << "\n";
+                      for (std::size_t j = 0; j < cfg.divisions[i].gateways.size(); ++j)
+                          std::cout << "DIVISION[" << i << "].GATEWAY[" << j << "]=" << cfg.divisions[i].gateways[j] << "\n";
+                  }
+                  return 0;
+              } catch (const std::exception& e) {
+                  std::cerr << "SERVER_CONFIG_PARSE_ERROR=" << e.what() << "\n";
+                  return 2;
+              }
+          }
+          CPP
+          g++ -std=c++17 -O2 inspect_server_config.cpp -I "$ROOT/pk2tool/include" "$ROOT/pk2tool/build/libpk2core.a" -o inspect_server_config
+          ./inspect_server_config | tee server-config.txt
 
-      - name: Inspect Silkroad binaries and config
+      - name: Fingerprint PHUONGHOANG90 executables
+        shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/phuonghoang90"
-          ROOT=extracted/PHUONGHOANG90
+          ROOT="$RUNNER_TEMP/phuonghoang90"
+          GAME="$ROOT/extracted/New folder"
           {
-            echo '=== SOURCE ARCHIVE ==='
-            echo 'Drive file id: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo'
-            cat archive.sha256
-            cat archive.file
+            echo '=== PROVENANCE ==='
+            cat "$ROOT/provenance.txt"
             echo
-            echo '=== IMPORTANT FILES IN ARCHIVE ==='
-            grep -Ei 'Data\.pk2|Map\.pk2|Media\.pk2|Particles\.pk2|Music\.pk2|sro_client\.exe|silkroad\.exe|Silkroad_Api\.dll|silkcfg\.dat|Silkload\.dat' archive-list.txt || true
+            echo '=== SERVER CONFIG ==='
+            cat "$ROOT/server-config.txt"
             echo
-            echo '=== HASHES ==='
-            sha256sum "$ROOT/sro_client.exe" "$ROOT/silkroad.exe" "$ROOT/Silkroad_Api.dll" "$ROOT/silkcfg.dat" "$ROOT/Silkload.dat" "$ROOT/Media.pk2"
-            echo
-            echo '=== PE INFO ==='
-            for f in "$ROOT/sro_client.exe" "$ROOT/silkroad.exe" "$ROOT/Silkroad_Api.dll"; do
+            echo '=== FILES ==='
+            for f in "$GAME/sro_client.exe" "$GAME/silkroad.exe" "$GAME/version.dll"; do
+              [ -f "$f" ] || continue
               echo "--- $f"
               file "$f"
-              objdump -x "$f" 2>/dev/null | grep -E 'file format|ImageBase|Subsystem|MajorSubsystemVersion|MinorSubsystemVersion|Time/Date|DLL Name' | head -n 120 || true
-              strings -a -n 4 "$f" | grep -Eai 'version|gateway|server|silkroad|division|locale|joymax|vsro|isro|[0-9]{1,3}(\.[0-9]{1,3}){3}|\.com|\.net|15779' | head -n 260 || true
+              sha256sum "$f"
+              objdump -x "$f" 2>/dev/null | grep -E 'Time/Date|ImageBase|Subsystem|MajorSubsystemVersion|MinorSubsystemVersion|DLL Name' | head -n 160 || true
+              strings -a -n 4 "$f" | grep -Eai 'Silkroad|Joymax|version|gateway|division|locale|vsro|isro|15779|15880|[0-9]{1,3}(\.[0-9]{1,3}){3}|\.(com|net|vn)' | head -n 400 || true
             done
-          } | tee client-audit.txt
+            echo
+            echo '=== LOCAL DAT FILES ==='
+            find "$GAME" -maxdepth 3 -type f \( -iname '*.dat' -o -iname '*.txt' \) -print0 | while IFS= read -r -d '' f; do
+              echo "--- $f"
+              xxd -g1 -l 512 "$f" || true
+              strings -a -n 2 "$f" | head -n 100 || true
+            done
+          } | tee "$ROOT/client-fingerprint.txt"
 
-      - name: Upload audit report only
+      - name: Create machine-readable report
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/phuonghoang90"
+          {
+            cat "$ROOT/provenance.txt"
+            cat "$ROOT/server-config.txt"
+          } | tee "$ROOT/PHUONGHOANG90-report.txt"
+
+      - name: Upload inspection report only
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-client-audit
-          path: |
-            ${{ runner.temp }}/phuonghoang90/client-audit.txt
-            ${{ runner.temp }}/phuonghoang90/media-network-metadata.txt
-            ${{ runner.temp }}/phuonghoang90/extracted-files.txt
-            ${{ runner.temp }}/phuonghoang90/archive-list.txt
-            ${{ runner.temp }}/phuonghoang90/archive.sha256
-          if-no-files-found: error
+          name: PHUONGHOANG90-protocol-report
           retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/phuonghoang90/PHUONGHOANG90-report.txt
+            ${{ runner.temp }}/phuonghoang90/provenance.txt
+            ${{ runner.temp }}/phuonghoang90/server-config.txt
+            ${{ runner.temp }}/phuonghoang90/client-fingerprint.txt
+            ${{ runner.temp }}/phuonghoang90/media-network-files.txt
+            ${{ runner.temp }}/phuonghoang90/media-config-raw.txt
+            ${{ runner.temp }}/phuonghoang90/extracted-files.txt

@@ -1,0 +1,35 @@
+name: Cleanup HieuSRO runtime to LIVE only
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/cleanup-runtime-live-only.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hieusro-digitalocean
+          fetch-depth: 0
+      - name: Replace runtime with known LIVE-only files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin hieusro-runtime-live
+          git show origin/hieusro-runtime-live:server-build/runtime-start.sh > server-build/runtime-start.sh
+          git show origin/hieusro-runtime-live:server-build/runtime-nginx.conf > server-build/runtime-nginx.conf
+          python - <<'PY'
+          import json
+          p='server-build/runtime-shards.json'
+          d=json.load(open(p))
+          d['shards']=[s for s in d.get('shards',[]) if s.get('id')=='global-official']
+          open(p,'w').write(json.dumps(d,indent=2)+'\n')
+          PY
+          git config user.name 'traanviet3010-ux'
+          git config user.email 'traanviet3010@gmail.com'
+          git add server-build/runtime-start.sh server-build/runtime-nginx.conf server-build/runtime-shards.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Production: remove TEST GameWorld and routes'
+          git push origin HEAD:hieusro-digitalocean

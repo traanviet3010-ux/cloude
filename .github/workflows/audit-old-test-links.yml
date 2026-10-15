@@ -1,0 +1,20 @@
+name: Audit old HieuSRO TEST links
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/audit-old-test-links.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Probe public endpoints
+        shell: bash
+        run: |
+          set +e
+          probe(){ echo "=== $1"; curl -k -sS -o /tmp/body -D /tmp/head --max-time 20 "$1"; code=$?; echo curl_exit=$code; head -n 1 /tmp/head 2>/dev/null || true; head -c 500 /tmp/body 2>/dev/null || true; echo; }
+          probe 'https://play.143-198-217-75.sslip.io/'
+          probe 'https://play.143-198-217-75.sslip.io/api/title/servers'
+          probe 'https://play.143-198-217-75.sslip.io/shards/hieusro-test/transport/readyz'
+          probe 'https://baseline-lite.143-198-217-75.sslip.io/'

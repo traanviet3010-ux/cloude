@@ -4,7 +4,4 @@ services:
     runtime: docker
     plan: free
     autoDeploy: true
-    envVars:
-      - key: OPENSRO_UPSTREAM_HOST
-        value: opensro.online
-    healthCheckPath: /
+    healthCheckPath: /healthz

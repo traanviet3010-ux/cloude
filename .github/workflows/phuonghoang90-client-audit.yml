@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends p7zip-full binutils file python3-pip
+          sudo apt-get install -y --no-install-recommends p7zip-full unar binutils file python3-pip
           python3 -m pip install --user --break-system-packages gdown
 
       - name: Download exact Drive archive
@@ -35,45 +35,61 @@ jobs:
           sha256sum PHUONGHOANG90.rar | tee archive.sha256
           file PHUONGHOANG90.rar | tee archive.file
 
-      - name: List and extract archive
+      - name: List archive and extract client/config only
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/phuonghoang90"
           7z l PHUONGHOANG90.rar | tee archive-list.txt
-          mkdir extracted
-          7z x -y -oextracted PHUONGHOANG90.rar | tee extract.log
+          mkdir -p extracted
+          unar -f -o extracted PHUONGHOANG90.rar \
+            'PHUONGHOANG90/sro_client.exe' \
+            'PHUONGHOANG90/silkroad.exe' \
+            'PHUONGHOANG90/Silkroad_Api.dll' \
+            'PHUONGHOANG90/silkcfg.dat' \
+            'PHUONGHOANG90/Silkload.dat' \
+            'PHUONGHOANG90/setting/gmwpfort.dat' \
+            'PHUONGHOANG90/setting/SROptionSet.dat' \
+            'PHUONGHOANG90/temppath/DNINF.dat' | tee extract.log
           find extracted -maxdepth 4 -type f -printf '%P\t%s bytes\n' | sort | tee extracted-files.txt
+          test -f extracted/PHUONGHOANG90/sro_client.exe
+          test -f extracted/PHUONGHOANG90/silkroad.exe
 
       - name: Inspect Silkroad client binaries and config
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/phuonghoang90"
-          ROOT=extracted
+          ROOT=extracted/PHUONGHOANG90
           {
-            echo '=== ARCHIVE ==='
+            echo '=== SOURCE ARCHIVE ==='
+            echo 'Drive file id: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo'
             cat archive.sha256
             cat archive.file
             echo
-            echo '=== IMPORTANT FILES ==='
-            find "$ROOT" -type f \( -iname 'SRO_Client.exe' -o -iname 'Silkroad.exe' -o -iname 'Media.pk2' -o -iname 'Data.pk2' -o -iname 'Map.pk2' -o -iname 'Particles.pk2' -o -iname 'Music.pk2' -o -iname 'SilkRoadGlobal.ini' -o -iname 'silkcfg.dat' \) -printf '%p\t%s bytes\n' | sort
+            echo '=== ARCHIVE CONTENT SIZES ==='
+            grep -Ei 'Data\.pk2|Map\.pk2|Media\.pk2|Particles\.pk2|Music\.pk2|sro_client\.exe|silkroad\.exe|Silkroad_Api\.dll|silkcfg\.dat|Silkload\.dat' archive-list.txt || true
+            echo
+            echo '=== EXTRACTED FILES ==='
+            cat extracted-files.txt
+            echo
+            echo '=== HASHES ==='
+            sha256sum "$ROOT/sro_client.exe" "$ROOT/silkroad.exe" "$ROOT/Silkroad_Api.dll" "$ROOT/silkcfg.dat" "$ROOT/Silkload.dat"
             echo
             echo '=== PE INFO ==='
-            while IFS= read -r f; do
+            for f in "$ROOT/sro_client.exe" "$ROOT/silkroad.exe" "$ROOT/Silkroad_Api.dll"; do
               echo "--- $f"
               file "$f"
-              objdump -x "$f" 2>/dev/null | grep -E 'file format|ImageBase|Subsystem|MajorSubsystemVersion|MinorSubsystemVersion|Time/Date|DLL Name' | head -n 80 || true
+              objdump -x "$f" 2>/dev/null | grep -E 'file format|ImageBase|Subsystem|MajorSubsystemVersion|MinorSubsystemVersion|Time/Date|DLL Name' | head -n 120 || true
               echo '--- strings: version/network hints'
-              strings -a -n 5 "$f" | grep -Eai 'version|gateway|server|silkroad|division|locale|joymax|[0-9]{1,3}(\.[0-9]{1,3}){3}|\.com|\.net' | head -n 160 || true
-            done < <(find "$ROOT" -type f \( -iname 'SRO_Client.exe' -o -iname 'Silkroad.exe' \) | sort)
+              strings -a -n 4 "$f" | grep -Eai 'version|gateway|server|silkroad|division|locale|joymax|vsro|isro|[0-9]{1,3}(\.[0-9]{1,3}){3}|\.com|\.net|15779' | head -n 260 || true
+            done
             echo
-            echo '=== SMALL CONFIG FILES ==='
-            while IFS= read -r f; do
-              size=$(stat -c %s "$f")
-              if [ "$size" -le 1048576 ]; then
-                echo "--- $f ($size bytes)"
-                strings -a -n 2 "$f" | head -n 300 || true
-              fi
-            done < <(find "$ROOT" -type f \( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.dat' \) | sort)
+            echo '=== CONFIG RAW/STRINGS ==='
+            for f in "$ROOT/silkcfg.dat" "$ROOT/Silkload.dat" "$ROOT/setting/gmwpfort.dat" "$ROOT/setting/SROptionSet.dat" "$ROOT/temppath/DNINF.dat"; do
+              [ -f "$f" ] || continue
+              echo "--- $f ($(stat -c %s "$f") bytes)"
+              xxd -g 1 "$f" | head -n 100 || true
+              strings -a -n 2 "$f" | head -n 200 || true
+            done
           } | tee client-audit.txt
 
       - name: Upload audit report only

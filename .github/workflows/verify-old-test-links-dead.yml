@@ -1,0 +1,34 @@
+name: Verify old HieuSRO TEST links are dead
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/verify-old-test-links-dead.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production auto-update and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE='https://play.143-198-217-75.sslip.io'
+          OLD='https://baseline-lite.143-198-217-75.sslip.io'
+          for attempt in $(seq 1 90); do
+            echo "VERIFY attempt=$attempt time=$(date -u +%FT%TZ)"
+            live_code=$(curl -k -sS -o /tmp/live -w '%{http_code}' --max-time 15 "$LIVE/" || true)
+            cat_code=$(curl -k -sS -H 'X-OpenSRO-Protocol: 6' -o /tmp/catalog -w '%{http_code}' --max-time 15 "$LIVE/api/title/servers" || true)
+            test_code=$(curl -k -sS -o /tmp/test -w '%{http_code}' --max-time 15 "$LIVE/shards/hieusro-test/transport/readyz" || true)
+            old_code=$(curl -k -sS -o /tmp/old -w '%{http_code}' --max-time 15 "$OLD/" || true)
+            echo "live=$live_code catalog=$cat_code test=$test_code baseline=$old_code"
+            cat /tmp/catalog 2>/dev/null || true; echo
+            if [ "$live_code" = 200 ] && [ "$cat_code" = 200 ] && ! grep -q 'hieusro-test' /tmp/catalog 2>/dev/null && [ "$test_code" != 200 ] && [ "$old_code" != 200 ]; then
+              echo 'HIEUSRO_TEST_LINKS_DISABLED=1'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Old TEST endpoints are still reachable or LIVE is unhealthy.' >&2
+          exit 1

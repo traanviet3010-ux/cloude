@@ -63,6 +63,7 @@ services:
     environment:
       HIEUSRO_HOST: "${HIEUSRO_HOST}"
       HIEUSRO_PORTAL_HOST: "${HIEUSRO_PORTAL_HOST}"
+      HIEUSRO_CADDY_REV: "20261015-live-only"
     ports:
       - "80:80"
       - "443:443"

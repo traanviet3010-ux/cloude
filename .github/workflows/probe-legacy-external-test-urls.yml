@@ -1,0 +1,27 @@
+name: Probe legacy external HieuSRO TEST URLs
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/probe-legacy-external-test-urls.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe legacy external URLs
+        shell: bash
+        run: |
+          set +e
+          for u in \
+            'https://hieusro-private-client-test.onrender.com/' \
+            'https://opensro-mobile-test.onrender.com/' \
+            'https://raw.githack.com/traanviet3010-ux/cloude/hieusro-web3d/web3d-test/index.html'; do
+            echo "=== $u"
+            code=$(curl -L -sS -o /tmp/body -w '%{http_code}' --max-time 30 "$u")
+            ec=$?
+            echo "curl_exit=$ec http=$code"
+            head -c 200 /tmp/body 2>/dev/null || true
+            echo
+          done

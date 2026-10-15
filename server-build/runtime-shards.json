@@ -12,19 +12,6 @@
       "controlUrl": "http://127.0.0.1:8791",
       "transportUrl": "http://127.0.0.1:8788",
       "publicTransportUrl": "/shards/global-official"
-    },
-    {
-      "id": "hieusro-test",
-      "name": "HieuSRO TEST",
-      "nativeServerId": 2,
-      "nativeFarmId": 0,
-      "capacity": 50,
-      "default": false,
-      "test": true,
-      "enabled": true,
-      "controlUrl": "http://127.0.0.1:8798",
-      "transportUrl": "http://127.0.0.1:8797",
-      "publicTransportUrl": "/shards/hieusro-test"
     }
   ]
 }

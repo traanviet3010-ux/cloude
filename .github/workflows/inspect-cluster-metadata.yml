@@ -1,0 +1,30 @@
+name: Inspect HieuSRO cluster metadata
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/inspect-cluster-metadata.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    environment: hieusro-vps
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST_KEY: ${{ secrets.HIEUSRO_VPS_HOST_KEY }}
+          VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+      - name: Inspect cluster paths read-only
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 \
+            "sudo -n docker run --rm --entrypoint sh -v digitalocean_game_state:/state:ro caddy:2.8-alpine -c 'echo ===CLUSTER===; find /state/cluster -maxdepth 3 -type f -print 2>/dev/null; echo ===SHARDS===; find /state/shards -maxdepth 2 -mindepth 1 -print 2>/dev/null; echo ===TEST_FILES===; grep -aRIl --exclude=accounts.json hieusro-test /state/cluster 2>/dev/null || true'"
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

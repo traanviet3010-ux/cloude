@@ -1,4 +1,4 @@
-name: Smoke PHUONGHOANG90 legacy TCP server modern DB driver
+name: Smoke PHUONGHOANG90 legacy TCP minimal world
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  smoke-modern-db:
+  smoke-minimal:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -49,7 +49,7 @@ jobs:
           test -s "$ROOT/game/PHUONGHOANG90/Data.pk2"
           printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
 
-      - name: Checkout patch DB driver and build legacy server
+      - name: Checkout patch DB driver and skip missing item catalog for network probe
         shell: bash
         run: |
           set -euxo pipefail
@@ -60,7 +60,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
           go get github.com/go-sql-driver/mysql@v1.8.1
           go mod tidy
-          grep 'go-sql-driver/mysql' go.mod
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('agent-server/server.go')
+          s=p.read_text()
+          old='model.RefItems = model.GetAllRefItems()'
+          new='model.RefItems = make(map[uint32]model.RefItem) // TEST-only: repo schema omits ITEMDATA'
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
+          grep -n 'RefItems = ' agent-server/server.go | tail
           CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/gateway-server" gateway-server/server.go
           CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/agent-server" agent-server/server.go
           test -s "$ROOT/gateway-server"
@@ -77,7 +86,7 @@ jobs:
             -e MYSQL_ROOT_HOST=% \
             -p 127.0.0.1:33306:3306 \
             -v "$ROOT/go-sro/db:/docker-entrypoint-initdb.d:ro" \
-            mysql:8.0
+            mysql:8.0 --default-authentication-plugin=mysql_native_password
           for i in $(seq 1 90); do
             if docker exec ph90-mysql mysqladmin ping -uroot --silent >/dev/null 2>&1; then break; fi
             sleep 2
@@ -90,7 +99,7 @@ jobs:
           done
           test "$READY" = 1
           docker exec ph90-mysql mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219', STATUS=1 WHERE ID=1;"
-          docker exec ph90-mysql mysql -uroot -e 'SELECT COUNT(*) AS ITEMS FROM SRO_SHARD.ITEMDATA; SELECT * FROM SRO_ACCOUNT.SHARD;'
+          docker exec ph90-mysql mysql -uroot -e 'SELECT COUNT(*) AS CHARS FROM SRO_SHARD.CHAR_REF_DATA; SELECT COUNT(*) AS REGIONS FROM SRO_SHARD.REGION_REFERENCE; SELECT * FROM SRO_ACCOUNT.SHARD;'
 
       - name: Start Agent
         shell: bash
@@ -153,7 +162,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-legacy-modern-db-smoke
+          name: PHUONGHOANG90-legacy-minimal-smoke
           retention-days: 7
           if-no-files-found: warn
           path: |

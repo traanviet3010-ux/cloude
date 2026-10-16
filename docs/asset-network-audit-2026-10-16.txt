@@ -1,0 +1,53 @@
+HieuSRO asset/network audit baseline
+Date: 2026-10-16
+Scope: read-only runtime/network audit. No LIVE compression/cache/proxy settings changed by this audit.
+
+ARCHITECTURE OBSERVED FROM DEPLOY CONFIG
+- Public edge: Caddy 2.8-alpine on TCP/UDP 443 -> game service :10000.
+- Runtime inside game service: nginx 1.22.1 -> client edge on 127.0.0.1:8795.
+- Client edge: Node HTTP server.
+- Most /assets/* that are not a small set of locally snapshotted client files are proxied by Node to opensro.online.
+- Localized text routes can instead proxy to the HieuSRO game/i18n origin.
+
+COMPRESSION / PROTOCOL
+- Caddy configuration: encode zstd gzip. Brotli is NOT configured.
+- External HTTP/2 test: HTTP/2 200 confirmed.
+- Public response advertises: Alt-Svc: h3=":443"; ma=2592000.
+- Docker publishes 443/tcp and 443/udp, so Caddy HTTP/3 is exposed/advertised.
+- The audit runner's libcurl had no HTTP/3 support, so an actual h3 transfer was not negotiated in this audit.
+- Index with Accept-Encoding:gzip returned Content-Encoding:gzip.
+
+CACHE BEHAVIOR FROM CODE/HEADERS
+- Local JS/CSS filenames matching the content-hash pattern get Cache-Control: public, max-age=31536000, immutable in the Node client edge.
+- Proxied runtime /assets/* copy upstream headers; the HieuSRO edge does NOT add a general long-lived immutable Cache-Control policy to hashed game assets.
+- Localized text assets are explicitly Cache-Control:no-cache.
+- Sample /assets/text/textdataname.en.json returned HTTP/2 200, gzip, Cache-Control:no-cache, transferred 958531 bytes.
+
+PUBLIC SAMPLE TRANSFER (GitHub runner -> LIVE)
+- /assets/text/textdataname.en.json: 958531 B in 1.932495 s, 496006 B/s (~484 KiB/s), start transfer 0.611254 s.
+
+VPS BANDWIDTH TEST (Cloudflare)
+Run 1:
+- Download 25,000,000 B in 0.191353 s = 130,648,591 B/s (~1.045 Gbit/s).
+- Upload 10,000,000 B in 0.201315 s = 49,673,397 B/s (~397 Mbit/s).
+Run 2:
+- Download 25,000,000 B in 0.232909 s = 107,338,059 B/s (~859 Mbit/s).
+- Upload 10,000,000 B in 0.233324 s = 42,858,857 B/s (~343 Mbit/s).
+
+LARGE EXTERNAL FILE -> VPS DISK
+- DigitalOcean SGP1 speedtest hostname DNS lookup timed out twice from the VPS during this run.
+- Fallback Hetzner NBG1 100MB.bin succeeded.
+- 104,857,600 B in 7.072385 s = 14,826,342 B/s (~14.1 MiB/s / ~118.6 Mbit/s).
+- Temporary test file was deleted after measurement.
+
+VPS -> LIVE SAMPLE
+- LIVE root over HTTP/2: 200, connect 0.003811 s, TLS 0.017024 s, start 0.023353 s, total 0.025304 s.
+- Sample localized asset through LIVE from the VPS: 958531 B in 0.187317 s = 5,117,159 B/s (~4.88 MiB/s).
+
+INTERPRETATION
+- VPS raw network is not the 44 KB/s bottleneck.
+- The current delivery path adds an upstream fetch through the Node edge for most game assets instead of serving all runtime assets from local VPS disk.
+- With about 1422 files, request count + mobile latency + per-file upstream proxying can dominate total load time even with HTTP/2.
+- HTTP/2 is already enabled. HTTP/3 is advertised/exposed.
+- Brotli is not enabled; gzip and zstd are configured.
+- Long immutable caching exists for local hashed JS/CSS only; it is not enforced generally for proxied hashed game assets.

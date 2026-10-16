@@ -2,7 +2,9 @@ name: Temporary LIVE asset timing log
 on:
   push:
     branches: [hieusro-secure-vps-ops]
-    paths: ['.github/workflows/temp-live-asset-log.yml']
+    paths:
+      - '.github/workflows/temp-live-asset-log.yml'
+      - '.github/scripts/temp-live-asset-log-enable.sh'
 permissions:
   contents: read
 jobs:

@@ -7,6 +7,7 @@ on:
       - '.github/workflows/phuonghoang90-gateway-v219-handshake.yml'
       - 'ci/ph90-v219-probe.go'
       - 'ci/ph90-skip299-generator.go'
+      - 'ci/ph90-select-safe-region.go'
       - 'ci/ph90-apply-test-patches.py'
   workflow_dispatch:
 
@@ -141,12 +142,36 @@ jobs:
           test "$READY" = 1
           docker exec ph90-gw-v219-mysql mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219-TEST', STATUS=1 WHERE ID=1;"
 
+          docker exec ph90-gw-v219-mysql mysql -uroot -Nse "SELECT wRegionID, ContinentName FROM SRO_SHARD.REGION_REFERENCE ORDER BY CASE WHEN ContinentName='Jangan' THEN 0 ELSE 1 END, wRegionID" > "$ROOT/regions.tsv"
+          REGION_ROWS="$(wc -l < "$ROOT/regions.tsv")"
+          echo "REGION_REFERENCE_ROWS=$REGION_ROWS"
+          test "$REGION_ROWS" -gt 0
+
+          SELECTOR="$ROOT/region-selector"
+          mkdir -p "$SELECTOR"
+          cp "$GITHUB_WORKSPACE/ci/ph90-select-safe-region.go" "$SELECTOR/main.go"
+          cat > "$SELECTOR/go.mod" <<EOF
+          module regionselector
+          go 1.22
+          require github.com/ferdoran/go-sro v0.0.0
+          replace github.com/ferdoran/go-sro => $ROOT/go-sro
+          EOF
+          cd "$SELECTOR"
+          go mod tidy
+          CGO_ENABLED=0 go run . "$ROOT/game/Data.pk2" "$ROOT/skip299-object-ids.txt" "$ROOT/regions.tsv" "$ROOT/region-selection.txt"
+          cat "$ROOT/region-selection.txt"
+          SAFE_REGION_ID="$(awk -F= '$1=="SELECTED_REGION_ID" {print $2}' "$ROOT/region-selection.txt")"
+          SAFE_REGION_CONTINENT="$(awk -F= '$1=="SELECTED_CONTINENT" {print $2}' "$ROOT/region-selection.txt")"
+          test -n "$SAFE_REGION_ID"
+          test "$SAFE_REGION_CONTINENT" = "Jangan"
+          docker exec ph90-gw-v219-mysql mysql -uroot -Nse "SELECT COUNT(*) FROM SRO_SHARD.REGION_REFERENCE WHERE wRegionID=$SAFE_REGION_ID" | grep -qx '1'
+
           HASH="$(python3 - <<'PY'
           import bcrypt, os
           print(bcrypt.hashpw(os.environ['TEST_LOGIN_PASSWORD'].encode(), bcrypt.gensalt(rounds=12)).decode())
           PY
           )"
-          docker exec ph90-gw-v219-mysql mysql -uroot -e "DELETE FROM SRO_ACCOUNT.USER WHERE USERNAME='$TEST_USERNAME'; INSERT INTO SRO_ACCOUNT.USER(USERNAME,PASSWORD,MAIL,STATUS,IS_GM) VALUES('$TEST_USERNAME','$HASH','test@example.invalid',1,0); SET @uid=LAST_INSERT_ID(); DELETE FROM SRO_SHARD.CHAR WHERE CHAR_NAME='$TEST_CHAR'; INSERT INTO SRO_SHARD.CHAR(REF_OBJ_ID,FK_USER,FK_SHARD,CHAR_NAME,CHAR_SCALE,CURRENT_LEVEL,EXP,SKILL_EXP,STRENGTH,INTELLECT,STAT_POINTS,HP,MP,DELETING,POS_X,POS_Y,POS_Z,FK_REGION,SKILL_POINTS,MAX_LEVEL) VALUES(1907,@uid,1,'$TEST_CHAR',100,1,0,0,20,20,0,200,200,0,950,40,1091,0x62A8,0,1);"
+          docker exec ph90-gw-v219-mysql mysql -uroot -e "DELETE FROM SRO_ACCOUNT.USER WHERE USERNAME='$TEST_USERNAME'; INSERT INTO SRO_ACCOUNT.USER(USERNAME,PASSWORD,MAIL,STATUS,IS_GM) VALUES('$TEST_USERNAME','$HASH','test@example.invalid',1,0); SET @uid=LAST_INSERT_ID(); DELETE FROM SRO_SHARD.CHAR WHERE CHAR_NAME='$TEST_CHAR'; INSERT INTO SRO_SHARD.CHAR(REF_OBJ_ID,FK_USER,FK_SHARD,CHAR_NAME,CHAR_SCALE,CURRENT_LEVEL,EXP,SKILL_EXP,STRENGTH,INTELLECT,STAT_POINTS,HP,MP,DELETING,POS_X,POS_Y,POS_Z,FK_REGION,SKILL_POINTS,MAX_LEVEL) VALUES(1907,@uid,1,'$TEST_CHAR',100,1,0,0,20,20,0,200,200,0,950,40,1091,$SAFE_REGION_ID,0,1);"
           docker exec ph90-gw-v219-mysql mysql -uroot -Nse "SELECT ID,USERNAME FROM SRO_ACCOUNT.USER WHERE USERNAME='$TEST_USERNAME'; SELECT ID,REF_OBJ_ID,CHAR_NAME,FK_REGION FROM SRO_SHARD.CHAR WHERE CHAR_NAME='$TEST_CHAR';" | tee "$ROOT/seed.txt"
 
       - name: Start Agent skip299 then Gateway TEST
@@ -244,6 +269,7 @@ jobs:
         run: |
           ROOT="$RUNNER_TEMP/ph90-gw-v219"
           {
+            echo '=== region selection ==='; cat "$ROOT/region-selection.txt" 2>/dev/null || true
             echo '=== gateway-agent ==='; cat "$ROOT/gateway-agent.txt" 2>/dev/null || true
             echo '=== probe ==='; cat "$ROOT/probe-summary.txt" 2>/dev/null || true
             echo '=== agent 5min ==='; cat "$ROOT/agent-5min.txt" 2>/dev/null || true
@@ -262,6 +288,7 @@ jobs:
             ${{ runner.temp }}/ph90-gw-v219/provenance.txt
             ${{ runner.temp }}/ph90-gw-v219/skip299-summary.txt
             ${{ runner.temp }}/ph90-gw-v219/skip299-paths.tsv
+            ${{ runner.temp }}/ph90-gw-v219/region-selection.txt
             ${{ runner.temp }}/ph90-gw-v219/seed.txt
             ${{ runner.temp }}/ph90-gw-v219/gateway-agent.txt
             ${{ runner.temp }}/ph90-gw-v219/probe.log

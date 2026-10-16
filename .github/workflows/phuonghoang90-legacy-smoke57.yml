@@ -1,4 +1,4 @@
-name: Smoke PHUONGHOANG90 legacy TCP server on MySQL57
+name: Smoke PHUONGHOANG90 legacy TCP server on MySQL8 native auth
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  smoke57:
+  smoke-native:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90legacy57"
+          ROOT="$RUNNER_TEMP/ph90legacy"
           mkdir -p "$ROOT/game"
           cd "$ROOT"
           ~/.local/bin/gdown "$DRIVE_FILE_ID" -O PHUONGHOANG90.rar
@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90legacy57"
+          ROOT="$RUNNER_TEMP/ph90legacy"
           git clone https://github.com/ferdoran/go-sro.git "$ROOT/go-sro"
           cd "$ROOT/go-sro"
           git checkout "$GOSRO_COMMIT"
@@ -64,39 +64,41 @@ jobs:
           test -s "$ROOT/gateway-server"
           test -s "$ROOT/agent-server"
 
-      - name: Start isolated MySQL 5.7
+      - name: Start isolated MySQL 8 with native password auth
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90legacy57"
-          docker rm -f ph90-mysql57 >/dev/null 2>&1 || true
-          docker run -d --name ph90-mysql57 \
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          docker rm -f ph90-mysql >/dev/null 2>&1 || true
+          docker run -d --name ph90-mysql \
             -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
             -e MYSQL_ROOT_HOST=% \
-            -p 127.0.0.1:33307:3306 \
+            -p 127.0.0.1:33306:3306 \
             -v "$ROOT/go-sro/db:/docker-entrypoint-initdb.d:ro" \
-            mysql:5.7
+            mysql:8.0 --default-authentication-plugin=mysql_native_password
           for i in $(seq 1 90); do
-            if docker exec ph90-mysql57 mysqladmin ping -uroot --silent >/dev/null 2>&1; then break; fi
+            if docker exec ph90-mysql mysqladmin ping -uroot --silent >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          docker exec ph90-mysql57 mysqladmin ping -uroot --silent
+          docker exec ph90-mysql mysqladmin ping -uroot --silent
+          READY=0
           for i in $(seq 1 90); do
-            if docker exec ph90-mysql57 mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then break; fi
+            if docker exec ph90-mysql mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then READY=1; break; fi
             sleep 2
           done
-          docker exec ph90-mysql57 mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219', STATUS=1 WHERE ID=1;"
-          docker exec ph90-mysql57 mysql -uroot -e 'SELECT * FROM SRO_ACCOUNT.SHARD;'
+          test "$READY" = 1
+          docker exec ph90-mysql mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219', STATUS=1 WHERE ID=1;"
+          docker exec ph90-mysql mysql -uroot -e 'SELECT * FROM SRO_ACCOUNT.SHARD;'
 
       - name: Start Agent
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90legacy57"
+          ROOT="$RUNNER_TEMP/ph90legacy"
           DATA="$ROOT/game/PHUONGHOANG90/Data.pk2"
           env \
-            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33307 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
-            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33307 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
             AGENT_HOST=127.0.0.1 AGENT_PORT=15882 AGENT_DATA_PATH="$DATA" AGENT_PRELINKED_NAVDATA_FILE="$ROOT/no-prelinked-nav.gob" \
             LOG_LEVEL=debug \
             "$ROOT/agent-server" >"$ROOT/agent.log" 2>&1 &
@@ -113,10 +115,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90legacy57"
+          ROOT="$RUNNER_TEMP/ph90legacy"
           env \
-            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33307 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
-            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33307 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
             AGENT_HOST=127.0.0.1 AGENT_PUBLIC_IP=127.0.0.1 AGENT_PORT=15882 \
             GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=15779 LOG_LEVEL=debug \
             "$ROOT/gateway-server" >"$ROOT/gateway.log" 2>&1 &
@@ -133,7 +135,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90legacy57"
+          ROOT="$RUNNER_TEMP/ph90legacy"
           nc -zv 127.0.0.1 15779 2>&1 | tee "$ROOT/gateway-port.txt"
           nc -zv 127.0.0.1 15882 2>&1 | tee "$ROOT/agent-port.txt"
           {
@@ -143,19 +145,19 @@ jobs:
             echo GATEWAY_PORT=15779
             echo AGENT_PORT=15882
             cat "$ROOT/provenance.txt"
-          } | tee "$ROOT/legacy57-report.txt"
+          } | tee "$ROOT/legacy-report.txt"
 
       - name: Upload smoke report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-legacy57-smoke
+          name: PHUONGHOANG90-legacy-native-smoke
           retention-days: 7
           if-no-files-found: warn
           path: |
-            ${{ runner.temp }}/ph90legacy57/legacy57-report.txt
-            ${{ runner.temp }}/ph90legacy57/provenance.txt
-            ${{ runner.temp }}/ph90legacy57/agent.log
-            ${{ runner.temp }}/ph90legacy57/gateway.log
-            ${{ runner.temp }}/ph90legacy57/gateway-port.txt
-            ${{ runner.temp }}/ph90legacy57/agent-port.txt
+            ${{ runner.temp }}/ph90legacy/legacy-report.txt
+            ${{ runner.temp }}/ph90legacy/provenance.txt
+            ${{ runner.temp }}/ph90legacy/agent.log
+            ${{ runner.temp }}/ph90legacy/gateway.log
+            ${{ runner.temp }}/ph90legacy/gateway-port.txt
+            ${{ runner.temp }}/ph90legacy/agent-port.txt

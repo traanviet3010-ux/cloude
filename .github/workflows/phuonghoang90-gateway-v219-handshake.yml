@@ -73,7 +73,7 @@ jobs:
             find "$INITDIR" -maxdepth 1 -type f -name '*.sql' -print0 | sort -z | xargs -0 sha256sum
           } | tee "$ROOT/init-files.txt"
 
-      - name: Start isolated MySQL and wait for init
+      - name: Start isolated MySQL and wait for FINAL server
         shell: bash
         run: |
           set -euxo pipefail
@@ -87,19 +87,20 @@ jobs:
             -v "$INITDIR:/docker-entrypoint-initdb.d:ro" \
             mysql:8.0 --default-authentication-plugin=mysql_native_password
 
-          READY=0
-          for i in $(seq 1 120); do
-            if docker exec ph90-mysql-region-diag mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then
-              READY=1
+          FINAL_READY=0
+          for i in $(seq 1 180); do
+            docker logs ph90-mysql-region-diag > "$ROOT/mysql-init-current.log" 2>&1 || true
+            if grep -q 'MySQL init process done. Ready for start up.' "$ROOT/mysql-init-current.log" \
+               && mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -uroot ping --silent >/dev/null 2>&1 \
+               && mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then
+              FINAL_READY=1
               break
             fi
             sleep 2
           done
-          test "$READY" = 1
-          sleep 2
-
+          test "$FINAL_READY" = 1
           docker logs ph90-mysql-region-diag > "$ROOT/mysql-init-current.log" 2>&1
-          echo 'MYSQL_INIT_READY=1'
+          echo 'MYSQL_FINAL_SERVER_READY=1'
 
       - name: Read-only schema diagnostics
         shell: bash
@@ -109,38 +110,40 @@ jobs:
 
           {
             echo '=== (1) lower_case_table_names ==='
-            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW VARIABLES LIKE 'lower_case_table_names';"
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SHOW VARIABLES LIKE 'lower_case_table_names';"
 
             echo '=== (2a) SHOW TABLES FROM SRO_SHARD (FULL) ==='
-            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW TABLES FROM SRO_SHARD;"
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SHOW TABLES FROM SRO_SHARD;"
 
             echo '=== (2b) SHOW TABLES FROM SRO_SHARD LIKE %REGION% ==='
-            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW TABLES FROM SRO_SHARD LIKE '%REGION%';"
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SHOW TABLES FROM SRO_SHARD LIKE '%REGION%';"
 
             echo '=== (3) SHOW CREATE TABLE SRO_SHARD.CHAR ==='
-            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW CREATE TABLE SRO_SHARD.CHAR\G"
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SHOW CREATE TABLE SRO_SHARD.CHAR\G"
 
             echo '=== FK_REGION metadata from information_schema ==='
-            docker exec ph90-mysql-region-diag mysql -uroot -e "SELECT CONSTRAINT_NAME,TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,REFERENCED_TABLE_SCHEMA,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='SRO_SHARD' AND TABLE_NAME='CHAR' AND CONSTRAINT_NAME='FK_REGION';"
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT CONSTRAINT_NAME,TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,REFERENCED_TABLE_SCHEMA,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='SRO_SHARD' AND TABLE_NAME='CHAR' AND CONSTRAINT_NAME='FK_REGION';"
           } | tee "$ROOT/schema-diagnostic.txt"
 
-          REGION_TABLE="$(docker exec ph90-mysql-region-diag mysql -uroot -Nse "SELECT REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='SRO_SHARD' AND TABLE_NAME='CHAR' AND CONSTRAINT_NAME='FK_REGION' LIMIT 1;")"
+          REGION_TABLE="$(mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -Nse "SELECT REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='SRO_SHARD' AND TABLE_NAME='CHAR' AND CONSTRAINT_NAME='FK_REGION' LIMIT 1;")"
           test -n "$REGION_TABLE"
-          REGION_ROWS="$(docker exec ph90-mysql-region-diag mysql -uroot -Nse "SELECT COUNT(*) FROM SRO_SHARD.\`$REGION_TABLE\`;" )"
+          REGION_ROWS="$(mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -Nse "SELECT COUNT(*) FROM SRO_SHARD.\`$REGION_TABLE\`;" )"
 
           {
             echo "ACTUAL_REGION_TABLE=$REGION_TABLE"
             echo "ACTUAL_REGION_ROW_COUNT=$REGION_ROWS"
             echo '=== actual region table sample (first 10 rows) ==='
-            docker exec ph90-mysql-region-diag mysql -uroot -e "SELECT * FROM SRO_SHARD.\`$REGION_TABLE\` LIMIT 10;"
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT * FROM SRO_SHARD.\`$REGION_TABLE\` LIMIT 10;"
           } | tee "$ROOT/region-table-result.txt"
 
       - name: Inspect current MySQL init log
+        if: always()
         shell: bash
         run: |
           set -euxo pipefail
           ROOT="$RUNNER_TEMP/ph90-mysql-region-diag"
           LOG="$ROOT/mysql-init-current.log"
+          test -f "$LOG"
 
           {
             echo '=== CURRENT RUN: entrypoint SQL execution lines ==='
@@ -149,11 +152,14 @@ jobs:
             grep -Ein 'error|failed|failure|skip|ignored|warning' "$LOG" || true
             echo '=== CURRENT RUN: create_sro_shard mentions ==='
             grep -Ein 'create_sro_shard' "$LOG" || true
-            echo '=== CURRENT RUN: final 120 init-log lines ==='
-            tail -n 120 "$LOG"
+            echo '=== CURRENT RUN: init completion markers ==='
+            grep -Ein 'MySQL init process done|ready for connections|Temporary server stopped' "$LOG" || true
+            echo '=== CURRENT RUN: final 160 init-log lines ==='
+            tail -n 160 "$LOG"
           } | tee "$ROOT/mysql-init-current-summary.txt"
 
       - name: Compare MySQL init visibility with run 1
+        if: always()
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -179,7 +185,7 @@ jobs:
               echo 'RUN1_CONTAINER_ENTRYPOINT_LOG_CAPTURED=NO'
             fi
             echo '=== CURRENT RUN: did workflow capture container entrypoint execution? ==='
-            if grep -qi 'running /docker-entrypoint-initdb.d' "$ROOT/mysql-init-current.log"; then
+            if grep -q 'running /docker-entrypoint-initdb.d' "$ROOT/mysql-init-current.log"; then
               echo 'CURRENT_CONTAINER_ENTRYPOINT_LOG_CAPTURED=YES'
             else
               echo 'CURRENT_CONTAINER_ENTRYPOINT_LOG_CAPTURED=NO'

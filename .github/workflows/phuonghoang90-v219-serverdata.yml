@@ -58,7 +58,7 @@ jobs:
           corepack pnpm assets prepare
           corepack pnpm assets doctor
 
-      - name: Preserve v219 native localization for server projection
+      - name: Preserve v219 localization and fill required item title cells
         run: |
           set -euxo pipefail
           FILE="$RUNNER_TEMP/ph219sd/opensro/scripts/build/shared/englishCompletions.mjs"
@@ -70,7 +70,26 @@ jobs:
           marker = 'export function completeEnglishTextProjection( fileName, bytes ) {\n'
           if marker not in s:
               raise SystemExit('projection function not found')
-          p.write_text(s.replace(marker, marker + '\treturn bytes; // v219 uses its own retail localization\n', 1))
+          patch = r'''
+          {
+            const nativeName = fileName.toLowerCase();
+            if ( nativeName !== "textdataname.txt" ) return bytes;
+            const nativeUtf16 = bytes[0] === 0xff && bytes[1] === 0xfe;
+            const nativeEncoding = nativeUtf16 ? "utf16le" : "utf8";
+            const validNativeTitle = value => typeof value === "string" && value.trim() && !/^(?:-|xxx|null|0)$/i.test( value.trim() );
+            const nativeText = bytes.toString( nativeEncoding ).replace( /[^\r]+/g, record => {
+              if ( record.trimStart().startsWith( "//" ) ) return record;
+              const columns = record.split( "\t" );
+              if ( columns.length < 9 || validNativeTitle( columns[8] ) ) return record;
+              const fallback = [7, 6, 5, 4, 3, 2].map( index => columns[index] ).find( validNativeTitle );
+              if ( !fallback ) return record;
+              columns[8] = fallback;
+              return columns.join( "\t" );
+            } );
+            return Buffer.from( nativeText, nativeEncoding );
+          }
+          '''
+          p.write_text(s.replace(marker, marker + patch, 1))
           PY
 
       - name: Build server data and Linux services

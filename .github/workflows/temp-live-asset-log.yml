@@ -4,14 +4,13 @@ on:
     branches: [hieusro-secure-vps-ops]
     paths:
       - '.github/workflows/temp-live-asset-log.yml'
-      - '.github/scripts/temp-live-asset-log-enable.sh'
 permissions:
   contents: read
 jobs:
   assetlog:
     runs-on: ubuntu-24.04
     environment: hieusro-vps
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout operations script
         uses: actions/checkout@v4
@@ -28,13 +27,13 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
           ssh-keygen -F 143.198.217.75 -f ~/.ssh/known_hosts >/dev/null
-      - name: Enable logging-only nginx capture
+      - name: Read-only manifest/cache diagnosis
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' \
-            < .github/scripts/temp-live-asset-log-enable.sh
+            < .github/scripts/diagnose-live-manifest-cache.sh
       - name: Remove key
         if: always()
         run: rm -f ~/.ssh/id_ed25519

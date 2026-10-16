@@ -1,0 +1,184 @@
+name: Smoke PHUONGHOANG90 legacy TCP server
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-legacy-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      EXPECTED_SIZE: '1792674229'
+      EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      GOSRO_COMMIT: 7507c9210da1fb44b3c221f8e30568e26fba68dc
+
+    steps:
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar python3-pip netcat-openbsd default-mysql-client git
+          python3 -m pip install --user --break-system-packages gdown
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.18.10'
+
+      - name: Download exact PHUONGHOANG90 archive only
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          mkdir -p "$ROOT/game"
+          cd "$ROOT"
+          ~/.local/bin/gdown "$DRIVE_FILE_ID" -O PHUONGHOANG90.rar
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$EXPECTED_SIZE"
+          ACTUAL_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
+          unrar x -o+ -idq PHUONGHOANG90.rar 'PHUONGHOANG90/Data.pk2' game/
+          test -s "$ROOT/game/PHUONGHOANG90/Data.pk2"
+          printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
+          sha256sum "$ROOT/game/PHUONGHOANG90/Data.pk2" | tee Data.pk2.sha256
+
+      - name: Checkout pinned legacy vSRO server
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          git clone https://github.com/ferdoran/go-sro.git "$ROOT/go-sro"
+          cd "$ROOT/go-sro"
+          git checkout "$GOSRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
+
+      - name: Build Gateway and Agent
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          cd "$ROOT/go-sro"
+          go mod download
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/gateway-server" gateway-server/server.go
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/agent-server" agent-server/server.go
+          test -s "$ROOT/gateway-server"
+          test -s "$ROOT/agent-server"
+          file "$ROOT/gateway-server" "$ROOT/agent-server" | tee "$ROOT/binaries.txt"
+          sha256sum "$ROOT/gateway-server" "$ROOT/agent-server" | tee "$ROOT/binaries.sha256"
+
+      - name: Start isolated MySQL test DB
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          docker rm -f ph90-mysql >/dev/null 2>&1 || true
+          docker run -d --name ph90-mysql \
+            -e MYSQL_ROOT_PASSWORD=ph90root \
+            -e MYSQL_USER=sro \
+            -e MYSQL_PASSWORD=1234 \
+            -p 127.0.0.1:33306:3306 \
+            -v "$ROOT/go-sro/db:/docker-entrypoint-initdb.d:ro" \
+            mysql:8.0
+          for i in $(seq 1 90); do
+            if docker exec ph90-mysql mysqladmin ping -uroot -pph90root --silent >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec ph90-mysql mysqladmin ping -uroot -pph90root --silent
+          for i in $(seq 1 90); do
+            if docker exec ph90-mysql mysql -uroot -pph90root -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec ph90-mysql mysql -uroot -pph90root -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219', STATUS=1 WHERE ID=1; UPDATE SRO_ACCOUNT.USER SET USERNAME='hieu', PASSWORD='\$2a\$12\$rW6Ska0DaVjTX/8sQGCp/.y7kl2RvF.9936Hmm27HyI0cJ78q1UOG', MAIL='hieu@test.local', STATUS=1, IS_GM=1 WHERE ID=2;"
+          docker exec ph90-mysql mysql -uroot -pph90root -e 'SELECT * FROM SRO_ACCOUNT.SHARD; SELECT ID,USERNAME,STATUS,IS_GM FROM SRO_ACCOUNT.USER;'
+
+      - name: Start Agent on isolated localhost
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          DATA="$ROOT/game/PHUONGHOANG90/Data.pk2"
+          (
+            tail -f /dev/null | env \
+              DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW=1234 DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+              DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW=1234 DB_SHARD_DATABASE=SRO_SHARD \
+              AGENT_HOST=127.0.0.1 AGENT_PORT=15882 AGENT_DATA_PATH="$DATA" AGENT_PRELINKED_NAVDATA_FILE="$ROOT/no-prelinked-nav.gob" \
+              LOG_LEVEL=debug \
+              "$ROOT/agent-server"
+          ) >"$ROOT/agent.log" 2>&1 &
+          echo $! > "$ROOT/agent.pid"
+          for i in $(seq 1 120); do
+            if nc -z 127.0.0.1 15882; then exit 0; fi
+            if ! kill -0 "$(cat "$ROOT/agent.pid")" 2>/dev/null; then cat "$ROOT/agent.log"; exit 1; fi
+            sleep 2
+          done
+          cat "$ROOT/agent.log"
+          exit 1
+
+      - name: Start Gateway on isolated localhost
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          (
+            tail -f /dev/null | env \
+              DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW=1234 DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+              DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW=1234 DB_SHARD_DATABASE=SRO_SHARD \
+              AGENT_HOST=127.0.0.1 AGENT_PUBLIC_IP=127.0.0.1 AGENT_PORT=15882 \
+              GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=15779 LOG_LEVEL=debug \
+              "$ROOT/gateway-server"
+          ) >"$ROOT/gateway.log" 2>&1 &
+          echo $! > "$ROOT/gateway.pid"
+          for i in $(seq 1 60); do
+            if nc -z 127.0.0.1 15779; then exit 0; fi
+            if ! kill -0 "$(cat "$ROOT/gateway.pid")" 2>/dev/null; then cat "$ROOT/gateway.log"; exit 1; fi
+            sleep 1
+          done
+          cat "$ROOT/gateway.log"
+          exit 1
+
+      - name: Verify legacy TCP stack
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          nc -zv 127.0.0.1 15779 2>&1 | tee "$ROOT/gateway-port.txt"
+          nc -zv 127.0.0.1 15882 2>&1 | tee "$ROOT/agent-port.txt"
+          grep -Eai 'error|panic|fatal' "$ROOT/agent.log" "$ROOT/gateway.log" | tee "$ROOT/errors.txt" || true
+          {
+            echo PHUONGHOANG90_LEGACY_SMOKE_OK=1
+            echo CLIENT_VERSION=219
+            echo CONTENT_ID=22
+            echo GATEWAY_PORT=15779
+            echo AGENT_PORT=15882
+            echo TEST_USERNAME=hieu
+            echo 'TEST_PASSWORD=MyPassword123!!##'
+            cat "$ROOT/provenance.txt"
+            cat "$ROOT/binaries.txt"
+          } | tee "$ROOT/legacy-smoke-report.txt"
+
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-legacy-smoke
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ph90legacy/legacy-smoke-report.txt
+            ${{ runner.temp }}/ph90legacy/provenance.txt
+            ${{ runner.temp }}/ph90legacy/Data.pk2.sha256
+            ${{ runner.temp }}/ph90legacy/binaries.txt
+            ${{ runner.temp }}/ph90legacy/binaries.sha256
+            ${{ runner.temp }}/ph90legacy/agent.log
+            ${{ runner.temp }}/ph90legacy/gateway.log
+            ${{ runner.temp }}/ph90legacy/errors.txt
+            ${{ runner.temp }}/ph90legacy/gateway-port.txt
+            ${{ runner.temp }}/ph90legacy/agent-port.txt

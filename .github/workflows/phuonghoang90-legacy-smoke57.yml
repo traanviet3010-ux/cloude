@@ -34,7 +34,7 @@ jobs:
         with:
           go-version: '1.22.12'
 
-      - name: Download exact archive and extract Data.pk2
+      - name: Download exact archive and extract all PK2 files
         shell: bash
         run: |
           set -euxo pipefail
@@ -45,8 +45,13 @@ jobs:
           test "$(stat -c %s PHUONGHOANG90.rar)" = "$EXPECTED_SIZE"
           ACTUAL_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
-          unrar x -o+ -idq PHUONGHOANG90.rar 'PHUONGHOANG90/Data.pk2' game/
+          unrar lb PHUONGHOANG90.rar | grep -Ei '\.pk2$' | tee "$ROOT/client-pk2-in-rar.txt"
+          test -s "$ROOT/client-pk2-in-rar.txt"
+          while IFS= read -r member; do
+            unrar x -o+ -idq PHUONGHOANG90.rar "$member" game/
+          done < "$ROOT/client-pk2-in-rar.txt"
           test -s "$ROOT/game/PHUONGHOANG90/Data.pk2"
+          find "$ROOT/game/PHUONGHOANG90" -maxdepth 1 -type f -iname '*.pk2' -printf '%f\t%s\n' | sort | tee "$ROOT/extracted-pk2-files.txt"
           printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
 
       - name: Checkout patch DB driver and skip missing item catalog for network probe
@@ -75,6 +80,355 @@ jobs:
           test -s "$ROOT/gateway-server"
           test -s "$ROOT/agent-server"
 
+      - name: Read-only audit of PK2 and NVM resource references
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          DIAG="$ROOT/ph90diag"
+          mkdir -p "$DIAG"
+          cat > "$DIAG/go.mod" <<EOF
+          module ph90diag
+
+          go 1.22
+
+          require github.com/ferdoran/go-sro v0.0.0
+
+          replace github.com/ferdoran/go-sro => $ROOT/go-sro
+          EOF
+          cat > "$DIAG/main.go" <<'EOF'
+          package main
+
+          import (
+              "bufio"
+              "encoding/binary"
+              "fmt"
+              "os"
+              "path/filepath"
+              "sort"
+              "strconv"
+              "strings"
+
+              "github.com/ferdoran/go-sro/framework/pk2"
+          )
+
+          type hit struct {
+              Archive string
+              Key     string
+          }
+
+          type objInfo struct {
+              Index uint32
+              Path  string
+          }
+
+          func norm(s string) string {
+              s = strings.ReplaceAll(s, "\\", "/")
+              for strings.Contains(s, "//") {
+                  s = strings.ReplaceAll(s, "//", "/")
+              }
+              s = strings.TrimPrefix(s, "./")
+              return strings.ToLower(s)
+          }
+
+          func cleanSep(s string) string {
+              s = strings.ReplaceAll(s, "\\", "/")
+              for strings.Contains(s, "//") {
+                  s = strings.ReplaceAll(s, "//", "/")
+              }
+              return strings.TrimPrefix(s, "./")
+          }
+
+          func relAfterRoot(s string) string {
+              n := norm(s)
+              if i := strings.IndexByte(n, '/'); i >= 0 && i+1 < len(n) {
+                  return n[i+1:]
+              }
+              return n
+          }
+
+          func indexArchive(p string) (r *pk2.Pk2Reader, err error) {
+              defer func() {
+                  if v := recover(); v != nil {
+                      err = fmt.Errorf("panic: %v", v)
+                      r = nil
+                  }
+              }()
+              x := pk2.NewPk2Reader(p)
+              x.IndexArchive()
+              return &x, nil
+          }
+
+          func parseObjectInfo(data []byte) (map[uint32]objInfo, error) {
+              sc := bufio.NewScanner(strings.NewReader(string(data)))
+              if !sc.Scan() || strings.TrimSpace(sc.Text()) != "JMXVOBJI1000" {
+                  return nil, fmt.Errorf("invalid object.ifo header")
+              }
+              if !sc.Scan() {
+                  return nil, fmt.Errorf("missing object.ifo count")
+              }
+              count, err := strconv.Atoi(strings.TrimSpace(sc.Text()))
+              if err != nil {
+                  return nil, err
+              }
+              out := make(map[uint32]objInfo, count)
+              for i := 0; i < count; i++ {
+                  if !sc.Scan() {
+                      return nil, fmt.Errorf("object.ifo EOF at %d/%d", i, count)
+                  }
+                  line := sc.Text()
+                  if len(line) < 19 {
+                      return nil, fmt.Errorf("short object.ifo line %d", i)
+                  }
+                  idx64, err := strconv.ParseUint(line[:5], 10, 32)
+                  if err != nil {
+                      return nil, fmt.Errorf("object.ifo index line %d: %w", i, err)
+                  }
+                  p := strings.ReplaceAll(line[18:], "\"", "")
+                  out[uint32(idx64)] = objInfo{Index: uint32(idx64), Path: p}
+              }
+              return out, sc.Err()
+          }
+
+          func parseNVMObjectIDs(data []byte) ([]uint32, error) {
+              if len(data) < 14 {
+                  return nil, fmt.Errorf("too short")
+              }
+              if string(data[:12]) != "JMXVNVM 1000" {
+                  return nil, fmt.Errorf("invalid signature %q", string(data[:12]))
+              }
+              pos := 12
+              count := int(binary.LittleEndian.Uint16(data[pos : pos+2]))
+              pos += 2
+              ids := make([]uint32, 0, count)
+              for i := 0; i < count; i++ {
+                  if pos+32 > len(data) {
+                      return nil, fmt.Errorf("object %d fixed record exceeds file", i)
+                  }
+                  id := binary.LittleEndian.Uint32(data[pos : pos+4])
+                  linkCount := int(binary.LittleEndian.Uint16(data[pos+30 : pos+32]))
+                  ids = append(ids, id)
+                  pos += 32
+                  skip := linkCount * 6
+                  if pos+skip > len(data) {
+                      return nil, fmt.Errorf("object %d edge links exceed file", i)
+                  }
+                  pos += skip
+              }
+              return ids, nil
+          }
+
+          func levenshtein(a, b string) int {
+              ra, rb := []rune(a), []rune(b)
+              prev := make([]int, len(rb)+1)
+              cur := make([]int, len(rb)+1)
+              for j := range prev { prev[j] = j }
+              for i := 1; i <= len(ra); i++ {
+                  cur[0] = i
+                  for j := 1; j <= len(rb); j++ {
+                      cost := 0
+                      if ra[i-1] != rb[j-1] { cost = 1 }
+                      x := prev[j] + 1
+                      if cur[j-1]+1 < x { x = cur[j-1]+1 }
+                      if prev[j-1]+cost < x { x = prev[j-1]+cost }
+                      cur[j] = x
+                  }
+                  prev, cur = cur, prev
+              }
+              return prev[len(rb)]
+          }
+
+          func writeLines(path string, lines []string) error {
+              sort.Strings(lines)
+              return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+          }
+
+          func main() {
+              if len(os.Args) != 3 {
+                  panic("usage: ph90diag <pk2-dir> <out-dir>")
+              }
+              pk2Dir, outDir := os.Args[1], os.Args[2]
+              paths, err := filepath.Glob(filepath.Join(pk2Dir, "*.pk2"))
+              if err != nil { panic(err) }
+              sort.Strings(paths)
+              if len(paths) == 0 { panic("no pk2 files") }
+
+              allNorm := map[string][]hit{}
+              allRel := map[string][]hit{}
+              var dataReader *pk2.Pk2Reader
+              var dataPath string
+              var pk2Stats []string
+              indexed, indexErrors := 0, 0
+
+              for _, p := range paths {
+                  r, err := indexArchive(p)
+                  if err != nil {
+                      indexErrors++
+                      pk2Stats = append(pk2Stats, fmt.Sprintf("ERROR\t%s\t%v", filepath.Base(p), err))
+                      continue
+                  }
+                  indexed++
+                  pk2Stats = append(pk2Stats, fmt.Sprintf("OK\t%s\t%d", filepath.Base(p), len(r.Files)))
+                  if strings.EqualFold(filepath.Base(p), "Data.pk2") {
+                      dataReader, dataPath = r, p
+                  }
+                  for key := range r.Files {
+                      h := hit{Archive: filepath.Base(p), Key: cleanSep(key)}
+                      allNorm[norm(key)] = append(allNorm[norm(key)], h)
+                      allRel[relAfterRoot(key)] = append(allRel[relAfterRoot(key)], h)
+                  }
+              }
+              if err := writeLines(filepath.Join(outDir, "pk2-index-stats.txt"), pk2Stats); err != nil { panic(err) }
+              if dataReader == nil { panic("Data.pk2 failed to index") }
+
+              target := "Data/res/bldg/arabia/bagh_petra/bagh_petra_obj02.bsr"
+              targetNorm := norm(target)
+              targetBase := filepath.Base(targetNorm)
+              var bagh, targetMatches []string
+              targetExactHits := len(allNorm[targetNorm])
+              targetBaseHits := 0
+              seenNear := map[string]bool{}
+
+              for n, hits := range allNorm {
+                  base := filepath.Base(n)
+                  inBagh := strings.Contains(n, "/bagh_petra/")
+                  near := base == targetBase || strings.Contains(n, "bagh_petra") || levenshtein(base, targetBase) <= 3
+                  for _, h := range hits {
+                      line := h.Archive + "\t" + h.Key
+                      if inBagh { bagh = append(bagh, line) }
+                      if base == targetBase { targetBaseHits++ }
+                      if near && !seenNear[line] {
+                          seenNear[line] = true
+                          targetMatches = append(targetMatches, fmt.Sprintf("%d\t%s", levenshtein(base, targetBase), line))
+                      }
+                  }
+              }
+              writeLines(filepath.Join(outDir, "bagh-petra-files.txt"), bagh)
+              writeLines(filepath.Join(outDir, "bagh-petra-target-matches.txt"), targetMatches)
+
+              objBytes, err := dataReader.ReadFile("Data/navmesh/object.ifo")
+              if err != nil { panic(err) }
+              objects, err := parseObjectInfo(objBytes)
+              if err != nil { panic(err) }
+
+              var nvmKeys []string
+              for key := range dataReader.Files {
+                  n := norm(key)
+                  if strings.HasSuffix(n, ".nvm") {
+                      nvmKeys = append(nvmKeys, key)
+                  }
+              }
+              sort.Strings(nvmKeys)
+
+              refCountByID := map[uint32]int{}
+              nvmOK, nvmParseErrors := 0, 0
+              var nvmErrors []string
+              totalRefOccurrences := 0
+              for _, key := range nvmKeys {
+                  entry := dataReader.Files[key]
+                  b := dataReader.ReadEntry(&entry)
+                  ids, err := parseNVMObjectIDs(b)
+                  if err != nil {
+                      nvmParseErrors++
+                      nvmErrors = append(nvmErrors, fmt.Sprintf("%s\t%v", cleanSep(key), err))
+                      continue
+                  }
+                  nvmOK++
+                  for _, id := range ids {
+                      refCountByID[id]++
+                      totalRefOccurrences++
+                  }
+              }
+              writeLines(filepath.Join(outDir, "nvm-parse-errors.txt"), nvmErrors)
+
+              unresolvedIDs := 0
+              uniqueExpected := map[string]bool{}
+              idsByExpected := map[string][]uint32{}
+              refsByExpected := map[string]int{}
+              for id, refs := range refCountByID {
+                  oi, ok := objects[id]
+                  if !ok {
+                      unresolvedIDs++
+                      continue
+                  }
+                  expected := cleanSep("Data/" + oi.Path)
+                  uniqueExpected[expected] = true
+                  idsByExpected[expected] = append(idsByExpected[expected], id)
+                  refsByExpected[expected] += refs
+              }
+
+              exactPresent := 0
+              exactMissing := 0
+              missingButCaseInsensitiveData := 0
+              missingButSameRelativeOtherPK2 := 0
+              missingRefOccurrences := 0
+              var missingLines []string
+              for expected := range uniqueExpected {
+                  if _, ok := dataReader.Files[expected]; ok {
+                      exactPresent++
+                      continue
+                  }
+                  exactMissing++
+                  missingRefOccurrences += refsByExpected[expected]
+                  n := norm(expected)
+                  ciData := 0
+                  for _, h := range allNorm[n] {
+                      if strings.EqualFold(h.Archive, filepath.Base(dataPath)) { ciData++ }
+                  }
+                  if ciData > 0 { missingButCaseInsensitiveData++ }
+                  relHits := allRel[relAfterRoot(expected)]
+                  other := 0
+                  var hitText []string
+                  for _, h := range relHits {
+                      if !strings.EqualFold(h.Archive, filepath.Base(dataPath)) { other++ }
+                      hitText = append(hitText, h.Archive+":"+h.Key)
+                  }
+                  if other > 0 { missingButSameRelativeOtherPK2++ }
+                  ids := idsByExpected[expected]
+                  sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+                  var idText []string
+                  for _, id := range ids { idText = append(idText, fmt.Sprint(id)) }
+                  missingLines = append(missingLines, fmt.Sprintf("%s\trefs=%d\tobject_ids=%s\tci_data_hits=%d\trel_hits=%s", expected, refsByExpected[expected], strings.Join(idText, ","), ciData, strings.Join(hitText, ";")))
+              }
+              writeLines(filepath.Join(outDir, "nvm-missing-direct-resources.tsv"), missingLines)
+
+              summary := []string{
+                  fmt.Sprintf("PK2_ARCHIVES=%d", len(paths)),
+                  fmt.Sprintf("PK2_INDEXED=%d", indexed),
+                  fmt.Sprintf("PK2_INDEX_ERRORS=%d", indexErrors),
+                  fmt.Sprintf("TARGET=%s", target),
+                  fmt.Sprintf("TARGET_EXACT_CASE_INSENSITIVE_ALL_PK2_HITS=%d", targetExactHits),
+                  fmt.Sprintf("TARGET_BASENAME_ALL_PK2_HITS=%d", targetBaseHits),
+                  fmt.Sprintf("BAGH_PETRA_FILES_ALL_PK2=%d", len(bagh)),
+                  fmt.Sprintf("OBJECT_INFO_ENTRIES=%d", len(objects)),
+                  fmt.Sprintf("NVM_FILES_TOTAL=%d", len(nvmKeys)),
+                  fmt.Sprintf("NVM_FILES_PARSED_OK=%d", nvmOK),
+                  fmt.Sprintf("NVM_FILES_PARSE_ERRORS=%d", nvmParseErrors),
+                  fmt.Sprintf("NVM_OBJECT_REFERENCE_OCCURRENCES=%d", totalRefOccurrences),
+                  fmt.Sprintf("NVM_UNIQUE_OBJECT_IDS=%d", len(refCountByID)),
+                  fmt.Sprintf("NVM_UNRESOLVED_OBJECT_IDS=%d", unresolvedIDs),
+                  fmt.Sprintf("NVM_UNIQUE_DIRECT_RESOURCE_PATHS=%d", len(uniqueExpected)),
+                  fmt.Sprintf("DIRECT_RESOURCES_PRESENT_EXACT_DATA=%d", exactPresent),
+                  fmt.Sprintf("DIRECT_RESOURCES_MISSING_EXACT_DATA=%d", exactMissing),
+                  fmt.Sprintf("DIRECT_MISSING_BUT_CASE_INSENSITIVE_DATA=%d", missingButCaseInsensitiveData),
+                  fmt.Sprintf("DIRECT_MISSING_BUT_SAME_RELATIVE_PATH_OTHER_PK2=%d", missingButSameRelativeOtherPK2),
+                  fmt.Sprintf("REFERENCE_OCCURRENCES_TO_MISSING_DIRECT_RESOURCES=%d", missingRefOccurrences),
+              }
+              if err := writeLines(filepath.Join(outDir, "ph90-resource-audit-summary.txt"), summary); err != nil { panic(err) }
+              fmt.Println(strings.Join(summary, "\n"))
+          }
+          EOF
+          cd "$DIAG"
+          go mod tidy
+          CGO_ENABLED=0 go run . "$ROOT/game/PHUONGHOANG90" "$ROOT" | tee "$ROOT/ph90-resource-audit-console.txt"
+          cat "$ROOT/ph90-resource-audit-summary.txt"
+          echo '=== bagh_petra files ==='
+          cat "$ROOT/bagh-petra-files.txt"
+          echo '=== bagh_petra target/near matches ==='
+          cat "$ROOT/bagh-petra-target-matches.txt"
+          echo '=== missing direct NVM resources ==='
+          cat "$ROOT/nvm-missing-direct-resources.tsv"
+
       - name: Start isolated MySQL 8
         shell: bash
         run: |
@@ -85,6 +439,7 @@ jobs:
           mkdir -p "$INITDIR"
           cp -a "$ROOT/go-sro/db/." "$INITDIR/"
 
+          set +x
           SRO_DB_PASSWORD="$(python3 - <<'PY'
           import secrets
           print(secrets.token_urlsafe(32))
@@ -93,6 +448,7 @@ jobs:
           echo "::add-mask::$SRO_DB_PASSWORD"
           export SRO_DB_PASSWORD
           printf 'SRO_DB_PASSWORD=%s\n' "$SRO_DB_PASSWORD" >> "$GITHUB_ENV"
+          set -x
 
           python3 - <<'PY'
           import os
@@ -243,3 +599,12 @@ jobs:
             ${{ runner.temp }}/ph90legacy/mysql-tcp-diagnostics.txt
             ${{ runner.temp }}/ph90legacy/mysql-docker.log
             ${{ runner.temp }}/ph90legacy/memory-free.txt
+            ${{ runner.temp }}/ph90legacy/client-pk2-in-rar.txt
+            ${{ runner.temp }}/ph90legacy/extracted-pk2-files.txt
+            ${{ runner.temp }}/ph90legacy/pk2-index-stats.txt
+            ${{ runner.temp }}/ph90legacy/ph90-resource-audit-summary.txt
+            ${{ runner.temp }}/ph90legacy/ph90-resource-audit-console.txt
+            ${{ runner.temp }}/ph90legacy/bagh-petra-files.txt
+            ${{ runner.temp }}/ph90legacy/bagh-petra-target-matches.txt
+            ${{ runner.temp }}/ph90legacy/nvm-parse-errors.txt
+            ${{ runner.temp }}/ph90legacy/nvm-missing-direct-resources.tsv

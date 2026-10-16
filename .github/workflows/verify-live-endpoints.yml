@@ -1,0 +1,60 @@
+name: Verify HieuSRO LIVE endpoints
+
+on:
+  push:
+    branches: [hieusro-live-verify-20261016]
+    paths: ['.github/workflows/verify-live-endpoints.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify LIVE endpoints read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE='https://play.143-198-217-75.sslip.io'
+
+          probe() {
+            name="$1"; url="$2"
+            echo "=== $name ==="
+            curl -k -sS -D "/tmp/${name}.headers" -o "/tmp/${name}.body" --max-time 20 "$url"
+            status=$(awk 'toupper($1) ~ /^HTTP\// {code=$2} END{print code}' "/tmp/${name}.headers")
+            ctype=$(awk 'BEGIN{IGNORECASE=1} /^content-type:/ {sub(/\r$/,""); print substr($0,15)}' "/tmp/${name}.headers" | tail -1)
+            echo "status=$status content-type=$ctype"
+            head -c 500 "/tmp/${name}.body" || true
+            echo
+          }
+
+          probe root "$LIVE/"
+          grep -Eqi '<!doctype|<html' /tmp/root.body
+          ! grep -q 'runtime gateway online' /tmp/root.body
+
+          probe gm "$LIVE/gm/"
+          grep -Eqi '<!doctype|<html' /tmp/gm.body
+
+          echo '=== title_servers ==='
+          curl -k -fsS -H 'X-OpenSRO-Protocol: 6' -D /tmp/title.headers -o /tmp/title.body --max-time 20 "$LIVE/api/title/servers"
+          awk 'toupper($1) ~ /^HTTP\// {print}' /tmp/title.headers
+          cat /tmp/title.body
+          echo
+          grep -q 'global-official' /tmp/title.body
+
+          echo '=== shard_http ==='
+          set +e
+          curl -k -sS -D /tmp/shard.headers -o /tmp/shard.body --max-time 20 "$LIVE/shards/global-official/"
+          shard_rc=$?
+          set -e
+          shard_status=$(awk 'toupper($1) ~ /^HTTP\// {code=$2} END{print code}' /tmp/shard.headers 2>/dev/null || true)
+          echo "curl_rc=$shard_rc status=${shard_status:-none}"
+          cat /tmp/shard.headers 2>/dev/null || true
+          head -c 500 /tmp/shard.body 2>/dev/null || true
+          echo
+          test "$shard_rc" -eq 0
+          test -n "${shard_status:-}"
+
+          echo 'HIEUSRO_LIVE_ENDPOINTS_VERIFIED=1'

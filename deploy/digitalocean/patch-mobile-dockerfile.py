@@ -49,5 +49,19 @@ RUN set -eux; \\
     grep -q 'hieusro-language.js' /opt/hieusro/client-edge/public/index.html
 """
 text = text[:start] + replacement + text[end:]
+
+# Install the asset prewarmer into the runtime image and create the Nginx cache
+# directory with the same ownership the Debian nginx workers use. The named
+# Docker volume inherits these permissions on first mount.
+asset_anchor = "COPY allinone-start.sh /opt/hieusro/allinone-start.sh\n"
+asset_replacement = asset_anchor + """COPY prewarm-assets.py /opt/hieusro/prewarm-assets.py
+RUN mkdir -p /var/cache/hieusro-assets \\
+ && chown -R www-data:www-data /var/cache/hieusro-assets \\
+ && chmod +x /opt/hieusro/prewarm-assets.py
+"""
+if asset_anchor not in text:
+    raise SystemExit("asset mirror runtime anchor changed")
+text = text.replace(asset_anchor, asset_replacement, 1)
+
 path.write_text(text, encoding="utf-8")
-print("Patched Dockerfile: pinned source client + iOS asset backpressure + diagnostics")
+print("Patched Dockerfile: pinned mobile client + persistent asset mirror prewarmer")

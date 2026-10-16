@@ -44,7 +44,7 @@ jobs:
           echo
           grep -q 'global-official' /tmp/title.body
 
-          echo '=== shard_http ==='
+          echo '=== shard_root_http ==='
           set +e
           curl -k -sS -D /tmp/shard.headers -o /tmp/shard.body --max-time 20 "$LIVE/shards/global-official/"
           shard_rc=$?
@@ -56,5 +56,23 @@ jobs:
           echo
           test "$shard_rc" -eq 0
           test -n "${shard_status:-}"
+
+          echo '=== shard_websocket ==='
+          set +e
+          curl -k --http1.1 -sS -D /tmp/ws.headers -o /tmp/ws.body --max-time 5 \
+            -H 'Connection: Upgrade' \
+            -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            -H 'Origin: https://play.143-198-217-75.sslip.io' \
+            "$LIVE/shards/global-official/transport/ws"
+          ws_rc=$?
+          set -e
+          cat /tmp/ws.headers 2>/dev/null || true
+          head -c 200 /tmp/ws.body 2>/dev/null || true
+          echo
+          ws_status=$(awk 'toupper($1) ~ /^HTTP\// {code=$2} END{print code}' /tmp/ws.headers 2>/dev/null || true)
+          echo "curl_rc=$ws_rc status=${ws_status:-none}"
+          test "${ws_status:-}" = 101
 
           echo 'HIEUSRO_LIVE_ENDPOINTS_VERIFIED=1'

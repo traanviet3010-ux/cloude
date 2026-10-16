@@ -1,106 +1,49 @@
-name: TEST PHUONGHOANG90 Gateway + v219 handshake
+name: TEST PHUONGHOANG90 MySQL region diagnostic
 
 on:
   push:
     branches: [hieusro-phuonghoang90-client]
     paths:
       - '.github/workflows/phuonghoang90-gateway-v219-handshake.yml'
-      - 'ci/ph90-v219-probe.go'
-      - 'ci/ph90-skip299-generator.go'
-      - 'ci/ph90-select-safe-region.go'
-      - 'ci/ph90-apply-test-patches.py'
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  handshake:
+  mysql-region-diagnostic:
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 30
     env:
-      PH90_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
-      PH90_EXPECTED_SIZE: '1792674229'
-      PH90_EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
       GOSRO_COMMIT: 7507c9210da1fb44b3c221f8e30568e26fba68dc
-      CLIENT_VERSION: '219'
-      CONTENT_ID: '22'
-      TEST_USERNAME: ph90test219
-      TEST_CHAR: Ph90Probe
+      RUN1_ID: '38905510919'
+      RUN1_JOB_ID: '116987950663'
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout branch
+        uses: actions/checkout@v4
 
       - name: Install tools
         shell: bash
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends unrar python3-pip netcat-openbsd default-mysql-client git
-          python3 -m pip install --user --break-system-packages gdown bcrypt
+          sudo apt-get install -y --no-install-recommends default-mysql-client git curl
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22.12'
-          cache: false
-
-      - name: Download exact PHUONGHOANG90 Data.pk2
+      - name: Checkout exact go-sro DB scripts
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
-          mkdir -p "$ROOT/game"
-          cd "$ROOT"
-          ~/.local/bin/gdown "$PH90_FILE_ID" -O PHUONGHOANG90.rar
-          test "$(stat -c %s PHUONGHOANG90.rar)" = "$PH90_EXPECTED_SIZE"
-          SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
-          test "$SHA" = "$PH90_EXPECTED_SHA256"
-          unrar x -o+ -idq PHUONGHOANG90.rar 'PHUONGHOANG90/Data.pk2' game/
-          mv game/PHUONGHOANG90/Data.pk2 game/Data.pk2
-          rmdir game/PHUONGHOANG90
-          printf 'CLIENT_VERSION=%s\nCONTENT_ID=%s\nPH90_ARCHIVE_SHA256=%s\n' "$CLIENT_VERSION" "$CONTENT_ID" "$SHA" | tee provenance.txt
-
-      - name: Build TEST Agent skip299 and Gateway
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
+          ROOT="$RUNNER_TEMP/ph90-mysql-region-diag"
           git clone https://github.com/ferdoran/go-sro.git "$ROOT/go-sro"
           cd "$ROOT/go-sro"
           git checkout "$GOSRO_COMMIT"
           test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
-          go get github.com/go-sql-driver/mysql@v1.8.1
-          go mod tidy
 
-          GEN="$ROOT/generator"
-          mkdir -p "$GEN"
-          cp "$GITHUB_WORKSPACE/ci/ph90-skip299-generator.go" "$GEN/main.go"
-          cat > "$GEN/go.mod" <<EOF
-          module skipgen
-          go 1.22
-          require github.com/ferdoran/go-sro v0.0.0
-          replace github.com/ferdoran/go-sro => $ROOT/go-sro
-          EOF
-          cd "$GEN"
-          go mod tidy
-          CGO_ENABLED=0 go run . "$ROOT/game/Data.pk2" "$ROOT/go-sro/agent-server/navmeshv2/ph90_skip_missing_generated.go" "$ROOT" | tee "$ROOT/skip299-summary.txt"
-          test "$(wc -l < "$ROOT/skip299-paths.tsv")" = 299
-
-          python3 "$GITHUB_WORKSPACE/ci/ph90-apply-test-patches.py" "$ROOT/go-sro"
-          cd "$ROOT/go-sro"
-          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/agent-server" agent-server/server.go
-          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/gateway-server" gateway-server/server.go
-          test -s "$ROOT/agent-server"
-          test -s "$ROOT/gateway-server"
-
-      - name: Start isolated MySQL and seed TEST login
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
           INITDIR="$ROOT/mysql-init"
           mkdir -p "$INITDIR"
-          cp -a "$ROOT/go-sro/db/." "$INITDIR/"
+          cp -a db/. "$INITDIR/"
 
           set +x
           SRO_DB_PASSWORD="$(python3 - <<'PY'
@@ -108,192 +51,152 @@ jobs:
           print(secrets.token_urlsafe(32))
           PY
           )"
-          TEST_LOGIN_PASSWORD="$(python3 - <<'PY'
-          import secrets
-          print(secrets.token_urlsafe(18))
-          PY
-          )"
           echo "::add-mask::$SRO_DB_PASSWORD"
-          echo "::add-mask::$TEST_LOGIN_PASSWORD"
-          printf 'SRO_DB_PASSWORD=%s\nTEST_LOGIN_PASSWORD=%s\n' "$SRO_DB_PASSWORD" "$TEST_LOGIN_PASSWORD" >> "$GITHUB_ENV"
-          export SRO_DB_PASSWORD TEST_LOGIN_PASSWORD
+          export SRO_DB_PASSWORD
           set -x
 
           python3 - <<'PY'
           import os
           from pathlib import Path
-          p = Path(os.environ['RUNNER_TEMP']) / 'ph90-gw-v219/mysql-init/00-create-sro-user.sql'
+          root = Path(os.environ['RUNNER_TEMP']) / 'ph90-mysql-region-diag/mysql-init'
           pw = os.environ['SRO_DB_PASSWORD'].replace("'", "''")
-          p.write_text("CREATE USER IF NOT EXISTS 'sro'@'%' IDENTIFIED BY '" + pw + "';\n")
+          (root / '00-create-sro-user.sql').write_text(
+              "CREATE USER IF NOT EXISTS 'sro'@'%' IDENTIFIED BY '" + pw + "';\n",
+              encoding='utf-8',
+          )
           PY
 
-          docker rm -f ph90-gw-v219-mysql >/dev/null 2>&1 || true
-          docker run -d --name ph90-gw-v219-mysql \
+          {
+            echo '=== INIT FILES (sorted) ==='
+            find "$INITDIR" -maxdepth 1 -type f -printf '%f\n' | sort
+            echo '=== INIT SQL SHA256 ==='
+            find "$INITDIR" -maxdepth 1 -type f -name '*.sql' -print0 | sort -z | xargs -0 sha256sum
+          } | tee "$ROOT/init-files.txt"
+
+      - name: Start isolated MySQL and wait for init
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-mysql-region-diag"
+          INITDIR="$ROOT/mysql-init"
+
+          docker rm -f ph90-mysql-region-diag >/dev/null 2>&1 || true
+          docker run -d --name ph90-mysql-region-diag \
             -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_ROOT_HOST=% \
             -p 127.0.0.1:33306:3306 \
             -v "$INITDIR:/docker-entrypoint-initdb.d:ro" \
             mysql:8.0 --default-authentication-plugin=mysql_native_password
 
           READY=0
-          for i in $(seq 1 90); do
-            if docker exec ph90-gw-v219-mysql mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then READY=1; break; fi
+          for i in $(seq 1 120); do
+            if docker exec ph90-mysql-region-diag mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
             sleep 2
           done
           test "$READY" = 1
-          docker exec ph90-gw-v219-mysql mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219-TEST', STATUS=1 WHERE ID=1;"
-
-          docker exec ph90-gw-v219-mysql mysql -uroot -Nse "SELECT wRegionID, ContinentName FROM SRO_SHARD.REGION_REFERENCE ORDER BY CASE WHEN ContinentName='Jangan' THEN 0 ELSE 1 END, wRegionID" > "$ROOT/regions.tsv"
-          REGION_ROWS="$(wc -l < "$ROOT/regions.tsv")"
-          echo "REGION_REFERENCE_ROWS=$REGION_ROWS"
-          test "$REGION_ROWS" -gt 0
-
-          SELECTOR="$ROOT/region-selector"
-          mkdir -p "$SELECTOR"
-          cp "$GITHUB_WORKSPACE/ci/ph90-select-safe-region.go" "$SELECTOR/main.go"
-          cat > "$SELECTOR/go.mod" <<EOF
-          module regionselector
-          go 1.22
-          require github.com/ferdoran/go-sro v0.0.0
-          replace github.com/ferdoran/go-sro => $ROOT/go-sro
-          EOF
-          cd "$SELECTOR"
-          go mod tidy
-          CGO_ENABLED=0 go run . "$ROOT/game/Data.pk2" "$ROOT/skip299-object-ids.txt" "$ROOT/regions.tsv" "$ROOT/region-selection.txt"
-          cat "$ROOT/region-selection.txt"
-          SAFE_REGION_ID="$(awk -F= '$1=="SELECTED_REGION_ID" {print $2}' "$ROOT/region-selection.txt")"
-          SAFE_REGION_CONTINENT="$(awk -F= '$1=="SELECTED_CONTINENT" {print $2}' "$ROOT/region-selection.txt")"
-          test -n "$SAFE_REGION_ID"
-          test "$SAFE_REGION_CONTINENT" = "Jangan"
-          docker exec ph90-gw-v219-mysql mysql -uroot -Nse "SELECT COUNT(*) FROM SRO_SHARD.REGION_REFERENCE WHERE wRegionID=$SAFE_REGION_ID" | grep -qx '1'
-
-          HASH="$(python3 - <<'PY'
-          import bcrypt, os
-          print(bcrypt.hashpw(os.environ['TEST_LOGIN_PASSWORD'].encode(), bcrypt.gensalt(rounds=12)).decode())
-          PY
-          )"
-          docker exec ph90-gw-v219-mysql mysql -uroot -e "DELETE FROM SRO_ACCOUNT.USER WHERE USERNAME='$TEST_USERNAME'; INSERT INTO SRO_ACCOUNT.USER(USERNAME,PASSWORD,MAIL,STATUS,IS_GM) VALUES('$TEST_USERNAME','$HASH','test@example.invalid',1,0); SET @uid=LAST_INSERT_ID(); DELETE FROM SRO_SHARD.CHAR WHERE CHAR_NAME='$TEST_CHAR'; INSERT INTO SRO_SHARD.CHAR(REF_OBJ_ID,FK_USER,FK_SHARD,CHAR_NAME,CHAR_SCALE,CURRENT_LEVEL,EXP,SKILL_EXP,STRENGTH,INTELLECT,STAT_POINTS,HP,MP,DELETING,POS_X,POS_Y,POS_Z,FK_REGION,SKILL_POINTS,MAX_LEVEL) VALUES(1907,@uid,1,'$TEST_CHAR',100,1,0,0,20,20,0,200,200,0,950,40,1091,$SAFE_REGION_ID,0,1);"
-          docker exec ph90-gw-v219-mysql mysql -uroot -Nse "SELECT ID,USERNAME FROM SRO_ACCOUNT.USER WHERE USERNAME='$TEST_USERNAME'; SELECT ID,REF_OBJ_ID,CHAR_NAME,FK_REGION FROM SRO_SHARD.CHAR WHERE CHAR_NAME='$TEST_CHAR';" | tee "$ROOT/seed.txt"
-
-      - name: Start Agent skip299 then Gateway TEST
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
-          env DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW="$SRO_DB_PASSWORD" DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
-              DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW="$SRO_DB_PASSWORD" DB_SHARD_DATABASE=SRO_SHARD \
-              AGENT_HOST=127.0.0.1 AGENT_PORT=15882 AGENT_DATA_PATH="$ROOT/game/Data.pk2" AGENT_PRELINKED_NAVDATA_FILE="$ROOT/no-prelinked-nav.gob" LOG_LEVEL=debug \
-              "$ROOT/agent-server" >"$ROOT/agent.log" 2>&1 &
-          echo $! > "$ROOT/agent.pid"
-          date +%s > "$ROOT/agent-start-epoch.txt"
-
-          for i in $(seq 1 240); do
-            nc -z 127.0.0.1 15882 && break
-            kill -0 "$(cat "$ROOT/agent.pid")"
-            sleep 2
-          done
-          nc -z 127.0.0.1 15882
-
-          env DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW="$SRO_DB_PASSWORD" DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
-              DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW="$SRO_DB_PASSWORD" DB_SHARD_DATABASE=SRO_SHARD \
-              AGENT_HOST=127.0.0.1 AGENT_PUBLIC_IP=127.0.0.1 AGENT_PORT=15882 GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=15779 LOG_LEVEL=debug \
-              "$ROOT/gateway-server" >"$ROOT/gateway.log" 2>&1 &
-          echo $! > "$ROOT/gateway.pid"
-
-          for i in $(seq 1 60); do
-            nc -z 127.0.0.1 15779 && break
-            kill -0 "$(cat "$ROOT/gateway.pid")"
-            sleep 1
-          done
-          nc -z 127.0.0.1 15779
           sleep 2
-          if grep -q 'Connection established' "$ROOT/gateway.log"; then
-            echo 'GATEWAY_BACKEND_AGENT_CONNECTION=PASS' | tee "$ROOT/gateway-agent.txt"
-          else
-            echo 'GATEWAY_BACKEND_AGENT_CONNECTION=NOT_CONFIRMED' | tee "$ROOT/gateway-agent.txt"
-          fi
 
-      - name: Probe handshake CLIENT_VERSION 219 CONTENT_ID 22
+          docker logs ph90-mysql-region-diag > "$ROOT/mysql-init-current.log" 2>&1
+          echo 'MYSQL_INIT_READY=1'
+
+      - name: Read-only schema diagnostics
         shell: bash
         run: |
           set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
-          PROBE="$ROOT/probe"
-          mkdir -p "$PROBE"
-          cp "$GITHUB_WORKSPACE/ci/ph90-v219-probe.go" "$PROBE/main.go"
-          cat > "$PROBE/go.mod" <<EOF
-          module v219probe
-          go 1.22
-          require github.com/ferdoran/go-sro v0.0.0
-          replace github.com/ferdoran/go-sro => $ROOT/go-sro
-          EOF
-          cd "$PROBE"
-          go mod tidy
-          set +e
-          go run . "$TEST_USERNAME" "$TEST_LOGIN_PASSWORD" "$TEST_CHAR" "$CLIENT_VERSION" "$CONTENT_ID" 2>&1 | tee "$ROOT/probe.log"
-          RC=${PIPESTATUS[0]}
-          set -e
-          grep -E 'CLIENT_VERSION|CONTENT_ID|STEP_|WARN_|panic:|timeout waiting' "$ROOT/probe.log" | tee "$ROOT/probe-summary.txt" || true
-          if grep -q 'login token request' "$ROOT/agent.log"; then
-            echo 'GATEWAY_TO_AGENT_LOGIN_TOKEN=PASS' | tee -a "$ROOT/probe-summary.txt"
-          else
-            echo 'GATEWAY_TO_AGENT_LOGIN_TOKEN=NOT_CONFIRMED' | tee -a "$ROOT/probe-summary.txt"
-          fi
-          exit "$RC"
+          ROOT="$RUNNER_TEMP/ph90-mysql-region-diag"
 
-      - name: Keep Agent alive for at least 5 minutes
-        if: always()
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
-          test -f "$ROOT/agent.pid"
-          test -f "$ROOT/agent-start-epoch.txt"
-          START="$(cat "$ROOT/agent-start-epoch.txt")"
-          while [ $(( $(date +%s) - START )) -lt 300 ]; do
-            if ! kill -0 "$(cat "$ROOT/agent.pid")" 2>/dev/null; then
-              echo 'AGENT_CRASHED_BEFORE_5_MIN=1' | tee "$ROOT/agent-5min.txt"
-              exit 1
-            fi
-            sleep 5
-          done
-          if kill -0 "$(cat "$ROOT/agent.pid")" 2>/dev/null && nc -z 127.0.0.1 15882; then
-            echo 'AGENT_ALIVE_AFTER_5_MIN=1' | tee "$ROOT/agent-5min.txt"
-          else
-            echo 'AGENT_ALIVE_AFTER_5_MIN=0' | tee "$ROOT/agent-5min.txt"
-            exit 1
-          fi
-
-      - name: Collect diagnostics
-        if: always()
-        shell: bash
-        run: |
-          ROOT="$RUNNER_TEMP/ph90-gw-v219"
           {
-            echo '=== region selection ==='; cat "$ROOT/region-selection.txt" 2>/dev/null || true
-            echo '=== gateway-agent ==='; cat "$ROOT/gateway-agent.txt" 2>/dev/null || true
-            echo '=== probe ==='; cat "$ROOT/probe-summary.txt" 2>/dev/null || true
-            echo '=== agent 5min ==='; cat "$ROOT/agent-5min.txt" 2>/dev/null || true
-            echo '=== gateway tail ==='; tail -n 160 "$ROOT/gateway.log" 2>/dev/null || true
-            echo '=== agent tail ==='; tail -n 240 "$ROOT/agent.log" 2>/dev/null || true
-          } | tee "$ROOT/final-diagnostics.txt"
+            echo '=== (1) lower_case_table_names ==='
+            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW VARIABLES LIKE 'lower_case_table_names';"
 
-      - name: Upload report
+            echo '=== (2a) SHOW TABLES FROM SRO_SHARD (FULL) ==='
+            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW TABLES FROM SRO_SHARD;"
+
+            echo '=== (2b) SHOW TABLES FROM SRO_SHARD LIKE %REGION% ==='
+            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW TABLES FROM SRO_SHARD LIKE '%REGION%';"
+
+            echo '=== (3) SHOW CREATE TABLE SRO_SHARD.CHAR ==='
+            docker exec ph90-mysql-region-diag mysql -uroot -e "SHOW CREATE TABLE SRO_SHARD.CHAR\G"
+
+            echo '=== FK_REGION metadata from information_schema ==='
+            docker exec ph90-mysql-region-diag mysql -uroot -e "SELECT CONSTRAINT_NAME,TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,REFERENCED_TABLE_SCHEMA,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='SRO_SHARD' AND TABLE_NAME='CHAR' AND CONSTRAINT_NAME='FK_REGION';"
+          } | tee "$ROOT/schema-diagnostic.txt"
+
+          REGION_TABLE="$(docker exec ph90-mysql-region-diag mysql -uroot -Nse "SELECT REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='SRO_SHARD' AND TABLE_NAME='CHAR' AND CONSTRAINT_NAME='FK_REGION' LIMIT 1;")"
+          test -n "$REGION_TABLE"
+          REGION_ROWS="$(docker exec ph90-mysql-region-diag mysql -uroot -Nse "SELECT COUNT(*) FROM SRO_SHARD.\`$REGION_TABLE\`;" )"
+
+          {
+            echo "ACTUAL_REGION_TABLE=$REGION_TABLE"
+            echo "ACTUAL_REGION_ROW_COUNT=$REGION_ROWS"
+            echo '=== actual region table sample (first 10 rows) ==='
+            docker exec ph90-mysql-region-diag mysql -uroot -e "SELECT * FROM SRO_SHARD.\`$REGION_TABLE\` LIMIT 10;"
+          } | tee "$ROOT/region-table-result.txt"
+
+      - name: Inspect current MySQL init log
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-mysql-region-diag"
+          LOG="$ROOT/mysql-init-current.log"
+
+          {
+            echo '=== CURRENT RUN: entrypoint SQL execution lines ==='
+            grep -Ei 'docker-entrypoint-initdb.d|running /docker-entrypoint-initdb.d|create_sro|grant_user|\.sql' "$LOG" || true
+            echo '=== CURRENT RUN: error/warning/skip scan ==='
+            grep -Ein 'error|failed|failure|skip|ignored|warning' "$LOG" || true
+            echo '=== CURRENT RUN: create_sro_shard mentions ==='
+            grep -Ein 'create_sro_shard' "$LOG" || true
+            echo '=== CURRENT RUN: final 120 init-log lines ==='
+            tail -n 120 "$LOG"
+          } | tee "$ROOT/mysql-init-current-summary.txt"
+
+      - name: Compare MySQL init visibility with run 1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-mysql-region-diag"
+          API="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$RUN1_JOB_ID/logs"
+
+          curl -L --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "$API" -o "$ROOT/run1-job.log"
+
+          {
+            echo "RUN1_ID=$RUN1_ID"
+            echo "RUN1_JOB_ID=$RUN1_JOB_ID"
+            echo '=== RUN #1: MySQL/init-related lines ==='
+            grep -Ei 'mysql-init|docker-entrypoint-initdb.d|create_sro_shard|grant_user_permissions|00-create-sro-user|ERROR 14|ERROR 11|mysql:8\.0' "$ROOT/run1-job.log" || true
+            echo '=== RUN #1: did workflow capture container entrypoint execution? ==='
+            if grep -q 'running /docker-entrypoint-initdb.d' "$ROOT/run1-job.log"; then
+              echo 'RUN1_CONTAINER_ENTRYPOINT_LOG_CAPTURED=YES'
+            else
+              echo 'RUN1_CONTAINER_ENTRYPOINT_LOG_CAPTURED=NO'
+            fi
+            echo '=== CURRENT RUN: did workflow capture container entrypoint execution? ==='
+            if grep -qi 'running /docker-entrypoint-initdb.d' "$ROOT/mysql-init-current.log"; then
+              echo 'CURRENT_CONTAINER_ENTRYPOINT_LOG_CAPTURED=YES'
+            else
+              echo 'CURRENT_CONTAINER_ENTRYPOINT_LOG_CAPTURED=NO'
+            fi
+          } | tee "$ROOT/run1-comparison.txt"
+
+      - name: Upload read-only diagnostic report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-gateway-v219-handshake-report
+          name: PHUONGHOANG90-mysql-region-readonly-diagnostic
           retention-days: 7
           if-no-files-found: warn
           path: |
-            ${{ runner.temp }}/ph90-gw-v219/provenance.txt
-            ${{ runner.temp }}/ph90-gw-v219/skip299-summary.txt
-            ${{ runner.temp }}/ph90-gw-v219/skip299-paths.tsv
-            ${{ runner.temp }}/ph90-gw-v219/region-selection.txt
-            ${{ runner.temp }}/ph90-gw-v219/seed.txt
-            ${{ runner.temp }}/ph90-gw-v219/gateway-agent.txt
-            ${{ runner.temp }}/ph90-gw-v219/probe.log
-            ${{ runner.temp }}/ph90-gw-v219/probe-summary.txt
-            ${{ runner.temp }}/ph90-gw-v219/agent-5min.txt
-            ${{ runner.temp }}/ph90-gw-v219/gateway.log
-            ${{ runner.temp }}/ph90-gw-v219/agent.log
-            ${{ runner.temp }}/ph90-gw-v219/final-diagnostics.txt
+            ${{ runner.temp }}/ph90-mysql-region-diag/init-files.txt
+            ${{ runner.temp }}/ph90-mysql-region-diag/schema-diagnostic.txt
+            ${{ runner.temp }}/ph90-mysql-region-diag/region-table-result.txt
+            ${{ runner.temp }}/ph90-mysql-region-diag/mysql-init-current.log
+            ${{ runner.temp }}/ph90-mysql-region-diag/mysql-init-current-summary.txt
+            ${{ runner.temp }}/ph90-mysql-region-diag/run1-comparison.txt

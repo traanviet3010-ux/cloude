@@ -1,0 +1,34 @@
+name: Diagnose HieuSRO production auto-update
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/diagnose-autoupdate.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    environment: hieusro-vps
+    timeout-minutes: 5
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST_KEY: ${{ secrets.HIEUSRO_VPS_HOST_KEY }}
+          VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+      - name: Read updater failure
+        shell: bash
+        run: |
+          set +e
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 \
+            'sudo -n systemctl status hieusro-autoupdate.service --no-pager -l; echo ===UPDATE_LOG===; sudo -n tail -n 160 /var/log/hieusro-update.log; echo ===JOURNAL===; sudo -n journalctl -u hieusro-autoupdate.service -n 100 --no-pager'
+          exit 0
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

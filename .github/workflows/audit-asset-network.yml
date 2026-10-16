@@ -24,27 +24,33 @@ jobs:
           awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^content-type:/ || /^content-encoding:/ || /^cache-control:/ || /^alt-svc:/ || /^content-length:/' /tmp/index.h
           curl -k -sS --http2 -o /dev/null -w 'HTTP2 index: code=%{http_code} version=%{http_version} connect=%{time_connect}s tls=%{time_appconnect}s start=%{time_starttransfer}s total=%{time_total}s speed=%{speed_download}B/s\n' "$LIVE/"
           if curl --help all 2>/dev/null | grep -q -- '--http3'; then
-            curl -k -sS --http3 -o /dev/null -w 'HTTP3 index: code=%{http_code} version=%{http_version} total=%{time_total}s\n' "$LIVE/" || echo 'HTTP3 request failed from GitHub runner'
+            curl -k -sS --max-time 10 --http3 -o /dev/null -w 'HTTP3 index: code=%{http_code} version=%{http_version} total=%{time_total}s\n' "$LIVE/" || echo 'HTTP3 request failed from GitHub runner'
           else
             echo 'HTTP3 client test unavailable in runner curl; Alt-Svc will still be reported above.'
           fi
 
-          echo '=== HASHED LOCAL ASSET ==='
-          HASHED='/assets/entry-CJKUbK94.js'
-          for enc in 'gzip' 'br' 'zstd'; do
-            echo "-- Accept-Encoding: $enc"
-            curl -k -sS --http2 -o /dev/null -D /tmp/hashed.h -H "Accept-Encoding: $enc" "$LIVE$HASHED"
-            awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^content-type:/ || /^content-encoding:/ || /^cache-control:/ || /^alt-svc:/ || /^content-length:/' /tmp/hashed.h
-          done
+          echo '=== CURRENT HASHED LOCAL ASSET ==='
+          grep -Eo '(src|href)="[^"]+\.(js|css)"' /tmp/index.html | sed -E 's/^(src|href)="//; s/"$//' | tee /tmp/index-assets.txt || true
+          HASHED=$(grep '^/assets/' /tmp/index-assets.txt | head -n 1 || true)
+          if [ -n "$HASHED" ]; then
+            echo "HASHED=$HASHED"
+            for enc in 'gzip' 'br' 'zstd'; do
+              echo "-- Accept-Encoding: $enc"
+              curl -k -sS --http2 -o /dev/null -D /tmp/hashed.h -H "Accept-Encoding: $enc" "$LIVE$HASHED"
+              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^content-type:/ || /^content-encoding:/ || /^cache-control:/ || /^alt-svc:/ || /^content-length:/' /tmp/hashed.h
+            done
+          else
+            echo 'No hashed JS/CSS asset found in index.'
+          fi
 
-          echo '=== DISCOVER RUNTIME ASSET FROM PACKED CLIENT JS ==='
+          echo '=== DISCOVER RUNTIME ASSET FROM CURRENT CLIENT JS ==='
           : > /tmp/candidates.txt
-          for js in assets/entry-CJKUbK94.js assets/entry-B5zvI0hO.js assets/bootstrap-BE_ylLXC.js; do
-            curl -k -fsS "$LIVE/$js" -o "/tmp/$(basename "$js")" || true
-          done
+          while IFS= read -r js; do
+            case "$js" in *.js) curl -k -fsS "$LIVE$js" -o "/tmp/$(basename "$js")" || true ;; esac
+          done < /tmp/index-assets.txt
           grep -aEho '/assets/[A-Za-z0-9_./@%+:-]+\.(json|bin|glb|gltf|png|webp|jpg|jpeg|dds|ktx2|wasm)' /tmp/*.js 2>/dev/null \
             | sed 's/[?#].*$//' | sort -u > /tmp/candidates.txt || true
-          head -n 40 /tmp/candidates.txt || true
+          head -n 60 /tmp/candidates.txt || true
           ASSET=''
           while IFS= read -r candidate; do
             case "$candidate" in
@@ -54,14 +60,13 @@ jobs:
             if [ "$code" = 200 ]; then ASSET="$candidate"; break; fi
           done < /tmp/candidates.txt
           if [ -z "$ASSET" ]; then
-            echo 'No non-local runtime asset literal could be auto-discovered; using a known proxied text path for header/proxy comparison.'
+            echo 'No non-local runtime asset literal auto-discovered; using a known proxied text path for proxy comparison.'
             ASSET='/assets/text/textdataname.en.json'
           fi
           echo "ASSET_PATH=$ASSET" | tee /tmp/asset.env
-          echo '-- LIVE asset headers --'
+          echo '-- LIVE runtime/proxied asset headers --'
           curl -k -sS -o /dev/null -D /tmp/runtime.h -H 'Accept-Encoding: gzip' "$LIVE$ASSET" || true
           awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^content-type:/ || /^content-encoding:/ || /^cache-control:/ || /^etag:/ || /^last-modified:/ || /^alt-svc:/ || /^content-length:/' /tmp/runtime.h || true
-          echo '-- LIVE asset transfer --'
           curl -k -sS -o /dev/null -w 'live_asset code=%{http_code} version=%{http_version} size=%{size_download}B start=%{time_starttransfer}s total=%{time_total}s speed=%{speed_download}B/s\n' "$LIVE$ASSET" || true
 
       - name: Configure pinned SSH trust
@@ -88,7 +93,7 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 \
             "ASSET_PATH='$SAFE_ASSET' bash -s" <<'REMOTE'
-          set -euo pipefail
+          set -u
           echo '=== VPS INFO ==='
           hostname
           uptime
@@ -101,18 +106,27 @@ jobs:
           echo '=== VPS SPEEDTEST (Cloudflare, no package install) ==='
           curl -L --fail -sS -o /dev/null \
             -w 'cf_download_25MB size=%{size_download}B total=%{time_total}s speed=%{speed_download}B/s\n' \
-            'https://speed.cloudflare.com/__down?bytes=25000000'
+            'https://speed.cloudflare.com/__down?bytes=25000000' || true
           head -c 10000000 /dev/zero | curl -L --fail -sS -o /dev/null -X POST --data-binary @- \
             -w 'cf_upload_10MB total=%{time_total}s speed=%{speed_upload}B/s code=%{http_code}\n' \
             'https://speed.cloudflare.com/__up' || true
 
           echo '=== LARGE EXTERNAL FILE -> VPS DISK ==='
-          TMP='/tmp/hieusro-network-audit-100m.bin'
+          TMP='/tmp/hieusro-network-audit-large.bin'
           rm -f "$TMP"
-          curl -L --fail -sS -o "$TMP" \
-            -w 'external_100MB size=%{size_download}B total=%{time_total}s speed=%{speed_download}B/s code=%{http_code}\n' \
-            'https://speed.cloudflare.com/__down?bytes=100000000'
-          ls -lh "$TMP"
+          SUCCESS=0
+          for URL in \
+            'https://speedtest-sgp1.digitalocean.com/100mb.test' \
+            'http://speedtest-sgp1.digitalocean.com/100mb.test' \
+            'https://nbg1-speed.hetzner.com/100MB.bin'; do
+            echo "trying=$URL"
+            rm -f "$TMP"
+            if curl -L --fail -sS --connect-timeout 10 --max-time 120 -o "$TMP" \
+              -w 'large_file size=%{size_download}B total=%{time_total}s speed=%{speed_download}B/s code=%{http_code}\n' "$URL"; then
+              if [ -s "$TMP" ]; then SUCCESS=1; break; fi
+            fi
+          done
+          if [ "$SUCCESS" = 1 ]; then ls -lh "$TMP"; else echo 'All external large-file endpoints failed.'; fi
           rm -f "$TMP"
 
           echo '=== ASSET PATH COMPARISON FROM VPS ==='

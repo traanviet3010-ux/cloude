@@ -41,10 +41,10 @@ config.write_text(text.replace(needle, needle + block, 1))
 PY
 
 echo '=== LOGGING-ONLY CONFIG DIFF ==='
-"${DC[@]}" exec -T game sh -lc 'diff -u /tmp/runtime-nginx.conf.before-temp-asset-log /opt/hieusro/runtime-nginx.conf || true'
+"${DC[@]}" exec -T game sh -lc 'diff -u /tmp/runtime-nginx.conf.before-temp-asset-log /opt/hieusro/runtime-nginx.conf || true' </dev/null
 
-"${DC[@]}" exec -T game nginx -t -c /opt/hieusro/runtime-nginx.conf
-"${DC[@]}" exec -T game nginx -c /opt/hieusro/runtime-nginx.conf -s reload
+"${DC[@]}" exec -T game nginx -t -c /opt/hieusro/runtime-nginx.conf </dev/null
+"${DC[@]}" exec -T game nginx -c /opt/hieusro/runtime-nginx.conf -s reload </dev/null
 sleep 1
 
 # Sanity request: prove the new access log is writing. It is removed from the
@@ -53,8 +53,8 @@ curl -k -fsS -o /dev/null --max-time 30 \
   'https://play.143-198-217-75.sslip.io/assets/packs/manifest.json'
 sleep 1
 
-"${DC[@]}" exec -T game sh -lc 'test -s /tmp/hieusro-asset-temp.log; tail -n 2 /tmp/hieusro-asset-temp.log'
-"${DC[@]}" exec -T game sh -lc ': > /tmp/hieusro-asset-temp.log; date -u +%FT%TZ > /tmp/hieusro-asset-temp.start; printf "capture_start="; cat /tmp/hieusro-asset-temp.start'
+"${DC[@]}" exec -T game sh -lc 'test -s /tmp/hieusro-asset-temp.log; tail -n 2 /tmp/hieusro-asset-temp.log' </dev/null
+"${DC[@]}" exec -T game sh -lc ': > /tmp/hieusro-asset-temp.log; date -u +%FT%TZ > /tmp/hieusro-asset-temp.start; printf "capture_start="; cat /tmp/hieusro-asset-temp.start' </dev/null
 
 # Confirm routing still answers from the same LIVE endpoints after graceful reload.
 curl -k -fsS -o /dev/null --max-time 20 'https://play.143-198-217-75.sslip.io/'

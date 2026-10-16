@@ -52,21 +52,20 @@ jobs:
           cd "$ROOT"
           mkdir -p extracted
           unrar x -o+ -idq PHUONGHOANG90.rar \
-            'New folder/Media.pk2' \
-            'New folder/sro_client.exe' \
-            'New folder/silkroad.exe' \
-            'New folder/version.dll' \
-            'New folder/version.dat' \
-            'New folder/Setting/server.dat' \
-            'New folder/Setting/setting.dat' \
-            'New folder/Settings/server.dat' \
-            'New folder/Settings/setting.dat' \
+            'PHUONGHOANG90/Media.pk2' \
+            'PHUONGHOANG90/sro_client.exe' \
+            'PHUONGHOANG90/silkroad.exe' \
+            'PHUONGHOANG90/version.dll' \
+            'PHUONGHOANG90/version.dat' \
+            'PHUONGHOANG90/setting/*.dat' \
+            'PHUONGHOANG90/silkcfg.dat' \
+            'PHUONGHOANG90/Silkload.dat' \
             extracted/ || true
-          test -s 'extracted/New folder/Media.pk2'
-          test -s 'extracted/New folder/sro_client.exe'
-          test -s 'extracted/New folder/silkroad.exe'
+          test -s 'extracted/PHUONGHOANG90/Media.pk2'
+          test -s 'extracted/PHUONGHOANG90/sro_client.exe'
+          test -s 'extracted/PHUONGHOANG90/silkroad.exe'
           find extracted -type f -printf '%P\t%s bytes\n' | sort | tee extracted-files.txt
-          sha256sum 'extracted/New folder/Media.pk2' 'extracted/New folder/sro_client.exe' 'extracted/New folder/silkroad.exe' | tee extracted.sha256
+          sha256sum 'extracted/PHUONGHOANG90/Media.pk2' 'extracted/PHUONGHOANG90/sro_client.exe' 'extracted/PHUONGHOANG90/silkroad.exe' | tee extracted.sha256
 
       - name: Build read-only PK2 inspection tool
         shell: bash
@@ -86,7 +85,7 @@ jobs:
         run: |
           set -euxo pipefail
           ROOT="$RUNNER_TEMP/phuonghoang90"
-          MEDIA="$ROOT/extracted/New folder/Media.pk2"
+          MEDIA="$ROOT/extracted/PHUONGHOANG90/Media.pk2"
           TOOL="$ROOT/pk2tool/build/pk2cli"
           cd "$ROOT"
 
@@ -150,7 +149,7 @@ jobs:
         run: |
           set -euo pipefail
           ROOT="$RUNNER_TEMP/phuonghoang90"
-          GAME="$ROOT/extracted/New folder"
+          GAME="$ROOT/extracted/PHUONGHOANG90"
           {
             echo '=== PROVENANCE ==='
             cat "$ROOT/provenance.txt"

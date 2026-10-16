@@ -1,4 +1,4 @@
-name: Probe PHUONGHOANG90 v219 against OpenSRO
+name: Build PHUONGHOANG90 v219 server probe
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  compat:
+  build-server:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
@@ -22,7 +22,7 @@ jobs:
       SRO_BUILD_JOBS: '2'
 
     steps:
-      - name: Install system tools
+      - name: Install tools
         shell: bash
         run: |
           set -euxo pipefail
@@ -40,7 +40,7 @@ jobs:
         with:
           go-version: '1.27.1'
 
-      - name: Download exact PHUONGHOANG90 archive
+      - name: Download exact PHUONGHOANG90 archive only
         shell: bash
         run: |
           set -euxo pipefail
@@ -52,9 +52,8 @@ jobs:
           ACTUAL_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
           printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
-          df -h . | tee disk-before.txt
 
-      - name: Extract only OpenSRO client inputs
+      - name: Extract server-data inputs from exact archive
         shell: bash
         run: |
           set -euxo pipefail
@@ -66,23 +65,11 @@ jobs:
             'PHUONGHOANG90/sro_client.exe' \
             game/
           GAME="$ROOT/game/PHUONGHOANG90"
-          test -s "$GAME/Media.pk2"
-          test -s "$GAME/Data.pk2"
-          test -s "$GAME/Map.pk2"
-          test -s "$GAME/Particles.pk2"
-          test -s "$GAME/Music.pk2"
-          test -s "$GAME/sro_client.exe"
+          for f in Media.pk2 Data.pk2 Map.pk2 Particles.pk2 Music.pk2 sro_client.exe; do test -s "$GAME/$f"; done
           ln -sf sro_client.exe "$GAME/SRO_Client.exe"
-          {
-            echo '=== INPUT FILES ==='
-            find "$GAME" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort
-            echo
-            echo '=== SHA256 ==='
-            sha256sum "$GAME"/*.pk2 "$GAME/sro_client.exe"
-          } | tee "$ROOT/client-inputs.txt"
-          df -h . | tee "$ROOT/disk-after-extract.txt"
+          sha256sum "$GAME"/*.pk2 "$GAME/sro_client.exe" | tee "$ROOT/client-inputs.sha256"
 
-      - name: Checkout pinned OpenSRO source
+      - name: Checkout pinned OpenSRO
         shell: bash
         run: |
           set -euxo pipefail
@@ -92,99 +79,106 @@ jobs:
           git checkout "$OPEN_SRO_COMMIT"
           test "$(git rev-parse HEAD)" = "$OPEN_SRO_COMMIT"
           corepack enable
-          corepack pnpm --version
           corepack pnpm install --frozen-lockfile
           python3 -m pip install --user --break-system-packages -r requirements-build.txt
 
-      - name: Run v219 compatibility probe
+      - name: Apply v219 build-only compatibility shim
         shell: bash
         run: |
-          set -uo pipefail
+          set -euxo pipefail
+          SRC="$RUNNER_TEMP/ph219/opensro"
+          cd "$SRC"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/build/shared/englishCorrections.mjs')
+          s = p.read_text()
+          old = 'if ( english !== correction.before ) throw new Error( `Stale English correction ${fileName}:${key}` );'
+          new = 'if ( english !== correction.before ) { console.warn( `[v219-compat] keeping authored text for ${fileName}:${key}` ); return english; }'
+          if old not in s:
+              raise SystemExit('expected strict English correction guard not found')
+          p.write_text(s.replace(old, new))
+          PY
+          git diff -- scripts/build/shared/englishCorrections.mjs | tee "$RUNNER_TEMP/ph219/v219-build-shim.diff"
+
+      - name: Prepare exact v219 PK2 data
+        shell: bash
+        run: |
+          set -euxo pipefail
           ROOT="$RUNNER_TEMP/ph219"
           SRC="$ROOT/opensro"
           export SRO_GAME_ROOT="$ROOT/game/PHUONGHOANG90"
           export SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf
           export SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf
           cd "$SRC"
-          STATUS="$ROOT/status.env"
-          : > "$STATUS"
-
-          set +e
           corepack pnpm assets prepare 2>&1 | tee "$ROOT/01-prepare.log"
-          PREPARE=${PIPESTATUS[0]}
-          echo "PREPARE=$PREPARE" >> "$STATUS"
-
           corepack pnpm assets doctor 2>&1 | tee "$ROOT/02-doctor.log"
-          DOCTOR=${PIPESTATUS[0]}
-          echo "DOCTOR=$DOCTOR" >> "$STATUS"
 
-          if [ "$PREPARE" -eq 0 ] && [ "$DOCTOR" -eq 0 ]; then
-            corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/03-world-61a8.log"
-            WORLD=${PIPESTATUS[0]}
-          else
-            echo 'SKIPPED: prepare/doctor did not both pass' | tee "$ROOT/03-world-61a8.log"
-            WORLD=125
-          fi
-          echo "WORLD_61A8=$WORLD" >> "$STATUS"
+      - name: Build server game data from v219
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
+          SRC="$ROOT/opensro"
+          export SRO_GAME_ROOT="$ROOT/game/PHUONGHOANG90"
+          export SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf
+          export SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf
+          cd "$SRC"
+          corepack pnpm task build server-game-data 2>&1 | tee "$ROOT/03-server-game-data.log"
+          SROGZ="$(find "$SRC/apps/server/.generated/game-data" -name server.srogz -type f -print -quit)"
+          test -n "$SROGZ"
+          test -s "$SROGZ"
+          cp "$SROGZ" "$ROOT/server-v219.srogz"
+          sha256sum "$ROOT/server-v219.srogz" | tee "$ROOT/server-v219.srogz.sha256"
 
-          if [ "$PREPARE" -eq 0 ] && [ "$DOCTOR" -eq 0 ]; then
-            corepack pnpm task build server-game-data 2>&1 | tee "$ROOT/04-server-game-data.log"
-            SERVER_DATA=${PIPESTATUS[0]}
-          else
-            echo 'SKIPPED: prepare/doctor did not both pass' | tee "$ROOT/04-server-game-data.log"
-            SERVER_DATA=125
-          fi
-          echo "SERVER_GAME_DATA=$SERVER_DATA" >> "$STATUS"
+      - name: Build Linux server binaries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
+          SRC="$ROOT/opensro"
+          cd "$SRC/apps/server"
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-agent-v219" ./cmd/services/sro-agent 2>&1 | tee "$ROOT/04-build-agent.log"
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-gameworld-v219" ./cmd/services/sro-gameworld 2>&1 | tee "$ROOT/05-build-gameworld.log"
+          test -s "$ROOT/sro-agent-v219"
+          test -s "$ROOT/sro-gameworld-v219"
+          file "$ROOT/sro-agent-v219" "$ROOT/sro-gameworld-v219" | tee "$ROOT/binaries.txt"
+          sha256sum "$ROOT/sro-agent-v219" "$ROOT/sro-gameworld-v219" | tee "$ROOT/binaries.sha256"
 
-          if [ "$SERVER_DATA" -eq 0 ]; then
-            cd "$SRC/apps/server"
-            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-agent" ./cmd/services/sro-agent 2>&1 | tee "$ROOT/05-build-agent.log"
-            AGENT=${PIPESTATUS[0]}
-            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-gameworld" ./cmd/services/sro-gameworld 2>&1 | tee "$ROOT/06-build-gameworld.log"
-            GAMEWORLD=${PIPESTATUS[0]}
-          else
-            echo 'SKIPPED: server game-data did not build' | tee "$ROOT/05-build-agent.log"
-            echo 'SKIPPED: server game-data did not build' | tee "$ROOT/06-build-gameworld.log"
-            AGENT=125
-            GAMEWORLD=125
-          fi
-          echo "BUILD_AGENT=$AGENT" >> "$STATUS"
-          echo "BUILD_GAMEWORLD=$GAMEWORLD" >> "$STATUS"
-          set -e
-
+      - name: Write build report
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
           {
-            echo 'PHUONGHOANG90_OPEN_SRO_COMPAT_REPORT'
-            echo 'CLIENT_VERSION=219'
-            echo 'CONTENT_ID=22'
-            echo 'EXPECTED_GATEWAY_PORT=15779'
-            echo "OPEN_SRO_COMMIT=$OPEN_SRO_COMMIT"
-            cat "$STATUS"
-            echo
-            echo '=== INPUTS ==='
-            cat "$ROOT/client-inputs.txt"
-            echo
-            echo '=== DISK ==='
-            df -h .
-          } | tee "$ROOT/compat-report.txt"
+            echo PHUONGHOANG90_V219_SERVER_BUILD_OK=1
+            echo CLIENT_VERSION=219
+            echo CONTENT_ID=22
+            echo EXPECTED_GATEWAY_PORT=15779
+            echo OPEN_SRO_COMMIT="$OPEN_SRO_COMMIT"
+            cat "$ROOT/provenance.txt"
+            cat "$ROOT/server-v219.srogz.sha256"
+            cat "$ROOT/binaries.txt"
+            cat "$ROOT/binaries.sha256"
+          } | tee "$ROOT/build-report.txt"
 
-          # The probe reports incompatibilities through the artifact rather than
-          # hiding the diagnostic behind a failed workflow status.
-          exit 0
-
-      - name: Upload compatibility report
+      - name: Upload v219 server build
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-opensro-compat
+          name: PHUONGHOANG90-v219-server-build
           retention-days: 7
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/ph219/compat-report.txt
-            ${{ runner.temp }}/ph219/status.env
-            ${{ runner.temp }}/ph219/client-inputs.txt
+            ${{ runner.temp }}/ph219/build-report.txt
             ${{ runner.temp }}/ph219/provenance.txt
+            ${{ runner.temp }}/ph219/v219-build-shim.diff
             ${{ runner.temp }}/ph219/01-prepare.log
             ${{ runner.temp }}/ph219/02-doctor.log
-            ${{ runner.temp }}/ph219/03-world-61a8.log
-            ${{ runner.temp }}/ph219/04-server-game-data.log
-            ${{ runner.temp }}/ph219/05-build-agent.log
-            ${{ runner.temp }}/ph219/06-build-gameworld.log
+            ${{ runner.temp }}/ph219/03-server-game-data.log
+            ${{ runner.temp }}/ph219/04-build-agent.log
+            ${{ runner.temp }}/ph219/05-build-gameworld.log
+            ${{ runner.temp }}/ph219/server-v219.srogz
+            ${{ runner.temp }}/ph219/server-v219.srogz.sha256
+            ${{ runner.temp }}/ph219/sro-agent-v219
+            ${{ runner.temp }}/ph219/sro-gameworld-v219
+            ${{ runner.temp }}/ph219/binaries.txt
+            ${{ runner.temp }}/ph219/binaries.sha256

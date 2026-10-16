@@ -1,0 +1,161 @@
+name: Smoke PHUONGHOANG90 legacy TCP server on MySQL57
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-legacy-smoke57.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke57:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      EXPECTED_SIZE: '1792674229'
+      EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      GOSRO_COMMIT: 7507c9210da1fb44b3c221f8e30568e26fba68dc
+
+    steps:
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar python3-pip netcat-openbsd default-mysql-client git
+          python3 -m pip install --user --break-system-packages gdown
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.18.10'
+
+      - name: Download exact archive and extract Data.pk2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy57"
+          mkdir -p "$ROOT/game"
+          cd "$ROOT"
+          ~/.local/bin/gdown "$DRIVE_FILE_ID" -O PHUONGHOANG90.rar
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$EXPECTED_SIZE"
+          ACTUAL_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
+          unrar x -o+ -idq PHUONGHOANG90.rar 'PHUONGHOANG90/Data.pk2' game/
+          test -s "$ROOT/game/PHUONGHOANG90/Data.pk2"
+          printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
+
+      - name: Checkout and build pinned legacy server
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy57"
+          git clone https://github.com/ferdoran/go-sro.git "$ROOT/go-sro"
+          cd "$ROOT/go-sro"
+          git checkout "$GOSRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
+          go mod download
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/gateway-server" gateway-server/server.go
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/agent-server" agent-server/server.go
+          test -s "$ROOT/gateway-server"
+          test -s "$ROOT/agent-server"
+
+      - name: Start isolated MySQL 5.7
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy57"
+          docker rm -f ph90-mysql57 >/dev/null 2>&1 || true
+          docker run -d --name ph90-mysql57 \
+            -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
+            -e MYSQL_ROOT_HOST=% \
+            -p 127.0.0.1:33307:3306 \
+            -v "$ROOT/go-sro/db:/docker-entrypoint-initdb.d:ro" \
+            mysql:5.7
+          for i in $(seq 1 90); do
+            if docker exec ph90-mysql57 mysqladmin ping -uroot --silent >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec ph90-mysql57 mysqladmin ping -uroot --silent
+          for i in $(seq 1 90); do
+            if docker exec ph90-mysql57 mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec ph90-mysql57 mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219', STATUS=1 WHERE ID=1;"
+          docker exec ph90-mysql57 mysql -uroot -e 'SELECT * FROM SRO_ACCOUNT.SHARD;'
+
+      - name: Start Agent
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy57"
+          DATA="$ROOT/game/PHUONGHOANG90/Data.pk2"
+          env \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33307 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33307 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
+            AGENT_HOST=127.0.0.1 AGENT_PORT=15882 AGENT_DATA_PATH="$DATA" AGENT_PRELINKED_NAVDATA_FILE="$ROOT/no-prelinked-nav.gob" \
+            LOG_LEVEL=debug \
+            "$ROOT/agent-server" >"$ROOT/agent.log" 2>&1 &
+          echo $! > "$ROOT/agent.pid"
+          for i in $(seq 1 120); do
+            if nc -z 127.0.0.1 15882; then exit 0; fi
+            if ! kill -0 "$(cat "$ROOT/agent.pid")" 2>/dev/null; then cat "$ROOT/agent.log"; exit 1; fi
+            sleep 2
+          done
+          cat "$ROOT/agent.log"
+          exit 1
+
+      - name: Start Gateway
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy57"
+          env \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33307 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33307 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
+            AGENT_HOST=127.0.0.1 AGENT_PUBLIC_IP=127.0.0.1 AGENT_PORT=15882 \
+            GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=15779 LOG_LEVEL=debug \
+            "$ROOT/gateway-server" >"$ROOT/gateway.log" 2>&1 &
+          echo $! > "$ROOT/gateway.pid"
+          for i in $(seq 1 60); do
+            if nc -z 127.0.0.1 15779; then exit 0; fi
+            if ! kill -0 "$(cat "$ROOT/gateway.pid")" 2>/dev/null; then cat "$ROOT/gateway.log"; exit 1; fi
+            sleep 1
+          done
+          cat "$ROOT/gateway.log"
+          exit 1
+
+      - name: Verify TCP stack
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy57"
+          nc -zv 127.0.0.1 15779 2>&1 | tee "$ROOT/gateway-port.txt"
+          nc -zv 127.0.0.1 15882 2>&1 | tee "$ROOT/agent-port.txt"
+          {
+            echo PHUONGHOANG90_LEGACY_TCP_OK=1
+            echo CLIENT_VERSION=219
+            echo CONTENT_ID=22
+            echo GATEWAY_PORT=15779
+            echo AGENT_PORT=15882
+            cat "$ROOT/provenance.txt"
+          } | tee "$ROOT/legacy57-report.txt"
+
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-legacy57-smoke
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ph90legacy57/legacy57-report.txt
+            ${{ runner.temp }}/ph90legacy57/provenance.txt
+            ${{ runner.temp }}/ph90legacy57/agent.log
+            ${{ runner.temp }}/ph90legacy57/gateway.log
+            ${{ runner.temp }}/ph90legacy57/gateway-port.txt
+            ${{ runner.temp }}/ph90legacy57/agent-port.txt

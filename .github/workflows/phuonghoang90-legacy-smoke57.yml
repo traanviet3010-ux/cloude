@@ -102,6 +102,35 @@ jobs:
           docker exec ph90-mysql mysql -uroot -e 'SELECT COUNT(*) AS CHARS FROM SRO_SHARD.CHAR_REF_DATA; SELECT * FROM SRO_ACCOUNT.SHARD;'
           docker exec ph90-mysql mysql -uroot -Nse 'SHOW TABLES FROM SRO_SHARD' | tee "$ROOT/shard-tables.txt"
 
+      - name: Diagnose MySQL TCP before Agent
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90legacy"
+
+          TCP_READY=0
+          for i in $(seq 1 60); do
+            if mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -uroot ping --silent >/dev/null 2>&1; then
+              TCP_READY=1
+              echo "MySQL TCP ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          test "$TCP_READY" = 1
+          mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -uroot ping
+
+          {
+            echo '=== TCP COUNT CHAR_REF_DATA ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT COUNT(*) FROM SRO_SHARD.CHAR_REF_DATA;"
+            echo '=== MYSQL VERSION ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT VERSION();"
+            echo '=== DEFAULT AUTHENTICATION PLUGIN ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SHOW VARIABLES LIKE 'default_authentication_plugin';"
+            echo '=== TCP CHAR_REF_DATA LIMIT 100 ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT * FROM SRO_SHARD.CHAR_REF_DATA ORDER BY RefObjID LIMIT 100;"
+          } | tee "$ROOT/mysql-tcp-diagnostics.txt"
+
       - name: Start Agent
         shell: bash
         run: |
@@ -159,6 +188,18 @@ jobs:
             cat "$ROOT/provenance.txt"
           } | tee "$ROOT/legacy-report.txt"
 
+      - name: Collect MySQL and memory diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          ROOT="$RUNNER_TEMP/ph90legacy"
+          mkdir -p "$ROOT"
+          echo '=== docker logs ph90-mysql ==='
+          docker logs ph90-mysql 2>&1 | tee "$ROOT/mysql-docker.log"
+          echo '=== free -h ==='
+          free -h 2>&1 | tee "$ROOT/memory-free.txt"
+
       - name: Upload smoke report
         if: always()
         uses: actions/upload-artifact@v4
@@ -174,3 +215,6 @@ jobs:
             ${{ runner.temp }}/ph90legacy/gateway-port.txt
             ${{ runner.temp }}/ph90legacy/agent-port.txt
             ${{ runner.temp }}/ph90legacy/shard-tables.txt
+            ${{ runner.temp }}/ph90legacy/mysql-tcp-diagnostics.txt
+            ${{ runner.temp }}/ph90legacy/mysql-docker.log
+            ${{ runner.temp }}/ph90legacy/memory-free.txt

@@ -10,7 +10,7 @@ jobs:
   assetlog:
     runs-on: ubuntu-24.04
     environment: hieusro-vps
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout operations script
         uses: actions/checkout@v4
@@ -27,13 +27,13 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
           ssh-keygen -F 143.198.217.75 -f ~/.ssh/known_hosts >/dev/null
-      - name: Read-only manifest/cache diagnosis
+      - name: Apply manifest cache fix and prewarm startup packs
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' \
-            < .github/scripts/diagnose-live-manifest-cache.sh
+            < .github/scripts/apply-live-manifest-prewarm-fix.sh
       - name: Remove key
         if: always()
         run: rm -f ~/.ssh/id_ed25519

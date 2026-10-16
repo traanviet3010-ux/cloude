@@ -1,0 +1,117 @@
+name: Project PHUONGHOANG90 v219 server data
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-v219-serverdata.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  serverdata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      EXPECTED_SIZE: '1792674229'
+      EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+
+    steps:
+      - name: Install tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar ffmpeg git build-essential python3-pip fonts-liberation2
+          python3 -m pip install --user --break-system-packages gdown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+
+      - name: Prepare exact v219 source data
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219sd"
+          mkdir -p "$ROOT/game"
+          cd "$ROOT"
+          ~/.local/bin/gdown "$DRIVE_FILE_ID" -O client.rar
+          test "$(stat -c %s client.rar)" = "$EXPECTED_SIZE"
+          test "$(sha256sum client.rar | awk '{print $1}')" = "$EXPECTED_SHA256"
+          unrar x -o+ -idq client.rar 'PHUONGHOANG90/*.pk2' 'PHUONGHOANG90/sro_client.exe' game/
+          GAME="$ROOT/game/PHUONGHOANG90"
+          ln -sf sro_client.exe "$GAME/SRO_Client.exe"
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git "$ROOT/opensro"
+          cd "$ROOT/opensro"
+          git checkout "$OPEN_SRO_COMMIT"
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          python3 -m pip install --user --break-system-packages -r requirements-build.txt
+          export SRO_GAME_ROOT="$GAME"
+          export SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf
+          export SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf
+          corepack pnpm assets prepare
+          corepack pnpm assets doctor
+
+      - name: Preserve v219 native localization for server projection
+        run: |
+          set -euxo pipefail
+          FILE="$RUNNER_TEMP/ph219sd/opensro/scripts/build/shared/englishCompletions.mjs"
+          python3 - "$FILE" <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          s = p.read_text()
+          marker = 'export function completeEnglishTextProjection( fileName, bytes ) {\n'
+          if marker not in s:
+              raise SystemExit('projection function not found')
+          p.write_text(s.replace(marker, marker + '\treturn bytes; // v219 uses its own retail localization\n', 1))
+          PY
+
+      - name: Build server data and Linux services
+        run: |
+          set -uo pipefail
+          ROOT="$RUNNER_TEMP/ph219sd"
+          SRC="$ROOT/opensro"
+          export SRO_GAME_ROOT="$ROOT/game/PHUONGHOANG90"
+          cd "$SRC"
+          set +e
+          corepack pnpm task build server-game-data 2>&1 | tee "$ROOT/server-data.log"
+          SD=${PIPESTATUS[0]}
+          echo "SERVER_GAME_DATA=$SD" | tee "$ROOT/status.env"
+          if [ "$SD" -eq 0 ]; then
+            cd "$SRC/apps/server"
+            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-agent" ./cmd/services/sro-agent 2>&1 | tee "$ROOT/agent.log"
+            A=${PIPESTATUS[0]}
+            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-gameworld" ./cmd/services/sro-gameworld 2>&1 | tee "$ROOT/gameworld.log"
+            G=${PIPESTATUS[0]}
+            SROGZ="$(find "$SRC/apps/server/.generated/game-data" -type f -name server.srogz -print -quit)"
+            if [ -n "$SROGZ" ] && [ -s "$SROGZ" ]; then cp "$SROGZ" "$ROOT/server-v219.srogz"; fi
+          else
+            A=125; G=125
+            echo SKIPPED > "$ROOT/agent.log"
+            echo SKIPPED > "$ROOT/gameworld.log"
+          fi
+          echo "BUILD_AGENT=$A" >> "$ROOT/status.env"
+          echo "BUILD_GAMEWORLD=$G" >> "$ROOT/status.env"
+          exit 0
+
+      - name: Upload server-data result
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-v219-serverdata
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/ph219sd/status.env
+            ${{ runner.temp }}/ph219sd/server-data.log
+            ${{ runner.temp }}/ph219sd/agent.log
+            ${{ runner.temp }}/ph219sd/gameworld.log
+            ${{ runner.temp }}/ph219sd/sro-agent
+            ${{ runner.temp }}/ph219sd/sro-gameworld
+            ${{ runner.temp }}/ph219sd/server-v219.srogz

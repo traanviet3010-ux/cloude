@@ -1,4 +1,4 @@
-name: Smoke PHUONGHOANG90 legacy TCP server on MySQL8 native auth
+name: Smoke PHUONGHOANG90 legacy TCP server modern DB driver
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  smoke-native:
+  smoke-modern-db:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -32,7 +32,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.18.10'
+          go-version: '1.22.12'
 
       - name: Download exact archive and extract Data.pk2
         shell: bash
@@ -49,7 +49,7 @@ jobs:
           test -s "$ROOT/game/PHUONGHOANG90/Data.pk2"
           printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
 
-      - name: Checkout and build pinned legacy server
+      - name: Checkout patch DB driver and build legacy server
         shell: bash
         run: |
           set -euxo pipefail
@@ -58,13 +58,15 @@ jobs:
           cd "$ROOT/go-sro"
           git checkout "$GOSRO_COMMIT"
           test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
-          go mod download
+          go get github.com/go-sql-driver/mysql@v1.8.1
+          go mod tidy
+          grep 'go-sql-driver/mysql' go.mod
           CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/gateway-server" gateway-server/server.go
           CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/agent-server" agent-server/server.go
           test -s "$ROOT/gateway-server"
           test -s "$ROOT/agent-server"
 
-      - name: Start isolated MySQL 8 with native password auth
+      - name: Start isolated MySQL 8
         shell: bash
         run: |
           set -euxo pipefail
@@ -75,7 +77,7 @@ jobs:
             -e MYSQL_ROOT_HOST=% \
             -p 127.0.0.1:33306:3306 \
             -v "$ROOT/go-sro/db:/docker-entrypoint-initdb.d:ro" \
-            mysql:8.0 --default-authentication-plugin=mysql_native_password
+            mysql:8.0
           for i in $(seq 1 90); do
             if docker exec ph90-mysql mysqladmin ping -uroot --silent >/dev/null 2>&1; then break; fi
             sleep 2
@@ -88,7 +90,7 @@ jobs:
           done
           test "$READY" = 1
           docker exec ph90-mysql mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219', STATUS=1 WHERE ID=1;"
-          docker exec ph90-mysql mysql -uroot -e 'SELECT * FROM SRO_ACCOUNT.SHARD;'
+          docker exec ph90-mysql mysql -uroot -e 'SELECT COUNT(*) AS ITEMS FROM SRO_SHARD.ITEMDATA; SELECT * FROM SRO_ACCOUNT.SHARD;'
 
       - name: Start Agent
         shell: bash
@@ -151,7 +153,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-legacy-native-smoke
+          name: PHUONGHOANG90-legacy-modern-db-smoke
           retention-days: 7
           if-no-files-found: warn
           path: |

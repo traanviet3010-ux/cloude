@@ -84,12 +84,21 @@ jobs:
           rm -rf "$INITDIR"
           mkdir -p "$INITDIR"
           cp -a "$ROOT/go-sro/db/." "$INITDIR/"
+
+          SRO_DB_PASSWORD="$(python3 - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )"
+          echo "::add-mask::$SRO_DB_PASSWORD"
+          export SRO_DB_PASSWORD
+          printf 'SRO_DB_PASSWORD=%s\n' "$SRO_DB_PASSWORD" >> "$GITHUB_ENV"
+
           python3 - <<'PY'
           import os
-          import secrets
           from pathlib import Path
           initdir = Path(os.environ['RUNNER_TEMP']) / 'ph90legacy' / 'mysql-init'
-          password = secrets.token_urlsafe(32)
+          password = os.environ['SRO_DB_PASSWORD']
           (initdir / '00-create-sro-user.sql').write_text(
               "CREATE USER IF NOT EXISTS 'sro'@'%' IDENTIFIED BY '" + password + "';\n",
               encoding='utf-8',
@@ -126,25 +135,25 @@ jobs:
 
           TCP_READY=0
           for i in $(seq 1 60); do
-            if mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -uroot ping --silent >/dev/null 2>&1; then
+            if mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" ping --silent >/dev/null 2>&1; then
               TCP_READY=1
-              echo "MySQL TCP ready after ${i}s"
+              echo "MySQL TCP ready for sro after ${i}s"
               break
             fi
             sleep 1
           done
           test "$TCP_READY" = 1
-          mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -uroot ping
+          mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" ping
 
           {
-            echo '=== TCP COUNT CHAR_REF_DATA ==='
-            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT COUNT(*) FROM SRO_SHARD.CHAR_REF_DATA;"
-            echo '=== MYSQL VERSION ==='
-            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT VERSION();"
-            echo '=== DEFAULT AUTHENTICATION PLUGIN ==='
-            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SHOW VARIABLES LIKE 'default_authentication_plugin';"
-            echo '=== TCP CHAR_REF_DATA LIMIT 100 ==='
-            mysql --protocol=TCP -h127.0.0.1 -P33306 -uroot -e "SELECT * FROM SRO_SHARD.CHAR_REF_DATA ORDER BY RefObjID LIMIT 100;"
+            echo '=== TCP COUNT CHAR_REF_DATA AS SRO ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" -e "SELECT COUNT(*) FROM SRO_SHARD.CHAR_REF_DATA;"
+            echo '=== MYSQL VERSION AS SRO ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" -e "SELECT VERSION();"
+            echo '=== DEFAULT AUTHENTICATION PLUGIN AS SRO ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" -e "SHOW VARIABLES LIKE 'default_authentication_plugin';"
+            echo '=== TCP CHAR_REF_DATA LIMIT 100 AS SRO ==='
+            mysql --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" -e "SELECT * FROM SRO_SHARD.CHAR_REF_DATA ORDER BY RefObjID LIMIT 100;"
           } | tee "$ROOT/mysql-tcp-diagnostics.txt"
 
       - name: Start Agent
@@ -154,8 +163,8 @@ jobs:
           ROOT="$RUNNER_TEMP/ph90legacy"
           DATA="$ROOT/game/PHUONGHOANG90/Data.pk2"
           env \
-            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
-            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW="$SRO_DB_PASSWORD" DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW="$SRO_DB_PASSWORD" DB_SHARD_DATABASE=SRO_SHARD \
             AGENT_HOST=127.0.0.1 AGENT_PORT=15882 AGENT_DATA_PATH="$DATA" AGENT_PRELINKED_NAVDATA_FILE="$ROOT/no-prelinked-nav.gob" \
             LOG_LEVEL=debug \
             "$ROOT/agent-server" >"$ROOT/agent.log" 2>&1 &
@@ -174,8 +183,8 @@ jobs:
           set -euxo pipefail
           ROOT="$RUNNER_TEMP/ph90legacy"
           env \
-            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=root DB_ACCOUNT_PW= DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
-            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=root DB_SHARD_PW= DB_SHARD_DATABASE=SRO_SHARD \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW="$SRO_DB_PASSWORD" DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW="$SRO_DB_PASSWORD" DB_SHARD_DATABASE=SRO_SHARD \
             AGENT_HOST=127.0.0.1 AGENT_PUBLIC_IP=127.0.0.1 AGENT_PORT=15882 \
             GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=15779 LOG_LEVEL=debug \
             "$ROOT/gateway-server" >"$ROOT/gateway.log" 2>&1 &

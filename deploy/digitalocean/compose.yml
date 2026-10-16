@@ -14,6 +14,7 @@ services:
       HIEUSRO_GM_SESSION_SECRET: "${HIEUSRO_GM_SESSION_SECRET}"
     volumes:
       - game_state:/data/state
+      - asset_cache:/var/cache/hieusro-assets
     expose:
       - "10000"
     healthcheck:
@@ -63,7 +64,7 @@ services:
     environment:
       HIEUSRO_HOST: "${HIEUSRO_HOST}"
       HIEUSRO_PORTAL_HOST: "${HIEUSRO_PORTAL_HOST}"
-      HIEUSRO_CADDY_REV: "20261015-live-only"
+      HIEUSRO_CADDY_REV: "20261016-asset-mirror"
     ports:
       - "80:80"
       - "443:443"
@@ -76,5 +77,6 @@ services:
 volumes:
   game_state:
   redis_data:
+  asset_cache:
   caddy_data:
   caddy_config:

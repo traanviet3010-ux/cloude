@@ -1,0 +1,158 @@
+name: Continue PHUONGHOANG90 v219 OpenSRO compatibility
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-opensro-compat-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compat-fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      EXPECTED_SIZE: '1792674229'
+      EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+      SRO_BUILD_JOBS: '2'
+
+    steps:
+      - name: Install toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar ffmpeg git build-essential python3-pip fonts-liberation2 ca-certificates
+          python3 -m pip install --user --break-system-packages gdown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+
+      - name: Download and extract exact v219 client inputs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219fix"
+          mkdir -p "$ROOT/game"
+          cd "$ROOT"
+          ~/.local/bin/gdown "$DRIVE_FILE_ID" -O PHUONGHOANG90.rar
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$EXPECTED_SIZE"
+          test "$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')" = "$EXPECTED_SHA256"
+          unrar x -o+ -idq PHUONGHOANG90.rar \
+            'PHUONGHOANG90/*.pk2' \
+            'PHUONGHOANG90/sro_client.exe' \
+            game/
+          GAME="$ROOT/game/PHUONGHOANG90"
+          for f in Media.pk2 Data.pk2 Map.pk2 Particles.pk2 Music.pk2 sro_client.exe; do test -s "$GAME/$f"; done
+          ln -sf sro_client.exe "$GAME/SRO_Client.exe"
+
+      - name: Checkout and patch pinned OpenSRO only for TEST compatibility
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219fix"
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git "$ROOT/opensro"
+          cd "$ROOT/opensro"
+          git checkout "$OPEN_SRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$OPEN_SRO_COMMIT"
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          python3 -m pip install --user --break-system-packages -r requirements-build.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/build/shared/englishCorrections.mjs')
+          s = p.read_text()
+          old = 'if ( english !== correction.before ) throw new Error( `Stale English correction ${fileName}:${key}` );'
+          new = 'if ( english !== correction.before ) return english; // v219 TEST: keep changed retail wording'
+          if old not in s:
+              raise SystemExit('englishCorrections guard not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Run compatibility continuation
+        shell: bash
+        run: |
+          set -uo pipefail
+          ROOT="$RUNNER_TEMP/ph219fix"
+          SRC="$ROOT/opensro"
+          export SRO_GAME_ROOT="$ROOT/game/PHUONGHOANG90"
+          export SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf
+          export SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf
+          cd "$SRC"
+          : > "$ROOT/status.env"
+          set +e
+
+          corepack pnpm assets prepare 2>&1 | tee "$ROOT/01-prepare.log"
+          PREPARE=${PIPESTATUS[0]}; echo "PREPARE=$PREPARE" >> "$ROOT/status.env"
+          corepack pnpm assets doctor 2>&1 | tee "$ROOT/02-doctor.log"
+          DOCTOR=${PIPESTATUS[0]}; echo "DOCTOR=$DOCTOR" >> "$ROOT/status.env"
+
+          corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/03-world-first.log"
+          WORLD_FIRST=${PIPESTATUS[0]}; echo "WORLD_FIRST=$WORLD_FIRST" >> "$ROOT/status.env"
+          FAILS="$SRC/.generated/intermediate/image-conversion-failures.txt"
+          if [ -f "$FAILS" ]; then cp "$FAILS" "$ROOT/image-conversion-failures.txt"; fi
+
+          if [ "$WORLD_FIRST" -ne 0 ] && [ -f "$FAILS" ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/convert_images.py')
+          s = p.read_text()
+          old = '''        print(f"Failures written to {failure_path}", file=sys.stderr)\n        return 1'''
+          new = '''        print(f"Failures written to {failure_path}; v219 TEST continues with these images omitted", file=sys.stderr)\n        return 0'''
+          if old not in s:
+              raise SystemExit('convert_images failure return not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+            corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/04-world-lenient.log"
+            WORLD_LENIENT=${PIPESTATUS[0]}
+          else
+            WORLD_LENIENT=$WORLD_FIRST
+            echo 'Not required' | tee "$ROOT/04-world-lenient.log"
+          fi
+          echo "WORLD_LENIENT=$WORLD_LENIENT" >> "$ROOT/status.env"
+
+          corepack pnpm task build server-game-data 2>&1 | tee "$ROOT/05-server-game-data.log"
+          SERVER_DATA=${PIPESTATUS[0]}; echo "SERVER_GAME_DATA=$SERVER_DATA" >> "$ROOT/status.env"
+
+          if [ "$SERVER_DATA" -eq 0 ]; then
+            cd "$SRC/apps/server"
+            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-agent" ./cmd/services/sro-agent 2>&1 | tee "$ROOT/06-build-agent.log"
+            AGENT=${PIPESTATUS[0]}
+            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-gameworld" ./cmd/services/sro-gameworld 2>&1 | tee "$ROOT/07-build-gameworld.log"
+            GAMEWORLD=${PIPESTATUS[0]}
+          else
+            AGENT=125; GAMEWORLD=125
+            echo 'SKIPPED' | tee "$ROOT/06-build-agent.log" "$ROOT/07-build-gameworld.log"
+          fi
+          echo "BUILD_AGENT=$AGENT" >> "$ROOT/status.env"
+          echo "BUILD_GAMEWORLD=$GAMEWORLD" >> "$ROOT/status.env"
+          set -e
+          cat "$ROOT/status.env" | tee "$ROOT/compat-fix-report.txt"
+          df -h . | tee -a "$ROOT/compat-fix-report.txt"
+          exit 0
+
+      - name: Upload continuation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-opensro-compat-fix
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/ph219fix/status.env
+            ${{ runner.temp }}/ph219fix/compat-fix-report.txt
+            ${{ runner.temp }}/ph219fix/image-conversion-failures.txt
+            ${{ runner.temp }}/ph219fix/01-prepare.log
+            ${{ runner.temp }}/ph219fix/02-doctor.log
+            ${{ runner.temp }}/ph219fix/03-world-first.log
+            ${{ runner.temp }}/ph219fix/04-world-lenient.log
+            ${{ runner.temp }}/ph219fix/05-server-game-data.log
+            ${{ runner.temp }}/ph219fix/06-build-agent.log
+            ${{ runner.temp }}/ph219fix/07-build-gameworld.log

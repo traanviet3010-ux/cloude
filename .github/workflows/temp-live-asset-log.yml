@@ -1,0 +1,99 @@
+name: Temporary LIVE asset timing log
+
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths: ['.github/workflows/temp-live-asset-log.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hieusro-temp-live-asset-log
+  cancel-in-progress: false
+
+jobs:
+  enable:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: hieusro-vps
+    steps:
+      - name: Configure pinned SSH trust
+        env:
+          VPS_HOST_KEY: ${{ secrets.HIEUSRO_VPS_HOST_KEY }}
+          VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          ssh-keygen -F 143.198.217.75 -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Enable temporary nginx asset log only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          if sudo -n true >/dev/null 2>&1; then
+            SUDO='sudo -n'
+          else
+            SUDO=''
+          fi
+
+          GAME="$($SUDO docker ps --filter label=com.docker.compose.service=game --format '{{.ID}}' | head -n1)"
+          test -n "$GAME"
+          echo "game_container=$GAME"
+
+          $SUDO docker exec -i "$GAME" python3 - <<'PY'
+          from pathlib import Path
+
+          config = Path('/opt/hieusro/runtime-nginx.conf')
+          backup = Path('/tmp/runtime-nginx.conf.before-temp-asset-log')
+          text = config.read_text()
+          begin = '# HIEUSRO TEMP ASSET LOG BEGIN 20261016'
+          if begin not in text:
+              backup.write_text(text)
+              block = r'''  # HIEUSRO TEMP ASSET LOG BEGIN 20261016
+  map $uri $hieusro_temp_asset_log {
+    default 0;
+    ~^/assets/ 1;
+  }
+  log_format hieusro_temp_asset escape=json
+    '{"ts":"$time_iso8601","method":"$request_method","uri":"$request_uri","status":$status,"bytes":$body_bytes_sent,"request_time":$request_time,"upstream_response_time":"$upstream_response_time","cache":"$upstream_cache_status","asset_source":"$sent_http_x_hieusro_asset_source","upstream_addr":"$upstream_addr","upstream_status":"$upstream_status","ua":"$http_user_agent"}';
+  access_log /tmp/hieusro-asset-temp.log hieusro_temp_asset if=$hieusro_temp_asset_log;
+  # HIEUSRO TEMP ASSET LOG END 20261016
+'''
+              needle = 'http {\n'
+              if needle not in text:
+                  raise SystemExit('nginx http block not found')
+              config.write_text(text.replace(needle, needle + block, 1))
+          elif not backup.exists():
+              raise SystemExit('temp log marker exists but rollback backup is missing')
+          PY
+
+          echo '=== CONFIG DIFF (must be logging-only) ==='
+          $SUDO docker exec "$GAME" sh -lc 'diff -u /tmp/runtime-nginx.conf.before-temp-asset-log /opt/hieusro/runtime-nginx.conf || true'
+
+          $SUDO docker exec "$GAME" nginx -t -c /opt/hieusro/runtime-nginx.conf
+          $SUDO docker exec "$GAME" nginx -c /opt/hieusro/runtime-nginx.conf -s reload
+          sleep 1
+
+          # One sanity request verifies the log format, then the file is reset so
+          # the owner's Safari cold-load starts with a clean capture.
+          curl -k -fsS -o /dev/null --max-time 20 'https://play.143-198-217-75.sslip.io/assets/packs/manifest.json'
+          sleep 1
+          $SUDO docker exec "$GAME" sh -lc 'test -s /tmp/hieusro-asset-temp.log && tail -n 2 /tmp/hieusro-asset-temp.log'
+          $SUDO docker exec "$GAME" sh -lc ': > /tmp/hieusro-asset-temp.log; date -u +%FT%TZ > /tmp/hieusro-asset-temp.start; printf "capture_start="; cat /tmp/hieusro-asset-temp.start'
+
+          echo 'TEMP_ASSET_LOG_READY=1'
+          REMOTE
+
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

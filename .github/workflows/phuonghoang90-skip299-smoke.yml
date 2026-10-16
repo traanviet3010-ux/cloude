@@ -1,0 +1,231 @@
+name: Smoke PHUONGHOANG90 exact skip299 fallback
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-skip299-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  skip299-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PH90_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      PH90_EXPECTED_SIZE: '1792674229'
+      PH90_EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      GOSRO_COMMIT: 7507c9210da1fb44b3c221f8e30568e26fba68dc
+
+    steps:
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar python3-pip netcat-openbsd default-mysql-client git
+          python3 -m pip install --user --break-system-packages gdown
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.12'
+          cache: false
+
+      - name: Download exact PHUONGHOANG90 Data.pk2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-skip299"
+          mkdir -p "$ROOT/game"
+          cd "$ROOT"
+          ~/.local/bin/gdown "$PH90_FILE_ID" -O PHUONGHOANG90.rar
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$PH90_EXPECTED_SIZE"
+          SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
+          test "$SHA" = "$PH90_EXPECTED_SHA256"
+          unrar x -o+ -idq PHUONGHOANG90.rar 'PHUONGHOANG90/Data.pk2' game/
+          mv game/PHUONGHOANG90/Data.pk2 game/Data.pk2
+          rmdir game/PHUONGHOANG90
+          printf 'PH90_ARCHIVE_SHA256=%s\nPH90_DATA_SIZE=%s\n' "$SHA" "$(stat -c %s game/Data.pk2)" | tee provenance.txt
+
+      - name: Generate exact skip list and build TEST-only Agent
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-skip299"
+          git clone https://github.com/ferdoran/go-sro.git "$ROOT/go-sro"
+          cd "$ROOT/go-sro"
+          git checkout "$GOSRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
+          go get github.com/go-sql-driver/mysql@v1.8.1
+          go mod tidy
+
+          GEN="$ROOT/generator"
+          mkdir -p "$GEN"
+          cat > "$GEN/go.mod" <<EOF
+          module skipgen
+          go 1.22
+          require github.com/ferdoran/go-sro v0.0.0
+          replace github.com/ferdoran/go-sro => $ROOT/go-sro
+          EOF
+          cat > "$GEN/main.go" <<'EOF'
+          package main
+
+          import (
+            "bufio"
+            "encoding/binary"
+            "fmt"
+            "os"
+            "sort"
+            "strconv"
+            "strings"
+            "github.com/ferdoran/go-sro/framework/pk2"
+          )
+
+          type oi struct { Index uint32; Path string }
+          func norm(s string) string { s=strings.ReplaceAll(s,"\\","/"); for strings.Contains(s,"//") { s=strings.ReplaceAll(s,"//","/") }; return strings.ToLower(strings.TrimPrefix(s,"./")) }
+          func parseOI(b []byte) map[uint32]oi { sc:=bufio.NewScanner(strings.NewReader(string(b))); if !sc.Scan() || strings.TrimSpace(sc.Text())!="JMXVOBJI1000" { panic("bad object.ifo") }; sc.Scan(); n,_:=strconv.Atoi(strings.TrimSpace(sc.Text())); out:=map[uint32]oi{}; for i:=0;i<n;i++ { if !sc.Scan(){panic("object.ifo eof")}; line:=sc.Text(); id,_:=strconv.ParseUint(line[:5],10,32); p:=strings.ReplaceAll(line[18:],"\"",""); out[uint32(id)]=oi{uint32(id),p} }; return out }
+          func parseNVM(b []byte) []uint32 { if len(b)<14 || string(b[:12])!="JMXVNVM 1000" { panic("bad nvm") }; pos:=12; n:=int(binary.LittleEndian.Uint16(b[pos:pos+2])); pos+=2; ids:=make([]uint32,0,n); for i:=0;i<n;i++ { id:=binary.LittleEndian.Uint32(b[pos:pos+4]); links:=int(binary.LittleEndian.Uint16(b[pos+30:pos+32])); ids=append(ids,id); pos+=32+links*6 }; return ids }
+          func main(){
+            if len(os.Args)!=4 { panic("usage data.pk2 out.go outdir") }
+            r:=pk2.NewPk2Reader(os.Args[1]); r.IndexArchive()
+            normKeys:=map[string]bool{}; for k:=range r.Files { normKeys[norm(k)]=true }
+            b,err:=r.ReadFile("Data/navmesh/object.ifo"); if err!=nil { panic(err) }; objs:=parseOI(b)
+            refs:=map[uint32]bool{}; for k,e:=range r.Files { if strings.HasSuffix(norm(k),".nvm") { bb:=r.ReadEntry(&e); for _,id:=range parseNVM(bb){ refs[id]=true } } }
+            var ids []int; var paths []string
+            for id:=range refs { x,ok:=objs[id]; if !ok { panic(fmt.Sprintf("unresolved object %d",id)) }; full:="Data/"+x.Path; if !normKeys[norm(full)] { ids=append(ids,int(id)); paths=append(paths,fmt.Sprintf("%d\t%s",id,full)) } }
+            sort.Ints(ids); sort.Strings(paths)
+            if len(ids)!=299 { panic(fmt.Sprintf("expected exactly 299 missing direct resources, got %d",len(ids))) }
+            var sb strings.Builder
+            sb.WriteString("package navmeshv2\n\nvar ph90SkipMissingObjectIndices = map[uint32]struct{}{\n")
+            for _,id:=range ids { sb.WriteString(fmt.Sprintf("\t%d: {},\n",id)) }
+            sb.WriteString("}\n")
+            if err:=os.WriteFile(os.Args[2],[]byte(sb.String()),0644); err!=nil { panic(err) }
+            if err:=os.WriteFile(os.Args[3]+"/skip299-paths.tsv",[]byte(strings.Join(paths,"\n")+"\n"),0644); err!=nil { panic(err) }
+            var idLines []string; for _,id:=range ids { idLines=append(idLines,strconv.Itoa(id)) }
+            if err:=os.WriteFile(os.Args[3]+"/skip299-object-ids.txt",[]byte(strings.Join(idLines,"\n")+"\n"),0644); err!=nil { panic(err) }
+            fmt.Printf("EXACT_SKIP_PATHS=%d\nEXACT_SKIP_OBJECT_IDS=%d\n",len(paths),len(ids))
+          }
+          EOF
+          cd "$GEN"
+          go mod tidy
+          CGO_ENABLED=0 go run . "$ROOT/game/Data.pk2" "$ROOT/go-sro/agent-server/navmeshv2/ph90_skip_missing_generated.go" "$ROOT" | tee "$ROOT/skip299-summary.txt"
+          test "$(wc -l < "$ROOT/skip299-paths.tsv")" = 299
+          test "$(wc -l < "$ROOT/skip299-object-ids.txt")" = 299
+
+          cd "$ROOT/go-sro"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('agent-server/navmeshv2/loader.go')
+          s=p.read_text()
+          old='''\tobjectEntry := l.ObjectInfo.Objects[objectIndex]\n\tswitch path.Ext(objectEntry.FilePath) {'''
+          new='''\tobjectEntry := l.ObjectInfo.Objects[objectIndex]\n\tif _, skip := ph90SkipMissingObjectIndices[objectIndex]; skip {\n\t\tlogrus.Warnf("TEST-only PHUONGHOANG90: skipping missing direct navmesh resource object %d: %s", objectIndex, objectEntry.FilePath)\n\t\tempty := RtNavmeshObj{}\n\t\tl.ObjectData[objectIndex] = empty\n\t\treturn empty\n\t}\n\tswitch path.Ext(objectEntry.FilePath) {'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one LoadObjectMesh insertion point, got {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('agent-server/server.go')
+          s=p.read_text()
+          old='model.RefItems = model.GetAllRefItems()'
+          new='model.RefItems = make(map[uint32]model.RefItem) // TEST-only: repo schema probe'
+          if s.count(old)!=1: raise SystemExit('RefItems patch point mismatch')
+          p.write_text(s.replace(old,new,1))
+          PY
+          grep -n 'PHUONGHOANG90: skipping' agent-server/navmeshv2/loader.go
+          grep -n 'RefItems = ' agent-server/server.go | tail -1
+          CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/agent-server" agent-server/server.go
+          test -s "$ROOT/agent-server"
+
+      - name: Start isolated MySQL 8 with masked sro user
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-skip299"
+          INITDIR="$ROOT/mysql-init"
+          mkdir -p "$INITDIR"
+          cp -a "$ROOT/go-sro/db/." "$INITDIR/"
+          set +x
+          SRO_DB_PASSWORD="$(python3 - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )"
+          echo "::add-mask::$SRO_DB_PASSWORD"
+          export SRO_DB_PASSWORD
+          printf 'SRO_DB_PASSWORD=%s\n' "$SRO_DB_PASSWORD" >> "$GITHUB_ENV"
+          set -x
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'ph90-skip299'/'mysql-init'/'00-create-sro-user.sql'
+          pw=os.environ['SRO_DB_PASSWORD'].replace("'","''")
+          p.write_text("CREATE USER IF NOT EXISTS 'sro'@'%' IDENTIFIED BY '"+pw+"';\n")
+          PY
+          docker rm -f ph90-skip299-mysql >/dev/null 2>&1 || true
+          docker run -d --name ph90-skip299-mysql \
+            -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_ROOT_HOST=% \
+            -p 127.0.0.1:33306:3306 \
+            -v "$INITDIR:/docker-entrypoint-initdb.d:ro" \
+            mysql:8.0 --default-authentication-plugin=mysql_native_password
+          READY=0
+          for i in $(seq 1 90); do
+            if docker exec ph90-skip299-mysql mysql -uroot -Nse 'SELECT COUNT(*) FROM SRO_ACCOUNT.SHARD' >/dev/null 2>&1; then READY=1; break; fi
+            sleep 2
+          done
+          test "$READY" = 1
+          docker exec ph90-skip299-mysql mysql -uroot -e "UPDATE SRO_ACCOUNT.SHARD SET CONTENT_ID=22, NAME='HieuSRO-v219-skip299', STATUS=1 WHERE ID=1;"
+          TCP_READY=0
+          for i in $(seq 1 60); do
+            if mysqladmin --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" ping --silent >/dev/null 2>&1; then TCP_READY=1; break; fi
+            sleep 1
+          done
+          test "$TCP_READY" = 1
+          mysql --protocol=TCP -h127.0.0.1 -P33306 -usro -p"$SRO_DB_PASSWORD" -Nse 'SELECT COUNT(*) FROM SRO_SHARD.CHAR_REF_DATA' | tee "$ROOT/char-ref-count.txt"
+
+      - name: Start Agent with exact skip299 fallback
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-skip299"
+          env \
+            DB_ACCOUNT_HOST=127.0.0.1 DB_ACCOUNT_PORT=33306 DB_ACCOUNT_USER=sro DB_ACCOUNT_PW="$SRO_DB_PASSWORD" DB_ACCOUNT_DATABASE=SRO_ACCOUNT \
+            DB_SHARD_HOST=127.0.0.1 DB_SHARD_PORT=33306 DB_SHARD_USER=sro DB_SHARD_PW="$SRO_DB_PASSWORD" DB_SHARD_DATABASE=SRO_SHARD \
+            AGENT_HOST=127.0.0.1 AGENT_PORT=15882 AGENT_DATA_PATH="$ROOT/game/Data.pk2" AGENT_PRELINKED_NAVDATA_FILE="$ROOT/no-prelinked-nav.gob" \
+            LOG_LEVEL=debug \
+            "$ROOT/agent-server" >"$ROOT/agent.log" 2>&1 &
+          echo $! > "$ROOT/agent.pid"
+          for i in $(seq 1 180); do
+            if nc -z 127.0.0.1 15882; then
+              echo 'AGENT_PORT_OPEN=1' | tee "$ROOT/agent-result.txt"
+              cat "$ROOT/agent.log"
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$ROOT/agent.pid")" 2>/dev/null; then
+              echo 'AGENT_EXITED_BEFORE_PORT=1' | tee "$ROOT/agent-result.txt"
+              cat "$ROOT/agent.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo 'AGENT_BOOT_TIMEOUT=1' | tee "$ROOT/agent-result.txt"
+          cat "$ROOT/agent.log"
+          exit 1
+
+      - name: Upload skip299 smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-skip299-smoke-report
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ph90-skip299/provenance.txt
+            ${{ runner.temp }}/ph90-skip299/skip299-summary.txt
+            ${{ runner.temp }}/ph90-skip299/skip299-paths.tsv
+            ${{ runner.temp }}/ph90-skip299/skip299-object-ids.txt
+            ${{ runner.temp }}/ph90-skip299/char-ref-count.txt
+            ${{ runner.temp }}/ph90-skip299/agent-result.txt
+            ${{ runner.temp }}/ph90-skip299/agent.log

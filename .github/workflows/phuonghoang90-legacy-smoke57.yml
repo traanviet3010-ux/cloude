@@ -80,12 +80,28 @@ jobs:
         run: |
           set -euxo pipefail
           ROOT="$RUNNER_TEMP/ph90legacy"
+          INITDIR="$ROOT/mysql-init"
+          rm -rf "$INITDIR"
+          mkdir -p "$INITDIR"
+          cp -a "$ROOT/go-sro/db/." "$INITDIR/"
+          python3 - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          initdir = Path(os.environ['RUNNER_TEMP']) / 'ph90legacy' / 'mysql-init'
+          password = secrets.token_urlsafe(32)
+          (initdir / '00-create-sro-user.sql').write_text(
+              "CREATE USER IF NOT EXISTS 'sro'@'%' IDENTIFIED BY '" + password + "';\n",
+              encoding='utf-8',
+          )
+          PY
+          test -s "$INITDIR/00-create-sro-user.sql"
           docker rm -f ph90-mysql >/dev/null 2>&1 || true
           docker run -d --name ph90-mysql \
             -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
             -e MYSQL_ROOT_HOST=% \
             -p 127.0.0.1:33306:3306 \
-            -v "$ROOT/go-sro/db:/docker-entrypoint-initdb.d:ro" \
+            -v "$INITDIR:/docker-entrypoint-initdb.d:ro" \
             mysql:8.0 --default-authentication-plugin=mysql_native_password
           for i in $(seq 1 90); do
             if docker exec ph90-mysql mysqladmin ping -uroot --silent >/dev/null 2>&1; then break; fi

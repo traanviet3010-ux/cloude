@@ -1,0 +1,190 @@
+name: Probe PHUONGHOANG90 v219 against OpenSRO
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-opensro-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      DRIVE_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      EXPECTED_SIZE: '1792674229'
+      EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+      SRO_BUILD_JOBS: '2'
+
+    steps:
+      - name: Install system tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar ffmpeg git build-essential python3-pip fonts-liberation2 ca-certificates
+          python3 -m pip install --user --break-system-packages gdown
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+
+      - name: Download exact PHUONGHOANG90 archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
+          mkdir -p "$ROOT"
+          cd "$ROOT"
+          ~/.local/bin/gdown "$DRIVE_FILE_ID" -O PHUONGHOANG90.rar
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$EXPECTED_SIZE"
+          ACTUAL_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
+          printf 'ARCHIVE_SIZE=%s\nARCHIVE_SHA256=%s\n' "$EXPECTED_SIZE" "$ACTUAL_SHA" | tee provenance.txt
+          df -h . | tee disk-before.txt
+
+      - name: Extract only OpenSRO client inputs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
+          mkdir -p "$ROOT/game"
+          cd "$ROOT"
+          unrar x -o+ -idq PHUONGHOANG90.rar \
+            'PHUONGHOANG90/*.pk2' \
+            'PHUONGHOANG90/sro_client.exe' \
+            game/
+          GAME="$ROOT/game/PHUONGHOANG90"
+          test -s "$GAME/Media.pk2"
+          test -s "$GAME/Data.pk2"
+          test -s "$GAME/Map.pk2"
+          test -s "$GAME/Particles.pk2"
+          test -s "$GAME/Music.pk2"
+          test -s "$GAME/sro_client.exe"
+          ln -sf sro_client.exe "$GAME/SRO_Client.exe"
+          {
+            echo '=== INPUT FILES ==='
+            find "$GAME" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort
+            echo
+            echo '=== SHA256 ==='
+            sha256sum "$GAME"/*.pk2 "$GAME/sro_client.exe"
+          } | tee "$ROOT/client-inputs.txt"
+          df -h . | tee "$ROOT/disk-after-extract.txt"
+
+      - name: Checkout pinned OpenSRO source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git "$ROOT/opensro"
+          cd "$ROOT/opensro"
+          git checkout "$OPEN_SRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$OPEN_SRO_COMMIT"
+          corepack enable
+          corepack pnpm --version
+          corepack pnpm install --frozen-lockfile
+          python3 -m pip install --user --break-system-packages -r requirements-build.txt
+
+      - name: Run v219 compatibility probe
+        shell: bash
+        run: |
+          set -uo pipefail
+          ROOT="$RUNNER_TEMP/ph219"
+          SRC="$ROOT/opensro"
+          export SRO_GAME_ROOT="$ROOT/game/PHUONGHOANG90"
+          export SRO_FONT_ARIAL=/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf
+          export SRO_FONT_ARIAL_BOLD=/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf
+          cd "$SRC"
+          STATUS="$ROOT/status.env"
+          : > "$STATUS"
+
+          set +e
+          corepack pnpm assets prepare 2>&1 | tee "$ROOT/01-prepare.log"
+          PREPARE=${PIPESTATUS[0]}
+          echo "PREPARE=$PREPARE" >> "$STATUS"
+
+          corepack pnpm assets doctor 2>&1 | tee "$ROOT/02-doctor.log"
+          DOCTOR=${PIPESTATUS[0]}
+          echo "DOCTOR=$DOCTOR" >> "$STATUS"
+
+          if [ "$PREPARE" -eq 0 ] && [ "$DOCTOR" -eq 0 ]; then
+            corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/03-world-61a8.log"
+            WORLD=${PIPESTATUS[0]}
+          else
+            echo 'SKIPPED: prepare/doctor did not both pass' | tee "$ROOT/03-world-61a8.log"
+            WORLD=125
+          fi
+          echo "WORLD_61A8=$WORLD" >> "$STATUS"
+
+          if [ "$PREPARE" -eq 0 ] && [ "$DOCTOR" -eq 0 ]; then
+            corepack pnpm task build server-game-data 2>&1 | tee "$ROOT/04-server-game-data.log"
+            SERVER_DATA=${PIPESTATUS[0]}
+          else
+            echo 'SKIPPED: prepare/doctor did not both pass' | tee "$ROOT/04-server-game-data.log"
+            SERVER_DATA=125
+          fi
+          echo "SERVER_GAME_DATA=$SERVER_DATA" >> "$STATUS"
+
+          if [ "$SERVER_DATA" -eq 0 ]; then
+            cd "$SRC/apps/server"
+            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-agent" ./cmd/services/sro-agent 2>&1 | tee "$ROOT/05-build-agent.log"
+            AGENT=${PIPESTATUS[0]}
+            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-gameworld" ./cmd/services/sro-gameworld 2>&1 | tee "$ROOT/06-build-gameworld.log"
+            GAMEWORLD=${PIPESTATUS[0]}
+          else
+            echo 'SKIPPED: server game-data did not build' | tee "$ROOT/05-build-agent.log"
+            echo 'SKIPPED: server game-data did not build' | tee "$ROOT/06-build-gameworld.log"
+            AGENT=125
+            GAMEWORLD=125
+          fi
+          echo "BUILD_AGENT=$AGENT" >> "$STATUS"
+          echo "BUILD_GAMEWORLD=$GAMEWORLD" >> "$STATUS"
+          set -e
+
+          {
+            echo 'PHUONGHOANG90_OPEN_SRO_COMPAT_REPORT'
+            echo 'CLIENT_VERSION=219'
+            echo 'CONTENT_ID=22'
+            echo 'EXPECTED_GATEWAY_PORT=15779'
+            echo "OPEN_SRO_COMMIT=$OPEN_SRO_COMMIT"
+            cat "$STATUS"
+            echo
+            echo '=== INPUTS ==='
+            cat "$ROOT/client-inputs.txt"
+            echo
+            echo '=== DISK ==='
+            df -h .
+          } | tee "$ROOT/compat-report.txt"
+
+          # The probe reports incompatibilities through the artifact rather than
+          # hiding the diagnostic behind a failed workflow status.
+          exit 0
+
+      - name: Upload compatibility report
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-opensro-compat
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/ph219/compat-report.txt
+            ${{ runner.temp }}/ph219/status.env
+            ${{ runner.temp }}/ph219/client-inputs.txt
+            ${{ runner.temp }}/ph219/provenance.txt
+            ${{ runner.temp }}/ph219/01-prepare.log
+            ${{ runner.temp }}/ph219/02-doctor.log
+            ${{ runner.temp }}/ph219/03-world-61a8.log
+            ${{ runner.temp }}/ph219/04-server-game-data.log
+            ${{ runner.temp }}/ph219/05-build-agent.log
+            ${{ runner.temp }}/ph219/06-build-gameworld.log

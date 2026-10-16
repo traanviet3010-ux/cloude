@@ -68,6 +68,8 @@ jobs:
           python3 -m pip install --user --break-system-packages -r requirements-build.txt
           python3 - <<'PY'
           from pathlib import Path
+
+          # Keep v219 wording when a reviewed v1.150 correction no longer matches.
           p = Path('scripts/build/shared/englishCorrections.mjs')
           s = p.read_text()
           old = 'if ( english !== correction.before ) throw new Error( `Stale English correction ${fileName}:${key}` );'
@@ -75,9 +77,35 @@ jobs:
           if old not in s:
               raise SystemExit('englishCorrections guard not found')
           p.write_text(s.replace(old, new, 1))
+
+          # The v219 archive contains 22 nonstandard DDJ files. Record them, but
+          # allow the requested region build to prove whether it actually needs them.
+          p = Path('scripts/convert_images.py')
+          s = p.read_text()
+          old = '''        print(f"Failures written to {failure_path}", file=sys.stderr)\n        return 1'''
+          new = '''        print(f"Failures written to {failure_path}; v219 TEST continues so requested-region dependencies can be validated", file=sys.stderr)\n        return 0'''
+          if old not in s:
+              raise SystemExit('convert_images failure return not found')
+          p.write_text(s.replace(old, new, 1))
+
+          # OpenSRO discovers every mapinfo bit before applying --region. For a
+          # targeted compatibility build, validate exactly the requested region
+          # instead, while retaining all normal .m/.t/.o2/.nvm checks for it.
+          p = Path('scripts/build/world/buildOutdoorWorldRegionResources.mjs')
+          s = p.read_text()
+          old_loop = '\tfor ( const regionId of availability.regionIds ) {'
+          new_loop = '''\tconst requested = options.regionIds?.length ? new Set( options.regionIds.map( normalizeRegionId ) ) : undefined;\n\tconst candidateRegionIds = requested ? availability.regionIds.filter( regionId => requested.has( normalizeRegionId( regionId ) ) ) : availability.regionIds;\n\tfor ( const regionId of candidateRegionIds ) {'''
+          if old_loop not in s:
+              raise SystemExit('outdoor discovery loop not found')
+          s = s.replace(old_loop, new_loop, 1)
+          old_call = 'const sectors = options.sectors ?? (await discoverOutdoorWorldSectors( { extractedRoot: sourceExtractedRoot } ));'
+          new_call = 'const sectors = options.sectors ?? (await discoverOutdoorWorldSectors( { extractedRoot: sourceExtractedRoot, regionIds: options.regionIds } ));'
+          if old_call not in s:
+              raise SystemExit('outdoor discovery call not found')
+          p.write_text(s.replace(old_call, new_call, 1))
           PY
 
-      - name: Run compatibility continuation
+      - name: Run requested-region compatibility build
         shell: bash
         run: |
           set -uo pipefail
@@ -95,54 +123,24 @@ jobs:
           corepack pnpm assets doctor 2>&1 | tee "$ROOT/02-doctor.log"
           DOCTOR=${PIPESTATUS[0]}; echo "DOCTOR=$DOCTOR" >> "$ROOT/status.env"
 
-          corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/03-world-first.log"
-          WORLD_FIRST=${PIPESTATUS[0]}; echo "WORLD_FIRST=$WORLD_FIRST" >> "$ROOT/status.env"
+          corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/03-world-61a8.log"
+          WORLD=${PIPESTATUS[0]}; echo "WORLD_61A8=$WORLD" >> "$ROOT/status.env"
           FAILS="$SRC/.generated/intermediate/image-conversion-failures.txt"
           if [ -f "$FAILS" ]; then cp "$FAILS" "$ROOT/image-conversion-failures.txt"; fi
 
-          if [ "$WORLD_FIRST" -ne 0 ] && [ -f "$FAILS" ]; then
-            python3 - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/convert_images.py')
-          s = p.read_text()
-          old = '''        print(f"Failures written to {failure_path}", file=sys.stderr)\n        return 1'''
-          new = '''        print(f"Failures written to {failure_path}; v219 TEST continues with these images omitted", file=sys.stderr)\n        return 0'''
-          if old not in s:
-              raise SystemExit('convert_images failure return not found')
-          p.write_text(s.replace(old, new, 1))
-          PY
-            corepack pnpm assets build world-outdoor -- --region=0x61a8 --force --jobs=1 2>&1 | tee "$ROOT/04-world-lenient.log"
-            WORLD_LENIENT=${PIPESTATUS[0]}
-          else
-            WORLD_LENIENT=$WORLD_FIRST
-            echo 'Not required' | tee "$ROOT/04-world-lenient.log"
-          fi
-          echo "WORLD_LENIENT=$WORLD_LENIENT" >> "$ROOT/status.env"
-
-          corepack pnpm task build server-game-data 2>&1 | tee "$ROOT/05-server-game-data.log"
-          SERVER_DATA=${PIPESTATUS[0]}; echo "SERVER_GAME_DATA=$SERVER_DATA" >> "$ROOT/status.env"
-
-          if [ "$SERVER_DATA" -eq 0 ]; then
-            cd "$SRC/apps/server"
-            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-agent" ./cmd/services/sro-agent 2>&1 | tee "$ROOT/06-build-agent.log"
-            AGENT=${PIPESTATUS[0]}
-            CGO_ENABLED=0 GOOS=linux go build -o "$ROOT/sro-gameworld" ./cmd/services/sro-gameworld 2>&1 | tee "$ROOT/07-build-gameworld.log"
-            GAMEWORLD=${PIPESTATUS[0]}
-          else
-            AGENT=125; GAMEWORLD=125
-            echo 'SKIPPED' | tee "$ROOT/06-build-agent.log" "$ROOT/07-build-gameworld.log"
-          fi
-          echo "BUILD_AGENT=$AGENT" >> "$ROOT/status.env"
-          echo "BUILD_GAMEWORLD=$GAMEWORLD" >> "$ROOT/status.env"
           set -e
           cat "$ROOT/status.env" | tee "$ROOT/compat-fix-report.txt"
-          df -h . | tee -a "$ROOT/compat-fix-report.txt"
+          if [ -f "$SRC/public/assets/world/outdoor/region-61a8.json" ]; then
+            cp "$SRC/public/assets/world/outdoor/region-61a8.json" "$ROOT/region-61a8.json"
+            sha256sum "$ROOT/region-61a8.json" | tee "$ROOT/region-61a8.sha256"
+          fi
+          find "$SRC/public/assets/world" -maxdepth 4 -type f -printf '%P\t%s bytes\n' 2>/dev/null | sort > "$ROOT/world-files.txt" || true
           exit 0
 
-      - name: Upload continuation report
+      - name: Upload requested-region report
         uses: actions/upload-artifact@v4
         with:
-          name: PHUONGHOANG90-opensro-compat-fix
+          name: PHUONGHOANG90-v219-region-61a8
           retention-days: 7
           if-no-files-found: error
           path: |
@@ -151,8 +149,7 @@ jobs:
             ${{ runner.temp }}/ph219fix/image-conversion-failures.txt
             ${{ runner.temp }}/ph219fix/01-prepare.log
             ${{ runner.temp }}/ph219fix/02-doctor.log
-            ${{ runner.temp }}/ph219fix/03-world-first.log
-            ${{ runner.temp }}/ph219fix/04-world-lenient.log
-            ${{ runner.temp }}/ph219fix/05-server-game-data.log
-            ${{ runner.temp }}/ph219fix/06-build-agent.log
-            ${{ runner.temp }}/ph219fix/07-build-gameworld.log
+            ${{ runner.temp }}/ph219fix/03-world-61a8.log
+            ${{ runner.temp }}/ph219fix/region-61a8.json
+            ${{ runner.temp }}/ph219fix/region-61a8.sha256
+            ${{ runner.temp }}/ph219fix/world-files.txt

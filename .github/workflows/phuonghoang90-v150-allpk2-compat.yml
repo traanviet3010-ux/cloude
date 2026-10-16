@@ -1,0 +1,231 @@
+name: Diagnose PHUONGHOANG90 vs all v1.150 PK2 resources
+
+on:
+  push:
+    branches: [hieusro-phuonghoang90-client]
+    paths:
+      - '.github/workflows/phuonghoang90-v150-allpk2-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare-all-v150-pk2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PH90_FILE_ID: 1BGHeEvfQYFGuTw90QR6bYUXrfH-V-hjo
+      PH90_EXPECTED_SIZE: '1792674229'
+      PH90_EXPECTED_SHA256: b081c94db008de4d3a7e418a159027b1a75aef8d03e6768efff871f7e5c3e595
+      V150_DATA_ID: 1mm_GUP5hsxlTdXkFFfyV2L9uKga9sw9c
+      V150_DATA_SIZE: '1342164992'
+      V150_MAP_ID: 1a1FT2-gzqKSQ5xlauTCpuBA6fiqs6LF3
+      V150_MAP_SIZE: '621858816'
+      V150_MEDIA_ID: 12IeBgOHIhHwQrI3xmJFcZnpGmmm8HALL
+      V150_MEDIA_SIZE: '289288192'
+      V150_MUSIC_ID: 1qPWMF0X5Zh53SNAIwbqLjTnVxdxs4DtV
+      V150_MUSIC_SIZE: '35569664'
+      V150_PARTICLES_ID: 1GsrE_kpupG7S9KwM7BPyF0BhCO_DXtcu
+      V150_PARTICLES_SIZE: '68116480'
+      GOSRO_COMMIT: 7507c9210da1fb44b3c221f8e30568e26fba68dc
+
+    steps:
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unrar python3-pip git
+          python3 -m pip install --user --break-system-packages gdown
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.12'
+          cache: false
+
+      - name: Download exact PHUONGHOANG90 Data and all v1.150 PK2s
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-v150-allpk2"
+          mkdir -p "$ROOT/ph90" "$ROOT/v150"
+          cd "$ROOT"
+
+          ~/.local/bin/gdown "$PH90_FILE_ID" -O PHUONGHOANG90.rar
+          test "$(stat -c %s PHUONGHOANG90.rar)" = "$PH90_EXPECTED_SIZE"
+          PH90_SHA="$(sha256sum PHUONGHOANG90.rar | awk '{print $1}')"
+          test "$PH90_SHA" = "$PH90_EXPECTED_SHA256"
+          unrar x -o+ -idq PHUONGHOANG90.rar 'PHUONGHOANG90/Data.pk2' ph90/
+          mv ph90/PHUONGHOANG90/Data.pk2 ph90/Data.pk2
+          rmdir ph90/PHUONGHOANG90
+
+          ~/.local/bin/gdown "$V150_DATA_ID" -O v150/Data.pk2
+          ~/.local/bin/gdown "$V150_MAP_ID" -O v150/Map.pk2
+          ~/.local/bin/gdown "$V150_MEDIA_ID" -O v150/Media.pk2
+          ~/.local/bin/gdown "$V150_MUSIC_ID" -O v150/Music.pk2
+          ~/.local/bin/gdown "$V150_PARTICLES_ID" -O v150/Particles.pk2
+
+          test "$(stat -c %s v150/Data.pk2)" = "$V150_DATA_SIZE"
+          test "$(stat -c %s v150/Map.pk2)" = "$V150_MAP_SIZE"
+          test "$(stat -c %s v150/Media.pk2)" = "$V150_MEDIA_SIZE"
+          test "$(stat -c %s v150/Music.pk2)" = "$V150_MUSIC_SIZE"
+          test "$(stat -c %s v150/Particles.pk2)" = "$V150_PARTICLES_SIZE"
+
+          {
+            echo "PH90_ARCHIVE_SHA256=$PH90_SHA"
+            echo "PH90_DATA_SIZE=$(stat -c %s ph90/Data.pk2)"
+            for f in v150/*.pk2; do
+              echo "V150_$(basename "$f" | tr '[:lower:].' '[:upper:]_')_SIZE=$(stat -c %s "$f")"
+              echo "V150_$(basename "$f" | tr '[:lower:].' '[:upper:]_')_SHA256=$(sha256sum "$f" | awk '{print $1}')"
+            done
+          } | tee provenance.txt
+
+      - name: Checkout exact go-sro parser
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-v150-allpk2"
+          git clone https://github.com/ferdoran/go-sro.git "$ROOT/go-sro"
+          cd "$ROOT/go-sro"
+          git checkout "$GOSRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$GOSRO_COMMIT"
+
+      - name: Compare against all five v1.150 PK2s
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/ph90-v150-allpk2"
+          DIAG="$ROOT/diag"
+          mkdir -p "$DIAG"
+          cat > "$DIAG/go.mod" <<EOF
+          module ph90v150allpk2
+          go 1.22
+          require github.com/ferdoran/go-sro v0.0.0
+          replace github.com/ferdoran/go-sro => $ROOT/go-sro
+          EOF
+          cat > "$DIAG/main.go" <<'EOF'
+          package main
+
+          import (
+            "bufio"
+            "crypto/sha256"
+            "encoding/binary"
+            "encoding/hex"
+            "fmt"
+            "os"
+            "path/filepath"
+            "sort"
+            "strconv"
+            "strings"
+            "github.com/ferdoran/go-sro/framework/pk2"
+          )
+
+          type objInfo struct { Index uint32; Path string }
+          type hit struct { Archive, Key string; Reader *pk2.Pk2Reader }
+
+          func norm(s string) string {
+            s = strings.ReplaceAll(s, "\\", "/")
+            for strings.Contains(s, "//") { s = strings.ReplaceAll(s, "//", "/") }
+            return strings.ToLower(strings.TrimPrefix(s, "./"))
+          }
+          func clean(s string) string {
+            s = strings.ReplaceAll(s, "\\", "/")
+            for strings.Contains(s, "//") { s = strings.ReplaceAll(s, "//", "/") }
+            return strings.TrimPrefix(s, "./")
+          }
+          func index(path string) *pk2.Pk2Reader { r:=pk2.NewPk2Reader(path); r.IndexArchive(); return &r }
+          func parseObjectInfo(data []byte) map[uint32]objInfo {
+            sc:=bufio.NewScanner(strings.NewReader(string(data)))
+            if !sc.Scan() || strings.TrimSpace(sc.Text())!="JMXVOBJI1000" { panic("bad object.ifo header") }
+            if !sc.Scan(){panic("missing object.ifo count")}
+            n,err:=strconv.Atoi(strings.TrimSpace(sc.Text())); if err!=nil{panic(err)}
+            out:=map[uint32]objInfo{}
+            for i:=0;i<n;i++ { if !sc.Scan(){panic("object.ifo eof")}; line:=sc.Text(); if len(line)<19{panic("short object.ifo line")}; id,err:=strconv.ParseUint(line[:5],10,32); if err!=nil{panic(err)}; out[uint32(id)]=objInfo{uint32(id),strings.ReplaceAll(line[18:],"\"","")} }
+            return out
+          }
+          func parseNVM(data []byte) []uint32 {
+            if len(data)<14 || string(data[:12])!="JMXVNVM 1000" { panic("bad nvm") }
+            pos:=12; n:=int(binary.LittleEndian.Uint16(data[pos:pos+2])); pos+=2; ids:=make([]uint32,0,n)
+            for i:=0;i<n;i++ { if pos+32>len(data){panic("nvm record overflow")}; id:=binary.LittleEndian.Uint32(data[pos:pos+4]); links:=int(binary.LittleEndian.Uint16(data[pos+30:pos+32])); ids=append(ids,id); pos+=32+links*6; if pos>len(data){panic("nvm links overflow")} }
+            return ids
+          }
+          func read(r *pk2.Pk2Reader,key string) []byte { e,ok:=r.Files[key]; if !ok{panic("missing indexed key: "+key)}; return r.ReadEntry(&e) }
+          func hash(b []byte) string { h:=sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+          func write(path string, lines []string){ sort.Strings(lines); if err:=os.WriteFile(path,[]byte(strings.Join(lines,"\n")+"\n"),0644);err!=nil{panic(err)} }
+
+          func main(){
+            if len(os.Args)!=4 { panic("usage: diag <ph90-data> <v150-dir> <out-dir>") }
+            ph:=index(os.Args[1]); out:=os.Args[3]
+            phNorm:=map[string]string{}; for k:=range ph.Files { phNorm[norm(k)]=k }
+
+            vfiles,err:=filepath.Glob(filepath.Join(os.Args[2],"*.pk2")); if err!=nil{panic(err)}; sort.Strings(vfiles)
+            if len(vfiles)!=5 { panic(fmt.Sprintf("expected 5 v150 pk2s, got %d",len(vfiles))) }
+            all:=map[string][]hit{}; var stats []string
+            for _,p:=range vfiles { r:=index(p); a:=filepath.Base(p); stats=append(stats,fmt.Sprintf("%s\t%d",a,len(r.Files))); for k:=range r.Files { n:=norm(k); all[n]=append(all[n],hit{a,k,r}) } }
+            for n:=range all { sort.Slice(all[n],func(i,j int)bool{ if all[n][i].Archive==all[n][j].Archive{return all[n][i].Key<all[n][j].Key}; return all[n][i].Archive<all[n][j].Archive }) }
+            write(filepath.Join(out,"v150-pk2-index-stats.tsv"),stats)
+
+            oiBytes,err:=ph.ReadFile("Data/navmesh/object.ifo"); if err!=nil{panic(err)}; objects:=parseObjectInfo(oiBytes)
+            ids:=map[uint32]bool{}; nvmCount:=0
+            for k,e:=range ph.Files { if strings.HasSuffix(norm(k),".nvm") { nvmCount++; for _,id:=range parseNVM(ph.ReadEntry(&e)){ids[id]=true} } }
+            expected:=map[string]string{}; for id:=range ids { o,ok:=objects[id]; if !ok{panic(fmt.Sprintf("unresolved object id %d",id))}; p:=clean("Data/"+o.Path); expected[norm(p)]=p }
+
+            var present,missing []string
+            for n,p:=range expected { if _,ok:=phNorm[n];ok{present=append(present,p)}else{missing=append(missing,p)} }
+            sort.Strings(present); sort.Strings(missing)
+            if len(present)!=1536 || len(missing)!=299 { panic(fmt.Sprintf("expected 1536 present/299 missing, got %d/%d",len(present),len(missing))) }
+
+            foundMissing:=0; var fillable,still []string
+            for _,p:=range missing { hs:=all[norm(p)]; if len(hs)==0 { still=append(still,p); continue }; foundMissing++; var where []string; for _,h:=range hs{where=append(where,h.Archive+":"+clean(h.Key))}; fillable=append(fillable,p+"\t"+strings.Join(where,";")) }
+            write(filepath.Join(out,"missing219-found-any-v150-pk2.tsv"),fillable)
+            write(filepath.Join(out,"missing219-still-absent-all-v150-pk2.txt"),still)
+
+            shared:=0; absent:=0; identical:=0; diffSize:=0; sameSizeDiff:=0; multiHit:=0; var details []string
+            for _,p:=range present { hs:=all[norm(p)]; if len(hs)==0 { absent++; details=append(details,"ABSENT_V150\t"+p); continue }; shared++; if len(hs)>1{multiHit++}; k219:=phNorm[norm(p)]; b219:=read(ph,k219); h219:=hash(b219); h:=hs[0]; b150:=read(h.Reader,h.Key); h150:=hash(b150); status:=""; if len(b219)!=len(b150){diffSize++;status="DIFFERENT_SIZE"}else if h219==h150{identical++;status="IDENTICAL"}else{sameSizeDiff++;status="SAME_SIZE_DIFFERENT_CONTENT"}; details=append(details,fmt.Sprintf("%s\t%s\tv150_archive=%s\tv219_size=%d\tv150_size=%d\tv219_sha256=%s\tv150_sha256=%s",status,p,h.Archive,len(b219),len(b150),h219,h150)) }
+            write(filepath.Join(out,"hash-comparison-all-v150-pk2.tsv"),details)
+
+            pct:=func(a,b int)float64{if b==0{return 0};return float64(a)*100/float64(b)}
+            summary:=[]string{
+              fmt.Sprintf("V150_PK2_COUNT=%d",len(vfiles)),
+              fmt.Sprintf("NVM_FILES_TOTAL=%d",nvmCount),
+              fmt.Sprintf("DIRECT_RESOURCE_TOTAL=%d",len(expected)),
+              fmt.Sprintf("V219_PRESENT=%d",len(present)),
+              fmt.Sprintf("V219_MISSING=%d",len(missing)),
+              fmt.Sprintf("MISSING219_FOUND_ANY_V150_PK2=%d",foundMissing),
+              fmt.Sprintf("MISSING219_STILL_ABSENT_ALL_V150_PK2=%d",len(still)),
+              fmt.Sprintf("PRESENT219_SAME_PATH_ANY_V150_PK2=%d",shared),
+              fmt.Sprintf("PRESENT219_ABSENT_ALL_V150_PK2=%d",absent),
+              fmt.Sprintf("PRESENT219_MULTI_V150_HITS=%d",multiHit),
+              fmt.Sprintf("HASH_IDENTICAL=%d",identical),
+              fmt.Sprintf("HASH_DIFFERENT_SIZE=%d",diffSize),
+              fmt.Sprintf("HASH_SAME_SIZE_DIFFERENT_CONTENT=%d",sameSizeDiff),
+              fmt.Sprintf("HASH_IDENTICAL_PCT_SHARED=%.2f",pct(identical,shared)),
+              fmt.Sprintf("HASH_DIFFERENT_SIZE_PCT_SHARED=%.2f",pct(diffSize,shared)),
+              fmt.Sprintf("HASH_SAME_SIZE_DIFFERENT_CONTENT_PCT_SHARED=%.2f",pct(sameSizeDiff,shared)),
+              fmt.Sprintf("HASH_IDENTICAL_PCT_ALL_V219_PRESENT=%.2f",pct(identical,len(present))),
+            }
+            sort.Strings(summary); text:=strings.Join(summary,"\n")+"\n"; if err:=os.WriteFile(filepath.Join(out,"allpk2-summary.txt"),[]byte(text),0644);err!=nil{panic(err)}; fmt.Print(text)
+          }
+          EOF
+          cd "$DIAG"
+          go mod tidy
+          CGO_ENABLED=0 go run . "$ROOT/ph90/Data.pk2" "$ROOT/v150" "$ROOT" | tee "$ROOT/allpk2-console.txt"
+          cat "$ROOT/allpk2-summary.txt"
+
+      - name: Upload text-only all-PK2 compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PHUONGHOANG90-v150-allpk2-report
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ph90-v150-allpk2/provenance.txt
+            ${{ runner.temp }}/ph90-v150-allpk2/v150-pk2-index-stats.tsv
+            ${{ runner.temp }}/ph90-v150-allpk2/allpk2-summary.txt
+            ${{ runner.temp }}/ph90-v150-allpk2/allpk2-console.txt
+            ${{ runner.temp }}/ph90-v150-allpk2/missing219-found-any-v150-pk2.tsv
+            ${{ runner.temp }}/ph90-v150-allpk2/missing219-still-absent-all-v150-pk2.txt
+            ${{ runner.temp }}/ph90-v150-allpk2/hash-comparison-all-v150-pk2.tsv

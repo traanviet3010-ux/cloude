@@ -1,0 +1,30 @@
+name: Diagnose fresh v1.150 ports
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths:
+      - '.github/workflows/diag-fresh-v150-ports.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check TCP and HTTP endpoints
+        shell: bash
+        run: |
+          set -u
+          IP=152.42.185.175
+          for port in 22 80 443; do
+            echo "=== TCP $port ==="
+            timeout 5 bash -lc "</dev/tcp/$IP/$port" && echo OPEN || echo CLOSED
+          done
+          echo '=== HTTP 80 ==='
+          curl -v --connect-timeout 5 --max-time 10 "http://$IP/" -o /tmp/http.out || true
+          wc -c /tmp/http.out 2>/dev/null || true
+          echo '=== HTTPS hostname ==='
+          curl -k -v --connect-timeout 5 --max-time 10 "https://play.152-42-185-175.sslip.io/" -o /tmp/https.out || true
+          wc -c /tmp/https.out 2>/dev/null || true

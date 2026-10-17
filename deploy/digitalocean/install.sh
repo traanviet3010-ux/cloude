@@ -17,8 +17,6 @@ apt-get update
 apt-get install -y docker.io docker-compose-v2 git curl openssl ufw ca-certificates
 systemctl enable --now docker
 
-# The OpenSRO world asset build can briefly exceed Node's default heap.
-# Keep the 4 GB Droplet responsive with swap and a low-memory build profile.
 if ! swapon --show=NAME --noheadings | grep -q .; then
   fallocate -l 4G /swapfile
   chmod 600 /swapfile
@@ -48,7 +46,6 @@ chmod +x \
   "$DEPLOY_DIR/update-if-needed.sh" \
   "$DEPLOY_DIR/backup.sh"
 
-# Apply a VPS-safe build profile without changing gameplay/runtime limits.
 DOCKERFILE="$SRC_DIR/server-build/Dockerfile.allinone"
 sed -i 's/SRO_BUILD_JOBS=2/SRO_BUILD_JOBS=1/' "$DOCKERFILE"
 sed -i 's#RUN corepack pnpm assets build world-outdoor#RUN NODE_OPTIONS="--max-old-space-size=3072" corepack pnpm assets build world-outdoor#' "$DOCKERFILE"
@@ -81,8 +78,8 @@ fi
 cd "$DEPLOY_DIR"
 docker compose --env-file .env -f compose.yml build
 docker compose --env-file .env -f compose.yml up -d --remove-orphans
+printf '%s\n' "$(git -C "$SRC_DIR" rev-parse HEAD)" > "$ROOT_DIR/.deployed-sha"
 
-# From now on only pushes to the isolated fresh-server branch are picked up.
 cat >/etc/systemd/system/hieusro-autoupdate.service <<'EOF'
 [Unit]
 Description=HieuSRO GitHub auto-update

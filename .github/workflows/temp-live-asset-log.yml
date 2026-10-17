@@ -1,25 +1,73 @@
-name: Temporary LIVE asset timing log
+name: LIVE v1.150 mobile entry hotfix
+
 on:
   push:
     branches: [hieusro-secure-vps-ops]
     paths:
       - '.github/workflows/temp-live-asset-log.yml'
+
 permissions:
   contents: read
+
+concurrency:
+  group: hieusro-v150-mobile-entry-hotfix
+  cancel-in-progress: false
+
 jobs:
-  assetlog:
+  hotfix:
     runs-on: ubuntu-24.04
     environment: hieusro-vps
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+      PATCH_920: 09083631c9bc50136db2c342445212ee6df72452
+      PATCH_950: 60e19fabf28a20d17c3794a6749366250815af73
+      LIVE: https://play.143-198-217-75.sslip.io
     steps:
-      - name: Checkout operations script
+      - name: Checkout HieuSRO operations branch
         uses: actions/checkout@v4
+
+      - name: Build patched v1.150 client only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-liberation2 python3-venv
+          sudo mkdir -p /src /out
+          sudo chown "$USER:$USER" /src /out
+          git clone https://github.com/opensro-dev/opensro.git /src/opensro
+          cd /src/opensro
+          git config user.name hieusro-hotfix
+          git config user.email hieusro-hotfix@localhost
+          git checkout "$OPEN_SRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$OPEN_SRO_COMMIT"
+          git cherry-pick -x "$PATCH_920"
+          git cherry-pick -x "$PATCH_950"
+          echo "OPEN_SRO_BASE=$OPEN_SRO_COMMIT"
+          echo "PATCH_920=$(git rev-parse HEAD~1)"
+          echo "PATCH_950=$(git rev-parse HEAD)"
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          python3 -m venv /tmp/hieusro-build-venv
+          source /tmp/hieusro-build-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+          bash "$GITHUB_WORKSPACE/server-build/build-client-next.sh"
+          test -s /out/client-public/index.html
+          test -s /out/client-public/viewer.html
+          find /out/client-public/assets -maxdepth 1 -type f \( -name '*.js' -o -name '*.css' \) -print | sort >/tmp/new-static-files
+          test -s /tmp/new-static-files
+          tar -C /out/client-public -czf /tmp/hieusro-client-mobile-fix.tgz .
+          sha256sum /tmp/hieusro-client-mobile-fix.tgz
+          du -h /tmp/hieusro-client-mobile-fix.tgz
+
       - name: Configure pinned SSH
         env:
           VPS_HOST_KEY: ${{ secrets.HIEUSRO_VPS_HOST_KEY }}
           VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
         run: |
           set -euo pipefail
+          test -n "$VPS_HOST_KEY" && test -n "$VPS_SSH_KEY"
           umask 077
           mkdir -p ~/.ssh
           printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
@@ -27,13 +75,105 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
           ssh-keygen -F 143.198.217.75 -f ~/.ssh/known_hosts >/dev/null
-      - name: Apply manifest cache fix and prewarm startup packs
+
+      - name: Backup and atomically swap static client
         shell: bash
         run: |
           set -euo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -i ~/.ssh/id_ed25519 /tmp/hieusro-client-mobile-fix.tgz \
+            hieusro-ops@143.198.217.75:/tmp/hieusro-client-mobile-fix.tgz
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' \
-            < .github/scripts/apply-live-manifest-prewarm-fix.sh
+            -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' <<'REMOTE'
+          set -euo pipefail
+          CID=''
+          for id in $(docker ps -q); do
+            if docker exec "$id" test -d /opt/hieusro/client-edge/public 2>/dev/null; then
+              CID="$id"
+              break
+            fi
+          done
+          test -n "$CID"
+          BACKUP=/opt/hieusro/backups/mobile-entry-fix-20261017-1454
+          rm -rf "$BACKUP"
+          mkdir -p "$BACKUP"
+          docker cp "$CID:/opt/hieusro/client-edge/public" "$BACKUP/public"
+          docker cp /tmp/hieusro-client-mobile-fix.tgz "$CID:/tmp/hieusro-client-mobile-fix.tgz"
+          docker exec "$CID" sh -lc '
+            set -eu
+            ROOT=/opt/hieusro/client-edge
+            rm -rf "$ROOT/public.mobile-new" "$ROOT/public.mobile-prev"
+            cp -a "$ROOT/public" "$ROOT/public.mobile-new"
+            tar -xzf /tmp/hieusro-client-mobile-fix.tgz -C "$ROOT/public.mobile-new"
+            test -s "$ROOT/public.mobile-new/index.html"
+            test -s "$ROOT/public.mobile-new/viewer.html"
+            mv "$ROOT/public" "$ROOT/public.mobile-prev"
+            mv "$ROOT/public.mobile-new" "$ROOT/public"
+          '
+          printf '%s\n' \
+            'base=4f6919d6900d169b89e75647e56c99ca8ebd5cfb' \
+            'patch920=09083631c9bc50136db2c342445212ee6df72452' \
+            'patch950=60e19fabf28a20d17c3794a6749366250815af73' \
+            > "$BACKUP/build.txt"
+          rm -f /tmp/hieusro-client-mobile-fix.tgz
+          REMOTE
+          touch /tmp/hieusro-client-deployed
+
+      - name: Verify LIVE from outside VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -k -fsS --max-time 30 -o /tmp/root.html "$LIVE/"
+          grep -Eqi '<!doctype|<html' /tmp/root.html
+          ENTRY=$(grep -oE 'assets/entry-[A-Za-z0-9_-]+\.js' /tmp/root.html | head -1)
+          test -n "$ENTRY"
+          curl -k -fsS --max-time 30 -o /dev/null "$LIVE/$ENTRY"
+          curl -k -fsS --max-time 30 -H 'X-OpenSRO-Protocol: 6' "$LIVE/api/title/servers" >/tmp/catalog.json
+          grep -q 'global-official' /tmp/catalog.json
+          grep -q '"operating":true' /tmp/catalog.json
+          curl -k -fsS --max-time 30 -D /tmp/m1.h -o /dev/null "$LIVE/assets/packs/manifest.json"
+          curl -k -fsS --max-time 30 -D /tmp/m2.h -o /dev/null "$LIVE/assets/packs/manifest.json"
+          grep -Eqi '^x-hieusro-asset-cache: (HIT|REVALIDATED)$' /tmp/m2.h
+          curl -k -fsS --max-time 30 -o /dev/null "$LIVE/gm/"
+          while IFS= read -r file; do
+            rel=${file#/out/client-public/}
+            curl -k -fsS --max-time 30 -o /dev/null "$LIVE/$rel"
+          done </tmp/new-static-files
+          echo 'HIEUSRO_V150_MOBILE_HOTFIX_VERIFIED=1'
+
+      - name: Roll back static client on verification failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/hieusro-client-deployed ]; then
+            echo 'No LIVE client swap occurred; nothing to roll back.'
+            exit 0
+          fi
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' <<'REMOTE'
+          set -euo pipefail
+          CID=''
+          for id in $(docker ps -q); do
+            if docker exec "$id" test -d /opt/hieusro/client-edge/public 2>/dev/null; then
+              CID="$id"
+              break
+            fi
+          done
+          test -n "$CID"
+          docker exec "$CID" sh -lc '
+            set -eu
+            ROOT=/opt/hieusro/client-edge
+            if [ -d "$ROOT/public.mobile-prev" ]; then
+              rm -rf "$ROOT/public.mobile-failed"
+              mv "$ROOT/public" "$ROOT/public.mobile-failed"
+              mv "$ROOT/public.mobile-prev" "$ROOT/public"
+            fi
+          '
+          REMOTE
+          curl -k -fsS --max-time 30 -o /dev/null "$LIVE/"
+          echo 'LIVE_STATIC_CLIENT_ROLLED_BACK=1'
+
       - name: Remove key
         if: always()
         run: rm -f ~/.ssh/id_ed25519

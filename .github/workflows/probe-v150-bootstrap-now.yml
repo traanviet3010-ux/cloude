@@ -1,0 +1,55 @@
+name: Probe active v1.150 bootstrap now
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths:
+      - '.github/workflows/probe-v150-bootstrap-now.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VPS_IP: 152.42.160.152
+      KEY_RUN_ID: '39031677011'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hieusro-v150-diag-key
+          path: /tmp/diag-key
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.KEY_RUN_ID }}
+      - name: Probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY=/tmp/diag-key/hieusro-v150-diag
+          chmod 600 "$KEY"
+          mkdir -p ~/.ssh
+          ssh-keyscan -T 10 -H "$VPS_IP" > ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i "$KEY" root@"$VPS_IP" 'bash -s' <<'REMOTE'
+          set +e
+          echo '=== SERVICE ==='
+          systemctl --no-pager --full status hieusro-bootstrap.service || true
+          echo '=== LOG ==='
+          tail -n 250 /var/log/hieusro-bootstrap.log 2>/dev/null || true
+          echo '=== PROCESS ==='
+          ps -eo pid,ppid,%cpu,%mem,etime,cmd --sort=-%cpu | head -30
+          echo '=== DOCKER ==='
+          command -v docker || true
+          docker ps -a 2>/dev/null || true
+          echo '=== GIT ==='
+          [ -d /opt/hieusro/src/.git ] && git -C /opt/hieusro/src status --short --branch || true
+          echo '=== PORTS ==='
+          ss -lntup || true
+          echo '=== RESOURCES ==='
+          free -h
+          df -h /
+          swapon --show || true
+          REMOTE

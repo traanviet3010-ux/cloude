@@ -44,11 +44,13 @@ chmod +x \
   "$DEPLOY_DIR/install.sh" \
   "$DEPLOY_DIR/update.sh" \
   "$DEPLOY_DIR/update-if-needed.sh" \
-  "$DEPLOY_DIR/backup.sh"
+  "$DEPLOY_DIR/backup.sh" \
+  "$DEPLOY_DIR/patch-fresh-client.py"
 
 DOCKERFILE="$SRC_DIR/server-build/Dockerfile.allinone"
 sed -i 's/SRO_BUILD_JOBS=2/SRO_BUILD_JOBS=1/' "$DOCKERFILE"
 sed -i 's#RUN corepack pnpm assets build world-outdoor#RUN NODE_OPTIONS="--max-old-space-size=3072" corepack pnpm assets build world-outdoor#' "$DOCKERFILE"
+python3 "$DEPLOY_DIR/patch-fresh-client.py" "$DOCKERFILE"
 
 PUBLIC_IP="$(curl -fsS --max-time 3 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address || true)"
 if [ -z "$PUBLIC_IP" ]; then

@@ -1,0 +1,34 @@
+name: Mint v1.150 diagnostic SSH key
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths:
+      - '.github/workflows/mint-v150-diag-key.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  mint:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate temporary keypair
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh-keygen -q -t ed25519 -N '' -C 'hieusro-v150-diag-20261017' -f /tmp/hieusro-v150-diag
+          chmod 600 /tmp/hieusro-v150-diag
+          echo 'DIAG_PUBLIC_KEY_BEGIN'
+          cat /tmp/hieusro-v150-diag.pub
+          echo 'DIAG_PUBLIC_KEY_END'
+          ssh-keygen -lf /tmp/hieusro-v150-diag.pub
+      - name: Upload temporary private key
+        uses: actions/upload-artifact@v4
+        with:
+          name: hieusro-v150-diag-key
+          path: /tmp/hieusro-v150-diag
+          retention-days: 1
+          if-no-files-found: error

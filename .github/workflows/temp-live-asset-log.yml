@@ -125,9 +125,10 @@ jobs:
           set -euo pipefail
           curl -k -fsS --max-time 30 -o /tmp/root.html "$LIVE/"
           grep -Eqi '<!doctype|<html' /tmp/root.html
-          ENTRY=$(grep -oE 'assets/entry-[A-Za-z0-9_-]+\.js' /tmp/root.html | head -1)
-          test -n "$ENTRY"
-          curl -k -fsS --max-time 30 -o /dev/null "$LIVE/$ENTRY"
+          MAIN=$(grep -oEm1 'assets/(bootstrap|entry)-[A-Za-z0-9_-]+\.js' /tmp/root.html)
+          test -n "$MAIN"
+          echo "MAIN_BUNDLE=$MAIN"
+          curl -k -fsS --max-time 30 -o /dev/null "$LIVE/$MAIN"
           curl -k -fsS --max-time 30 -H 'X-OpenSRO-Protocol: 6' "$LIVE/api/title/servers" >/tmp/catalog.json
           grep -q 'global-official' /tmp/catalog.json
           grep -q '"operating":true' /tmp/catalog.json

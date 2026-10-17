@@ -1,0 +1,100 @@
+name: Provision fresh HieuSRO v1.150 server
+
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths:
+      - '.github/workflows/provision-fresh-v150-server.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hieusro-v150-fresh-server
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-24.04
+    environment: hieusro-vps
+    timeout-minutes: 180
+    env:
+      VPS_IP: 104.248.158.95
+      GAME_URL: https://play.104-248-158-95.sslip.io
+    steps:
+      - name: Configure SSH for new droplet
+        env:
+          VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          for n in $(seq 1 30); do
+            if ssh-keyscan -T 5 -H "$VPS_IP" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ]; then break; fi
+            sleep 5
+          done
+          test -s ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/id_ed25519 root@"$VPS_IP" 'echo SSH_OK && uname -a && cat /etc/os-release | head'
+
+      - name: Install clean v1.150 stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 root@"$VPS_IP" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          curl -fsSL --retry 10 --retry-delay 3 --retry-all-errors \
+            https://raw.githubusercontent.com/traanviet3010-ux/cloude/hieusro-digitalocean/deploy/digitalocean/install.sh \
+            -o /root/hieusro-install.sh
+          chmod 700 /root/hieusro-install.sh
+          /root/hieusro-install.sh
+          cd /opt/hieusro/src/deploy/digitalocean
+          docker compose --env-file .env -f compose.yml ps
+          echo '--- env hosts ---'
+          grep -E '^HIEUSRO_(HOST|PORTAL_HOST)=' .env
+          echo '--- opensro pin ---'
+          grep -n 'ARG OPEN_SRO_COMMIT=' /opt/hieusro/src/server-build/Dockerfile.allinone
+          REMOTE
+
+      - name: Verify fresh server
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 60); do
+            code=$(curl -k -sS --max-time 15 -o /tmp/root.html -w '%{http_code}' "$GAME_URL/" || true)
+            echo "attempt=$n root_http=$code"
+            if [ "$code" = 200 ]; then break; fi
+            sleep 10
+          done
+          test "$(curl -k -sS --max-time 30 -o /tmp/root.html -w '%{http_code}' "$GAME_URL/")" = 200
+          grep -Eqi '<!doctype|<html' /tmp/root.html
+          echo "ROOT_OK=1"
+          code=$(curl -k -sS --max-time 30 -H 'X-OpenSRO-Protocol: 6' -o /tmp/catalog.json -w '%{http_code}' "$GAME_URL/api/title/servers")
+          echo "CATALOG_HTTP=$code BODY=$(cat /tmp/catalog.json)"
+          test "$code" = 200
+          grep -q 'global-official' /tmp/catalog.json
+          grep -q '"operating":true' /tmp/catalog.json
+          echo "SHARD_OK=1"
+          code=$(curl -k -sS --max-time 60 -o /tmp/manifest.json -w '%{http_code}' "$GAME_URL/assets/packs/manifest.json")
+          echo "MANIFEST_HTTP=$code BYTES=$(wc -c </tmp/manifest.json)"
+          test "$code" = 200
+          python3 - <<'PY'
+          import json
+          m=json.load(open('/tmp/manifest.json'))
+          assert m.get('version') == 2
+          packs=sum(len(g.get('packs',[])) for g in m.get('groups',[]))
+          assets=len(m.get('assets',[]))
+          print(f'MANIFEST_OK version=2 groups={len(m.get("groups",[]))} packs={packs} assets={assets}')
+          PY
+          gm=$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$GAME_URL/gm/" || true)
+          echo "GM_HTTP=$gm"
+          case "$gm" in 2??|3??|401|403) :;; *) exit 1;; esac
+          echo 'HIEUSRO_FRESH_V150_VERIFIED=1'
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

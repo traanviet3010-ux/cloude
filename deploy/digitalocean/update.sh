@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BRANCH="hieusro-digitalocean"
+BRANCH="hieusro-v150-fresh-server"
 SRC_DIR="/opt/hieusro/src"
 DEPLOY_DIR="$SRC_DIR/deploy/digitalocean"
 
@@ -18,15 +18,11 @@ git -C "$SRC_DIR" reset --hard "origin/$BRANCH"
 DOCKERFILE="$SRC_DIR/server-build/Dockerfile.allinone"
 sed -i 's/SRO_BUILD_JOBS=2/SRO_BUILD_JOBS=1/' "$DOCKERFILE"
 sed -i 's#RUN corepack pnpm assets build world-outdoor#RUN NODE_OPTIONS="--max-old-space-size=3072" corepack pnpm assets build world-outdoor#' "$DOCKERFILE"
-python3 "$DEPLOY_DIR/patch-mobile-dockerfile.py" "$DOCKERFILE"
 
 cd "$DEPLOY_DIR"
 docker compose --env-file .env -f compose.yml build
 docker compose --env-file .env -f compose.yml up -d --remove-orphans
 
-# Do not prewarm until the local Nginx/runtime is actually ready. A prewarm
-# failure is non-fatal because Nginx still falls back to opensro.online, but
-# it is logged loudly so the mirror can be repaired without taking LIVE down.
 ready=0
 for attempt in $(seq 1 180); do
   if docker compose --env-file .env -f compose.yml exec -T game \

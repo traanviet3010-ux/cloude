@@ -1,0 +1,59 @@
+name: Verify fresh v1.150 server
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths: ['.github/workflows/verify-fresh-v150-server.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      LIVE: https://play.152-42-179-41.sslip.io
+    steps:
+      - name: Wait for first-boot build and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=0
+          for n in $(seq 1 180); do
+            code=$(curl -k -sS --connect-timeout 5 --max-time 15 -o /tmp/root.html -w '%{http_code}' "$LIVE/" || true)
+            echo "WAIT attempt=$n http=${code:-000}"
+            if [ "$code" = 200 ] && grep -Eqi '<!doctype|<html' /tmp/root.html; then
+              ready=1
+              break
+            fi
+            sleep 20
+          done
+          test "$ready" = 1
+          echo ROOT_OK=1
+
+          code=$(curl -k -sS --max-time 30 -H 'X-OpenSRO-Protocol: 6' -o /tmp/catalog.json -w '%{http_code}' "$LIVE/api/title/servers")
+          echo "CATALOG_HTTP=$code BODY=$(cat /tmp/catalog.json)"
+          test "$code" = 200
+          grep -q 'global-official' /tmp/catalog.json
+          grep -q '"operating":true' /tmp/catalog.json
+          echo SHARD_OK=1
+
+          code=$(curl -k -sS --max-time 90 -D /tmp/manifest.headers -o /tmp/manifest.json -w '%{http_code}' "$LIVE/assets/packs/manifest.json")
+          echo "MANIFEST_HTTP=$code BYTES=$(wc -c </tmp/manifest.json)"
+          test "$code" = 200
+          python3 - <<'PY'
+          import json
+          m=json.load(open('/tmp/manifest.json'))
+          assert m.get('version') == 2
+          packs=sum(len(g.get('packs',[])) for g in m.get('groups',[]))
+          assets=len(m.get('assets',[]))
+          print(f'MANIFEST_OK groups={len(m.get("groups",[]))} packs={packs} assets={assets}')
+          PY
+
+          gm=$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$LIVE/gm/" || true)
+          echo "GM_HTTP=$gm"
+          case "$gm" in 2??|3??|401|403) :;; *) exit 1;; esac
+
+          echo HIEUSRO_FRESH_V150_SERVER_READY=1

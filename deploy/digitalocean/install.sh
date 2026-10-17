@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/traanviet3010-ux/cloude.git"
-BRANCH="hieusro-digitalocean"
+BRANCH="hieusro-v150-fresh-server"
 ROOT_DIR="/opt/hieusro"
 SRC_DIR="$ROOT_DIR/src"
 DEPLOY_DIR="$SRC_DIR/deploy/digitalocean"
@@ -82,7 +82,7 @@ cd "$DEPLOY_DIR"
 docker compose --env-file .env -f compose.yml build
 docker compose --env-file .env -f compose.yml up -d --remove-orphans
 
-# From now on pushes to the DigitalOcean branch are picked up automatically.
+# From now on only pushes to the isolated fresh-server branch are picked up.
 cat >/etc/systemd/system/hieusro-autoupdate.service <<'EOF'
 [Unit]
 Description=HieuSRO GitHub auto-update

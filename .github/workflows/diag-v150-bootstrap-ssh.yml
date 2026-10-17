@@ -1,0 +1,74 @@
+name: Diagnose fresh v1.150 bootstrap over SSH
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths:
+      - '.github/workflows/diag-v150-bootstrap-ssh.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VPS_IP: 152.42.160.152
+      KEY_RUN_ID: '39031677011'
+    steps:
+      - name: Download temporary diagnostic key
+        uses: actions/download-artifact@v4
+        with:
+          name: hieusro-v150-diag-key
+          path: /tmp/diag-key
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.KEY_RUN_ID }}
+
+      - name: Read bootstrap state
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY=/tmp/diag-key/hieusro-v150-diag
+          chmod 600 "$KEY"
+          mkdir -p ~/.ssh
+          for n in $(seq 1 30); do
+            if ssh-keyscan -T 5 -H "$VPS_IP" > ~/.ssh/known_hosts 2>/dev/null && [ -s ~/.ssh/known_hosts ]; then break; fi
+            sleep 5
+          done
+          test -s ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i "$KEY" root@"$VPS_IP" 'bash -s' <<'REMOTE'
+          set +e
+          echo '=== HOST ==='
+          date -Is
+          uname -a
+          cat /etc/os-release | head -20
+          echo '=== BOOTSTRAP SERVICE ==='
+          systemctl --no-pager --full status hieusro-bootstrap.service || true
+          echo '=== BOOTSTRAP JOURNAL ==='
+          journalctl -u hieusro-bootstrap.service --no-pager -n 250 || true
+          echo '=== BOOTSTRAP LOG ==='
+          tail -n 400 /var/log/hieusro-bootstrap.log 2>/dev/null || true
+          echo '=== DONE MARKER ==='
+          ls -l /var/lib/hieusro-bootstrap.complete 2>/dev/null || true
+          echo '=== PROCESSES ==='
+          ps auxww | grep -E 'apt|docker|git|hieusro|node|pnpm' | grep -v grep || true
+          echo '=== DISK/MEM ==='
+          df -h
+          free -h
+          swapon --show || true
+          echo '=== DOCKER ==='
+          systemctl --no-pager --full status docker || true
+          docker ps -a || true
+          docker images || true
+          echo '=== SOURCE ==='
+          if [ -d /opt/hieusro/src/.git ]; then
+            git -C /opt/hieusro/src status --short --branch || true
+            git -C /opt/hieusro/src rev-parse HEAD || true
+          fi
+          echo '=== NETWORK ==='
+          ss -lntup || true
+          ufw status verbose || true
+          REMOTE

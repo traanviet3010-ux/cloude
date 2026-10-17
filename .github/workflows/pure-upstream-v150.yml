@@ -1,0 +1,163 @@
+name: Pure upstream LIVE v1.150 client
+
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths:
+      - '.github/workflows/pure-upstream-v150.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hieusro-pure-upstream-v150
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-24.04
+    environment: hieusro-vps
+    timeout-minutes: 45
+    env:
+      OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+      LIVE: https://play.143-198-217-75.sslip.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build pure upstream v1.150
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/opensro-dev/opensro.git /tmp/opensro
+          cd /tmp/opensro
+          git checkout -q "$OPEN_SRO_COMMIT"
+          test "$(git rev-parse HEAD)" = "$OPEN_SRO_COMMIT"
+          echo "PURE_UPSTREAM_HEAD=$(git rev-parse HEAD)"
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm --filter @sro/client-next build
+          DIST=/tmp/opensro/apps/client-next/temp/artifacts/dist
+          test -s "$DIST/index.html"
+          test -s "$DIST/viewer.html"
+          find "$DIST/assets" -maxdepth 1 -type f \( -name '*.js' -o -name '*.css' \) -print | sort >/tmp/pure-static-files
+          test -s /tmp/pure-static-files
+          tar -C "$DIST" -czf /tmp/hieusro-pure-v150.tgz .
+          sha256sum /tmp/hieusro-pure-v150.tgz
+
+      - name: Configure pinned SSH
+        env:
+          VPS_HOST_KEY: ${{ secrets.HIEUSRO_VPS_HOST_KEY }}
+          VPS_SSH_KEY: ${{ secrets.HIEUSRO_VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST_KEY" && test -n "$VPS_SSH_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          ssh-keygen -F 143.198.217.75 -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Atomically swap pure client
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -q -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -i ~/.ssh/id_ed25519 /tmp/hieusro-pure-v150.tgz \
+            hieusro-ops@143.198.217.75:/tmp/hieusro-pure-v150.tgz
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' <<'REMOTE'
+          set -euo pipefail
+          CID=''
+          for id in $(docker ps -q); do
+            if docker exec "$id" test -d /opt/hieusro/client-edge/public 2>/dev/null; then CID="$id"; break; fi
+          done
+          test -n "$CID"
+          BACKUP=/opt/hieusro/backups/pre-pure-upstream-v150-20261017-1519
+          mkdir -p "$BACKUP"
+          docker cp "$CID:/opt/hieusro/client-edge/public" "$BACKUP/public" >/dev/null
+          printf '%s\n' 'base=4f6919d6900d169b89e75647e56c99ca8ebd5cfb' 'type=pre-pure-upstream-v150' > "$BACKUP/build.txt"
+          docker cp /tmp/hieusro-pure-v150.tgz "$CID:/tmp/hieusro-pure-v150.tgz" >/dev/null
+          docker exec "$CID" sh -lc '
+            set -eu
+            ROOT=/opt/hieusro/client-edge
+            NEW="$ROOT/public.pure-v150-new"
+            PREV="$ROOT/public.pre-pure-v150"
+            if [ -e "$NEW" ]; then mv "$NEW" "$NEW.old-$(date +%s)"; fi
+            if [ -e "$PREV" ]; then mv "$PREV" "$PREV.old-$(date +%s)"; fi
+            mkdir -p "$NEW"
+            tar -xzf /tmp/hieusro-pure-v150.tgz -C "$NEW"
+            test -s "$NEW/index.html"
+            test -s "$NEW/viewer.html"
+            mv "$ROOT/public" "$PREV"
+            mv "$NEW" "$ROOT/public"
+          '
+          REMOTE
+          touch /tmp/pure-v150-deployed
+
+      - name: Verify LIVE pure client
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT_CODE=$(curl -k -sS --max-time 30 -o /tmp/root.html -w '%{http_code}' "$LIVE/")
+          echo "ROOT HTTP=$ROOT_CODE"
+          test "$ROOT_CODE" = 200
+          grep -Eqi '<!doctype|<html' /tmp/root.html
+          MAIN=$(grep -oEm1 'assets/(bootstrap|entry)-[A-Za-z0-9_-]+\.js' /tmp/root.html)
+          test -n "$MAIN"
+          echo "MAIN_BUNDLE=$MAIN"
+          test "$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$LIVE/$MAIN")" = 200
+          API_CODE=$(curl -k -sS --max-time 30 -H 'X-OpenSRO-Protocol: 6' -o /tmp/catalog.json -w '%{http_code}' "$LIVE/api/title/servers")
+          echo "CATALOG HTTP=$API_CODE BODY=$(cat /tmp/catalog.json)"
+          test "$API_CODE" = 200
+          grep -q 'global-official' /tmp/catalog.json
+          grep -q '"operating":true' /tmp/catalog.json
+          MANIFEST_CODE=$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$LIVE/assets/packs/manifest.json")
+          echo "MANIFEST HTTP=$MANIFEST_CODE"
+          test "$MANIFEST_CODE" = 200
+          GM_CODE=$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$LIVE/gm/" || true)
+          echo "GM HTTP=$GM_CODE"
+          case "$GM_CODE" in 2??|3??|401|403) :;; *) exit 1;; esac
+          while IFS= read -r file; do
+            rel=${file#/tmp/opensro/apps/client-next/temp/artifacts/dist/}
+            code=$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$LIVE/$rel")
+            echo "STATIC $rel HTTP=$code"
+            case "$code" in 2??|3??) :;; *) exit 1;; esac
+          done </tmp/pure-static-files
+          echo 'HIEUSRO_PURE_UPSTREAM_V150_VERIFIED=1'
+
+      - name: Roll back if verification fails
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/pure-v150-deployed ]; then
+            echo 'No LIVE swap occurred.'
+            exit 0
+          fi
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -i ~/.ssh/id_ed25519 hieusro-ops@143.198.217.75 'sudo -n bash -s' <<'REMOTE'
+          set -euo pipefail
+          CID=''
+          for id in $(docker ps -q); do
+            if docker exec "$id" test -d /opt/hieusro/client-edge/public 2>/dev/null; then CID="$id"; break; fi
+          done
+          test -n "$CID"
+          docker exec "$CID" sh -lc '
+            set -eu
+            ROOT=/opt/hieusro/client-edge
+            PREV="$ROOT/public.pre-pure-v150"
+            if [ -d "$PREV" ]; then
+              FAILED="$ROOT/public.pure-failed-$(date +%s)"
+              mv "$ROOT/public" "$FAILED"
+              mv "$PREV" "$ROOT/public"
+            fi
+          '
+          REMOTE
+          curl -k -fsS --max-time 30 -o /dev/null "$LIVE/"
+          echo 'PURE_V150_ROLLED_BACK=1'
+
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

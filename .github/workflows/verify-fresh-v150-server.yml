@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      LIVE: https://play.152-42-179-41.sslip.io
+      LIVE: https://play.152-42-185-175.sslip.io
     steps:
       - name: Wait for first-boot build and verify
         shell: bash

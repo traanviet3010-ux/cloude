@@ -1,0 +1,94 @@
+name: Start fresh v1.150 bootstrap over SSH
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths:
+      - '.github/workflows/start-v150-bootstrap-ssh.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      VPS_IP: 152.42.160.152
+      KEY_RUN_ID: '39031677011'
+    steps:
+      - name: Download temporary diagnostic key
+        uses: actions/download-artifact@v4
+        with:
+          name: hieusro-v150-diag-key
+          path: /tmp/diag-key
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.KEY_RUN_ID }}
+
+      - name: Start bootstrap and monitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY=/tmp/diag-key/hieusro-v150-diag
+          chmod 600 "$KEY"
+          mkdir -p ~/.ssh
+          ssh-keyscan -T 10 -H "$VPS_IP" > ~/.ssh/known_hosts 2>/dev/null
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$KEY" root@"$VPS_IP")
+
+          "${SSH[@]}" 'systemctl daemon-reload; systemctl reset-failed hieusro-bootstrap.service || true; systemctl start --no-block hieusro-bootstrap.service; sleep 3; systemctl --no-pager --full status hieusro-bootstrap.service || true'
+
+          done_flag=0
+          for n in $(seq 1 240); do
+            state=$("${SSH[@]}" 'systemctl is-active hieusro-bootstrap.service || true')
+            marker=$("${SSH[@]}" 'test -f /var/lib/hieusro-bootstrap.complete && echo yes || echo no')
+            echo "CHECK $n state=$state marker=$marker"
+            if [ "$marker" = yes ]; then
+              done_flag=1
+              break
+            fi
+            if [ "$state" = failed ]; then
+              echo 'BOOTSTRAP_FAILED=1'
+              break
+            fi
+            if [ $((n % 4)) -eq 0 ]; then
+              "${SSH[@]}" 'echo "--- latest bootstrap log ---"; tail -n 80 /var/log/hieusro-bootstrap.log 2>/dev/null || true; echo "--- resources ---"; free -h; df -h /; ps -eo pid,ppid,%cpu,%mem,etime,cmd --sort=-%cpu | head -20' || true
+            fi
+            sleep 30
+          done
+
+          "${SSH[@]}" 'echo "=== FINAL SERVICE ==="; systemctl --no-pager --full status hieusro-bootstrap.service || true; echo "=== FINAL LOG ==="; tail -n 300 /var/log/hieusro-bootstrap.log 2>/dev/null || true; echo "=== DOCKER ==="; docker ps -a 2>/dev/null || true; echo "=== PORTS ==="; ss -lntup || true'
+          test "$done_flag" = 1
+
+      - name: Verify fresh TEST server
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE="https://play.152-42-160-152.sslip.io"
+          for n in $(seq 1 60); do
+            code=$(curl -k -sS --connect-timeout 5 --max-time 20 -o /tmp/root.html -w '%{http_code}' "$LIVE/" || true)
+            echo "VERIFY attempt=$n root=$code"
+            [ "$code" = 200 ] && break
+            sleep 10
+          done
+          test "$(curl -k -sS --max-time 30 -o /tmp/root.html -w '%{http_code}' "$LIVE/")" = 200
+          grep -Eqi '<!doctype|<html' /tmp/root.html
+          code=$(curl -k -sS --max-time 30 -H 'X-OpenSRO-Protocol: 6' -o /tmp/catalog.json -w '%{http_code}' "$LIVE/api/title/servers")
+          echo "CATALOG_HTTP=$code BODY=$(cat /tmp/catalog.json)"
+          test "$code" = 200
+          grep -q 'global-official' /tmp/catalog.json
+          grep -q '"operating":true' /tmp/catalog.json
+          code=$(curl -k -sS --max-time 90 -o /tmp/manifest.json -w '%{http_code}' "$LIVE/assets/packs/manifest.json")
+          echo "MANIFEST_HTTP=$code BYTES=$(wc -c </tmp/manifest.json)"
+          test "$code" = 200
+          python3 - <<'PY'
+          import json
+          m=json.load(open('/tmp/manifest.json'))
+          assert m.get('version') == 2
+          print('MANIFEST_OK', len(m.get('groups',[])), sum(len(g.get('packs',[])) for g in m.get('groups',[])), len(m.get('assets',[])))
+          PY
+          gm=$(curl -k -sS --max-time 30 -o /dev/null -w '%{http_code}' "$LIVE/gm/" || true)
+          echo "GM_HTTP=$gm"
+          case "$gm" in 2??|3??|401|403) :;; *) exit 1;; esac
+          echo HIEUSRO_FRESH_V150_READY=1

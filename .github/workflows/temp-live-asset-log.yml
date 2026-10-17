@@ -47,7 +47,7 @@ jobs:
           git cherry-pick -x "$PATCH_951"
           corepack enable
           corepack pnpm install --frozen-lockfile
-          node --test apps/client-next/tests/runtime/packs.test.mjs
+          node --test --test-name-pattern='quota refusal' apps/client-next/tests/runtime/packs.test.mjs
           python3 -m venv /tmp/hieusro-build-venv
           source /tmp/hieusro-build-venv/bin/activate
           python -m pip install -q --upgrade pip

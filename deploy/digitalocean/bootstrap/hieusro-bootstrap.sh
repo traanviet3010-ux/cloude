@@ -4,11 +4,11 @@ set -euo pipefail
 LOG=/var/log/hieusro-bootstrap.log
 DONE=/var/lib/hieusro-bootstrap.complete
 INSTALL=/root/hieusro-install.sh
-URL=https://raw.githubusercontent.com/traanviet3010-ux/cloude/hieusro-digitalocean/deploy/digitalocean/install.sh
+URL=https://raw.githubusercontent.com/traanviet3010-ux/cloude/hieusro-v150-fresh-server/deploy/digitalocean/install.sh
 
 exec >>"$LOG" 2>&1
 
-echo "[$(date -Is)] HieuSRO first-boot bootstrap starting"
+echo "[$(date -Is)] HieuSRO fresh v1.150 bootstrap starting"
 if [ -f "$DONE" ]; then
   echo "[$(date -Is)] bootstrap already completed"
   exit 0
@@ -25,7 +25,7 @@ for attempt in $(seq 1 60); do
 done
 
 if [ ! -s "$INSTALL" ]; then
-  echo "[$(date -Is)] could not download HieuSRO installer" >&2
+  echo "[$(date -Is)] could not download HieuSRO fresh installer" >&2
   exit 1
 fi
 
@@ -34,4 +34,4 @@ chmod 700 "$INSTALL"
 touch "$DONE"
 systemctl disable hieusro-bootstrap.service || true
 
-echo "[$(date -Is)] HieuSRO first-boot bootstrap completed"
+echo "[$(date -Is)] HieuSRO fresh v1.150 bootstrap completed"

@@ -1,0 +1,184 @@
+name: LIVE v1.150 asset integrity diagnostics
+
+on:
+  push:
+    branches: [hieusro-secure-vps-ops]
+    paths:
+      - '.github/workflows/asset-integrity-v150.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LIVE: https://play.143-198-217-75.sslip.io
+    steps:
+      - name: Fetch and validate manifest, all pack identities, startup pack hashes and startup members
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -k -fsS --max-time 60 "$LIVE/assets/packs/manifest.json" -o /tmp/manifest.json
+          python3 - <<'PY'
+          import concurrent.futures, gzip, hashlib, json, os, re, struct, ssl, sys, urllib.request
+
+          LIVE=os.environ['LIVE'].rstrip('/')
+          m=json.load(open('/tmp/manifest.json','r',encoding='utf-8'))
+          problems=[]
+          if m.get('version') != 2: problems.append(f"manifest version={m.get('version')} expected=2")
+          groups=m.get('groups')
+          assets=m.get('assets')
+          if not isinstance(groups,list): raise SystemExit('manifest groups missing')
+          if not isinstance(assets,list): raise SystemExit('manifest assets missing')
+
+          packs={}
+          group_by_pack={}
+          startup=[]
+          total_bytes=0
+          for g in groups:
+            name=g.get('name'); load=g.get('load'); rows=g.get('packs') or []
+            declared=g.get('assetCount')
+            count=0; gbytes=0
+            for p in rows:
+              path=p.get('path'); b=p.get('bytes'); sha=p.get('sha256'); ac=p.get('assetCount')
+              if not isinstance(path,str) or not path.startswith('/assets/packs/') or not path.endswith('.bin'):
+                problems.append(f'bad pack path in {name}: {path!r}'); continue
+              if path in packs: problems.append(f'duplicate pack {path}')
+              if not isinstance(b,int) or b < 12 or b > 64*1024*1024: problems.append(f'bad pack bytes {path}: {b}')
+              if not isinstance(sha,str) or not re.fullmatch(r'[0-9a-fA-F]{64}',sha): problems.append(f'bad pack sha {path}: {sha}')
+              if not isinstance(ac,int) or ac < 0: problems.append(f'bad assetCount {path}: {ac}')
+              packs[path]=p; group_by_pack[path]=(name,load)
+              count += ac if isinstance(ac,int) else 0
+              gbytes += b if isinstance(b,int) else 0
+              total_bytes += b if isinstance(b,int) else 0
+              if load == 'startup': startup.append(path)
+            if isinstance(declared,int) and declared != count: problems.append(f'group count mismatch {name}: declared={declared} sum={count}')
+            print(f'GROUP name={name} load={load} packs={len(rows)} assets={count} bytes={gbytes}')
+
+          by_path={}
+          by_pack={p:[] for p in packs}
+          for a in assets:
+            path=a.get('path'); pp=a.get('packPath'); off=a.get('offset'); length=a.get('length'); sha=a.get('sha256')
+            stored=a.get('stored'); span=stored.get('length') if isinstance(stored,dict) else length
+            if not isinstance(path,str) or not path.startswith('/assets/'): problems.append(f'bad asset path {path!r}'); continue
+            key=path.lower()
+            if key in by_path: problems.append(f'duplicate asset {path}')
+            by_path[key]=a
+            if pp not in packs: problems.append(f'asset missing pack {path} -> {pp}'); continue
+            if not all(isinstance(x,int) and x >= 0 for x in (off,length,span)): problems.append(f'bad range fields {path}')
+            if not isinstance(sha,str) or not re.fullmatch(r'[0-9a-fA-F]{64}',sha): problems.append(f'bad asset sha {path}')
+            by_pack[pp].append(a)
+
+          for pp,p in packs.items():
+            ac=p.get('assetCount')
+            if len(by_pack.get(pp,[])) != ac: problems.append(f'pack entry count mismatch {pp}: manifest={ac} actual={len(by_pack.get(pp,[]))}')
+            end=0
+            for a in sorted(by_pack.get(pp,[]), key=lambda x:x['offset']):
+              span=(a.get('stored') or {}).get('length',a['length'])
+              if a['offset'] < end: problems.append(f'overlap in {pp}: {a["path"]}')
+              end=a['offset']+span
+              if end > p['bytes']: problems.append(f'out of bounds in {pp}: {a["path"]} end={end} pack={p["bytes"]}')
+
+          print(f'MANIFEST version={m.get("version")} groups={len(groups)} packs={len(packs)} assets={len(assets)} total_bytes={total_bytes} startup_packs={len(startup)} startup_bytes={sum(packs[p]["bytes"] for p in startup)}')
+
+          title_paths=[
+            '/assets/cif/layouts/pstitle.json',
+            '/assets/fonts/native-ui-font-atlas.json',
+            '/assets/text/textuisystem.en.json',
+            '/assets/cif/layouts/pscharacterselect_europe.json',
+            '/assets/cif/layouts/pscharactercreate_europe.json',
+            '/assets/cif/layouts/pscharactercreatechina.json',
+          ]
+          for p in title_paths:
+            a=by_path.get(p)
+            if not a: problems.append(f'TITLE ASSET MISSING FROM MANIFEST: {p}')
+            else: print(f'TITLE asset={p} pack={a["packPath"]} length={a["length"]} sha256={a["sha256"]}')
+
+          ctx=ssl.create_default_context()
+          opener=urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+          def range_check(item):
+            path,p=item
+            req=urllib.request.Request(LIVE+path,headers={'Range':'bytes=0-11','Accept-Encoding':'identity','User-Agent':'HieuSRO-integrity/1'})
+            try:
+              with opener.open(req,timeout=30) as r:
+                body=r.read(13); status=getattr(r,'status',None); cr=r.headers.get('Content-Range'); src=r.headers.get('X-HieuSRO-Asset-Source'); cache=r.headers.get('X-HieuSRO-Asset-Cache')
+              expected=f'bytes 0-11/{p["bytes"]}'
+              magic=body[:8]
+              ok=(status==206 and len(body)==12 and cr==expected and magic==b'SROPACK2')
+              return path,ok,f'status={status} len={len(body)} cr={cr} expected={expected} magic={magic!r} source={src} cache={cache}'
+            except Exception as e:
+              return path,False,f'exception={type(e).__name__}: {e}'
+
+          bad_range=[]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+            for path,ok,detail in ex.map(range_check,packs.items()):
+              if not ok: bad_range.append((path,detail))
+          print(f'ALL_PACK_RANGE_CHECK total={len(packs)} bad={len(bad_range)}')
+          for row in bad_range[:50]: print('BAD_RANGE',*row)
+          if bad_range: problems.append(f'{len(bad_range)} pack range/identity failures')
+
+          startup_member_fail=[]
+          startup_pack_fail=[]
+          title_set=set(title_paths)
+          verified_members=0
+          for i,pp in enumerate(startup,1):
+            p=packs[pp]
+            print(f'STARTUP_VERIFY {i}/{len(startup)} {pp} bytes={p["bytes"]}')
+            req=urllib.request.Request(LIVE+pp,headers={'Accept-Encoding':'identity','User-Agent':'HieuSRO-integrity/1'})
+            try:
+              with opener.open(req,timeout=90) as r: data=r.read()
+            except Exception as e:
+              startup_pack_fail.append((pp,f'download {type(e).__name__}: {e}')); continue
+            if len(data)!=p['bytes']:
+              startup_pack_fail.append((pp,f'length {len(data)} expected {p["bytes"]}')); continue
+            got=hashlib.sha256(data).hexdigest()
+            if got.lower()!=p['sha256'].lower():
+              startup_pack_fail.append((pp,f'sha {got} expected {p["sha256"]}')); continue
+            if data[:8]!=b'SROPACK2':
+              startup_pack_fail.append((pp,'bad magic')); continue
+            hlen=struct.unpack_from('<I',data,8)[0]
+            start=12+hlen
+            try: header=json.loads(data[12:start].decode('utf-8'))
+            except Exception as e:
+              startup_pack_fail.append((pp,f'header json {e}')); continue
+            if header.get('format')!='sro-asset-pack' or header.get('version')!=2:
+              startup_pack_fail.append((pp,f'header format/version {header.get("format")}/{header.get("version")}')); continue
+            hfiles={x['path'].lower():x for x in header.get('files',[])}
+            for a in by_pack.get(pp,[]):
+              key=a['path'].lower(); h=hfiles.get(key)
+              if not h:
+                startup_member_fail.append((a['path'],'missing from pack header')); continue
+              span=(a.get('stored') or {}).get('length',a['length'])
+              raw=data[start+a['offset']:start+a['offset']+span]
+              if len(raw)!=span:
+                startup_member_fail.append((a['path'],f'truncated stored span {len(raw)}/{span}')); continue
+              try: payload=gzip.decompress(raw) if isinstance(a.get('stored'),dict) else raw
+              except Exception as e:
+                startup_member_fail.append((a['path'],f'gzip error {e}')); continue
+              if len(payload)!=a['length']:
+                startup_member_fail.append((a['path'],f'length {len(payload)}/{a["length"]}')); continue
+              gota=hashlib.sha256(payload).hexdigest()
+              if gota.lower()!=a['sha256'].lower():
+                startup_member_fail.append((a['path'],f'sha {gota} expected {a["sha256"]}')); continue
+              if key in title_set:
+                try: json.loads(payload.decode('utf-8'))
+                except Exception as e: startup_member_fail.append((a['path'],f'title JSON decode {e}')); continue
+              verified_members+=1
+
+          print(f'STARTUP_FULL_VERIFY packs={len(startup)} pack_fail={len(startup_pack_fail)} members_verified={verified_members} member_fail={len(startup_member_fail)}')
+          for row in startup_pack_fail: print('BAD_STARTUP_PACK',*row)
+          for row in startup_member_fail[:50]: print('BAD_STARTUP_MEMBER',*row)
+          if startup_pack_fail: problems.append(f'{len(startup_pack_fail)} startup pack hash/format failures')
+          if startup_member_fail: problems.append(f'{len(startup_member_fail)} startup member failures')
+
+          title_missing=[p for p in title_paths if p not in by_path]
+          print(f'TITLE_REQUIRED total={len(title_paths)} missing={len(title_missing)}')
+          if problems:
+            print('DIAGNOSTIC_PROBLEMS_BEGIN')
+            for p in problems: print('PROBLEM',p)
+            print('DIAGNOSTIC_PROBLEMS_END')
+            raise SystemExit(2)
+          print('HIEUSRO_V150_ASSET_INTEGRITY_OK=1')
+          PY

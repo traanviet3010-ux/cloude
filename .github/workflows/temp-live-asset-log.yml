@@ -1,4 +1,4 @@
-name: LIVE v1.150 mobile entry hotfix
+name: LIVE v1.150 iOS asset quota hotfix
 
 on:
   push:
@@ -22,6 +22,7 @@ jobs:
       OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
       PATCH_920: 09083631c9bc50136db2c342445212ee6df72452
       PATCH_950: 60e19fabf28a20d17c3794a6749366250815af73
+      PATCH_951: 197c29b2d3e09c9dff857fdeee63425e7bdc6b4e
       LIVE: https://play.143-198-217-75.sslip.io
     steps:
       - name: Checkout HieuSRO operations branch
@@ -43,8 +44,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$OPEN_SRO_COMMIT"
           git cherry-pick -x "$PATCH_920"
           git cherry-pick -x "$PATCH_950"
+          git cherry-pick -x "$PATCH_951"
           corepack enable
           corepack pnpm install --frozen-lockfile
+          node --test apps/client-next/tests/runtime/packs.test.mjs
           python3 -m venv /tmp/hieusro-build-venv
           source /tmp/hieusro-build-venv/bin/activate
           python -m pip install -q --upgrade pip
@@ -87,7 +90,7 @@ jobs:
             if docker exec "$id" test -d /opt/hieusro/client-edge/public 2>/dev/null; then CID="$id"; break; fi
           done
           test -n "$CID"
-          BACKUP=/opt/hieusro/backups/mobile-entry-fix-20261017-1454
+          BACKUP=/opt/hieusro/backups/mobile-entry-fix-951-20261017-1506
           rm -rf "$BACKUP"
           mkdir -p "$BACKUP"
           docker cp "$CID:/opt/hieusro/client-edge/public" "$BACKUP/public" >/dev/null
@@ -106,7 +109,8 @@ jobs:
           printf '%s\n' \
             'base=4f6919d6900d169b89e75647e56c99ca8ebd5cfb' \
             'patch920=09083631c9bc50136db2c342445212ee6df72452' \
-            'patch950=60e19fabf28a20d17c3794a6749366250815af73' > "$BACKUP/build.txt"
+            'patch950=60e19fabf28a20d17c3794a6749366250815af73' \
+            'patch951=197c29b2d3e09c9dff857fdeee63425e7bdc6b4e' > "$BACKUP/build.txt"
           rm -f /tmp/hieusro-client-mobile-fix.tgz
           REMOTE
           touch /tmp/hieusro-client-deployed
@@ -155,7 +159,7 @@ jobs:
             status STATIC "$LIVE/$rel"
           done </tmp/new-static-files
 
-          echo 'HIEUSRO_V150_MOBILE_HOTFIX_VERIFIED=1'
+          echo 'HIEUSRO_V150_IOS_QUOTA_HOTFIX_VERIFIED=1'
 
       - name: Roll back static client on verification failure
         if: failure()

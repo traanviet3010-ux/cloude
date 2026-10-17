@@ -22,7 +22,7 @@ jobs:
       OPEN_SRO_COMMIT: 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
       PATCH_920: 09083631c9bc50136db2c342445212ee6df72452
       PATCH_950: 60e19fabf28a20d17c3794a6749366250815af73
-      PATCH_951: 197c29b2d3e09c9dff857fdeee63425e7bdc6b4e
+      PATCH_951: 3bd026a568015a6f973c882e01b26a4786e1f23d
       LIVE: https://play.143-198-217-75.sslip.io
     steps:
       - name: Checkout HieuSRO operations branch
@@ -110,7 +110,7 @@ jobs:
             'base=4f6919d6900d169b89e75647e56c99ca8ebd5cfb' \
             'patch920=09083631c9bc50136db2c342445212ee6df72452' \
             'patch950=60e19fabf28a20d17c3794a6749366250815af73' \
-            'patch951=197c29b2d3e09c9dff857fdeee63425e7bdc6b4e' > "$BACKUP/build.txt"
+            'patch951=3bd026a568015a6f973c882e01b26a4786e1f23d' > "$BACKUP/build.txt"
           rm -f /tmp/hieusro-client-mobile-fix.tgz
           REMOTE
           touch /tmp/hieusro-client-deployed

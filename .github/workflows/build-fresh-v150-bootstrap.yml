@@ -1,0 +1,56 @@
+name: Build fresh v1.150 DigitalOcean bootstrap image
+
+on:
+  push:
+    branches: [hieusro-v150-fresh-server]
+    paths:
+      - '.github/workflows/build-fresh-v150-bootstrap.yml'
+      - 'deploy/digitalocean/bootstrap/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install image tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libguestfs-tools qemu-utils curl gzip
+      - name: Download Ubuntu cloud image
+        run: |
+          curl -fL --retry 5 --retry-delay 5 https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img -o hieusro-v150-fresh.qcow2
+          qemu-img info hieusro-v150-fresh.qcow2
+      - name: Inject isolated fresh-server bootstrap
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          chmod +x deploy/digitalocean/bootstrap/hieusro-bootstrap.sh
+          sudo -E virt-customize --no-network -a hieusro-v150-fresh.qcow2 \
+            --copy-in deploy/digitalocean/bootstrap/hieusro-bootstrap.sh:/usr/local/sbin \
+            --copy-in deploy/digitalocean/bootstrap/hieusro-bootstrap.service:/etc/systemd/system \
+            --run-command 'chmod 0755 /usr/local/sbin/hieusro-bootstrap.sh' \
+            --run-command 'mkdir -p /etc/systemd/system/multi-user.target.wants' \
+            --run-command 'ln -sf /etc/systemd/system/hieusro-bootstrap.service /etc/systemd/system/multi-user.target.wants/hieusro-bootstrap.service' \
+            --run-command 'cloud-init clean --logs || true' \
+            --run-command 'truncate -s 0 /etc/machine-id || true'
+      - name: Compress
+        run: |
+          gzip -1 hieusro-v150-fresh.qcow2
+          sha256sum hieusro-v150-fresh.qcow2.gz > hieusro-v150-fresh.qcow2.gz.sha256
+          ls -lh hieusro-v150-fresh.qcow2.gz*
+      - name: Publish isolated bootstrap release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete hieusro-v150-fresh-bootstrap --cleanup-tag -y || true
+          gh release create hieusro-v150-fresh-bootstrap \
+            hieusro-v150-fresh.qcow2.gz \
+            hieusro-v150-fresh.qcow2.gz.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "HieuSRO v1.150 Fresh Bootstrap" \
+            --notes "Isolated clean-server bootstrap. Follows hieusro-v150-fresh-server only; does not touch LIVE or v219."

@@ -1,0 +1,1 @@
+Fresh v1.150 server isolation plan: build on a separate branch/droplet; do not alter LIVE data or v219. The new server is validated before any migration or cutover.

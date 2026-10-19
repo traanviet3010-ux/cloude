@@ -246,8 +246,8 @@ RUN set -eux; \
 
 ENV PORT=10000 \
     SRO_STATE_ROOT=/opt/hieusro/server/.state \
-    HIEUSRO_PUBLIC_HOST=hieusro-all-in-one.onrender.com \
-    SRO_ALLOWED_ORIGINS=https://hieusro-all-in-one.onrender.com,https://hieusro-private-client-test.onrender.com,https://hieusro-portal.onrender.com
+    HIEUSRO_PUBLIC_HOST=hieusro-drive-test-20261019.onrender.com \
+    SRO_ALLOWED_ORIGINS=https://hieusro-drive-test-20261019.onrender.com
 
 EXPOSE 10000
 CMD ["/opt/hieusro/allinone-start.sh"]

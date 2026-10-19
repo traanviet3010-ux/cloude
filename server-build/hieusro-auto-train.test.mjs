@@ -1,6 +1,7 @@
 import '../helpers/native-source-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const { pickAutoTrainMonster, pickAutoTrainDrop } = await import('../../src/engine/runtime/auto-train/auto-train.ts');
 const center = { regionId: 0x0101, x: 400, y: 0, z: 400, angle: 0 };
@@ -70,4 +71,15 @@ test('server drop with no claim still remains in saved train area', () => {
   const item={...entity(12,'ground-item',1400,400),
     groundItem:{typeFlags:1,goldAmount:0,tint:0}};
   assert.equal(pickAutoTrainDrop([item],center,center,40,1,90,true,true),null);
+});
+
+test('Auto Train bootstrap UI must declare every referenced DOM ID', () => {
+  const source = readFileSync(new URL('../../src/engine/runtime/auto-train/auto-train.ts', import.meta.url), 'utf8');
+  const markup = source.split('shadow.innerHTML = [')[1]?.split("].join('');")[0];
+  assert.ok(markup, 'Auto Train UI template must remain inspectable');
+  const refs = [...source.matchAll(/byId<[^>]+>\('([^']+)'\)/g)].map(row => row[1]);
+  assert.ok(refs.length > 20, 'Expected core Auto controls');
+  for (const id of refs) {
+    assert.ok(markup.includes('id="' + id + '"'), 'Missing Auto Train control #' + id);
+  }
 });

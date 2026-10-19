@@ -128,10 +128,12 @@ RUN python /tmp/patch-particle-rotation.py \
 # HieuSRO Auto Train stage 1: UI and actual monster combat must ship together.
 # The automated test and TypeScript build block a broken user-facing feature.
 COPY hieusro-auto-train.ts /tmp/hieusro-auto-train.ts
+COPY hieusro-auto-skill-picker.ts /tmp/hieusro-auto-skill-picker.ts
 COPY hieusro-auto-train.test.mjs /tmp/hieusro-auto-train.test.mjs
 COPY patch-auto-train.py /tmp/patch-auto-train.py
 RUN mkdir -p apps/client-next/src/engine/runtime/auto-train \
  && cp /tmp/hieusro-auto-train.ts apps/client-next/src/engine/runtime/auto-train/auto-train.ts \
+ && cp /tmp/hieusro-auto-skill-picker.ts apps/client-next/src/engine/runtime/auto-train/skill-picker.ts \
  && cp /tmp/hieusro-auto-train.test.mjs apps/client-next/tests/runtime/hieusro-auto-train.test.mjs \
  && python /tmp/patch-auto-train.py \
  && cd apps/client-next \

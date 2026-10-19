@@ -7,7 +7,8 @@ import type { EntityState } from '@/engine/contracts/world';
 import type { GameplayCommand, GameplayState, Pose } from '@/engine/contracts/gameplay';
 import { autoPotionEntry, autoPotionWord, defaultAutoPotion } from '@/engine/foundation/gameplay/auto-potion';
 import { skillCooldown } from '@/engine/foundation/gameplay/skill-cooldowns';
-import { SKILL_TARGET_MONSTER, SKILL_TARGET_SELF, skillMpCost } from '@/engine/foundation/gameplay/skill-catalog';
+import { SKILL_TARGET_MONSTER, SKILL_TARGET_SELF, skillMpCost, type SkillMetadata } from '@/engine/foundation/gameplay/skill-catalog';
+import { createSkillIconPicker } from './skill-picker.ts';
 
 const UNIT_PER_METER = 10;
 const REGION_SIZE = 1920;
@@ -129,6 +130,23 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     '.compact{font-size:11px;color:#89b39c}.notice{color:#ffcc8b;font-size:12px;line-height:1.45}',
     '.stats-four{grid-template-columns:1fr 1fr}.stats-four strong{font-size:14px}',
     '.panel{scrollbar-width:thin;scrollbar-color:#547395 transparent}',
+    '.skill-source-select{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;overflow:hidden!important}',
+    '.auto-icon-picker{position:relative;min-width:0;margin:3px 0 6px}',
+    '.auto-icon-trigger{display:flex;align-items:center;gap:9px;width:100%;min-height:54px;padding:5px 9px!important;text-align:left;background:#111f32!important;border:1px solid #6682a6!important;border-radius:10px!important;font-weight:500!important}',
+    '.auto-icon-trigger:hover,.auto-icon-trigger:focus-visible{border-color:#f8d48a!important}',
+    '.auto-skill-icon{width:40px;height:40px;flex:0 0 40px;border:1px solid #687a96;border-radius:7px;background:linear-gradient(145deg,#354256,#111d2c);display:grid;place-items:center;position:relative;overflow:hidden;color:#9eafc8;font-weight:800}',
+    '.auto-skill-icon img{position:absolute;width:100%;height:100%;object-fit:contain;inset:0;image-rendering:auto}',
+    '.auto-icon-fallback{font-size:12px;line-height:1}.auto-icon-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;flex:1}',
+    '.auto-icon-chevron{color:#efce85;font-size:16px}.auto-icon-dropdown{padding:9px;background:#0b1727;border:1px solid #6e87a4;border-radius:9px;margin:6px 0;box-shadow:0 10px 28px #0009}',
+    '.auto-icon-dropdown[hidden],.auto-icon-choice[hidden]{display:none!important}',
+    '.auto-icon-search{display:block;width:100%;height:38px;padding:8px;color:#fff;background:#1c3148;border:1px solid #7086a2;border-radius:7px;font:inherit;margin-bottom:8px}',
+    '.auto-icon-choices{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;max-height:212px;overflow:auto;scrollbar-width:thin}',
+    '.auto-icon-choice{height:62px;min-height:62px!important;min-width:0!important;padding:3px!important;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:7px!important;background:#1a2e47!important}',
+    '.auto-icon-choice .auto-skill-icon{width:36px;height:36px;flex-basis:36px}',
+    '.auto-icon-choice.selected{outline:2px solid #f5cf72;outline-offset:-2px}',
+    '.auto-icon-choice-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:#c2d2e8;font-weight:500}',
+    '.auto-icon-info{margin:8px 1px 0;min-height:24px;font-size:11px;white-space:pre-line;color:#c5d3e8}',
+    '@media(max-width:380px){.auto-icon-choices{grid-template-columns:repeat(4,minmax(0,1fr))}}',
     '@media(max-height:440px){.tools{bottom:10px}.panel{bottom:64px;max-height:calc(100vh - 75px)}}',
     '</style>',
     '<div class="tools hidden" id="auto-tools">',
@@ -211,7 +229,8 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   let active = false;
   let selected = 0, looted = 0, casts = 0;
   let startedAt = 0, lastCastAt = -Infinity, lastBuffAt = -Infinity;
-  let activeProfile = '', cachedSkillSignature = '', cachedItemSignature = '';
+  let activeProfile = '', cachedSkillSignature = '__uninitialized__', cachedItemSignature = '';
+  let learnedSkillRows: readonly SkillMetadata[] = [];
   let attackSkillId = 0, extraSkillIds: number[] = [], buffSkillId = 0, nextSkillIndex = 0;
   let skillsOn = false, buffsOn = false, goldOn = true, itemsOn = true, returnOn = true;
   let hpOn = false, mpOn = false, hpSlot = 0, mpSlot = 0, hpPercent = 60, mpPercent = 40;
@@ -329,7 +348,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
         }
       }
     } catch { /* Corrupt saved UI profile falls back to defaults. */ }
-    cachedSkillSignature = ''; cachedItemSignature = '';
+    cachedSkillSignature = '__uninitialized__'; cachedItemSignature = '';
     nextSkillIndex = 0;
     syncInputs();
   }
@@ -345,11 +364,24 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     if (!select.value) select.value = '0';
   }
 
+  function renderIconPickers() {
+    const selectors: HTMLSelectElement[] = [
+      attackSelect, buffSelect, ...extraSkillRoot.querySelectorAll<HTMLSelectElement>('select')
+    ];
+    for (const select of selectors) {
+      select.classList.add('skill-source-select');
+      // The native select remains canonical, the picker only controls its
+      // selected value. Recreating the picker never changes the learned skill.
+      select.parentElement?.querySelector(':scope > .auto-icon-picker')?.remove();
+      select.insertAdjacentElement('afterend', createSkillIconPicker(select, learnedSkillRows));
+    }
+  }
+
   function renderExtraSkillOptions() {
     extraSkillRoot.replaceChildren();
     const options = [...attackSelect.options].map(o => ({ id: Number(o.value), label: o.textContent || '' }));
     extraSkillIds.forEach((id, i) => {
-      const row = document.createElement('label');
+      const row = document.createElement('div');
       row.className = 'field';
       const title = document.createElement('span');
       title.textContent = 'Kỹ năng ' + (i + 2);
@@ -371,12 +403,15 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       row.append(title, select);
       extraSkillRoot.append(row);
     });
+    renderIconPickers();
   }
 
   function updateSkillOptions(game: GameplayState) {
     const learned = new Set(game.skills ?? []);
     const rows = (game.skillCatalog ?? []).filter(row => learned.has(row.id));
-    const signature = rows.map(row => row.id).join(',');
+    learnedSkillRows = rows;
+    // Include icon metadata: catalogs may arrive after the learned IDs.
+    const signature = rows.map(row => row.id + ':' + (row.icon ?? '') + ':' + (row.name ?? '')).join('|');
     if (signature === cachedSkillSignature) return;
     cachedSkillSignature = signature;
     fillSelect(attackSelect, [

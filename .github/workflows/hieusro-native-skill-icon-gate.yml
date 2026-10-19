@@ -107,3 +107,5 @@ jobs:
           npm install --prefix /tmp/hieusro-icon-test --no-save playwright-core@1.63.0
           cp server-build/hieusro-auto-icons.browser.mjs /tmp/hieusro-icon-test/check.mjs
           node /tmp/hieusro-icon-test/check.mjs
+
+# Re-run with full Auto HUD integrated in the Vite Chrome fixture.

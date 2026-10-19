@@ -8,8 +8,10 @@ static-node baking when all rotations use its supported initialization schedule,
 but route genuinely timed rotations to the existing command runtime.
 """
 from pathlib import Path
+import os
 
-path = Path("/src/opensro/apps/client-next/src/engine/runtime/assets/worker/effects/program/program.ts")
+root = Path(os.environ.get("HIEUSRO_OPENSRO_ROOT", "/src/opensro"))
+path = root / "apps/client-next/src/engine/runtime/assets/worker/effects/program/program.ts"
 src = path.read_text(encoding="utf-8")
 marker = "\t\t\t\tlet combinedMatrix: number[] | null = null;"
 assert src.count(marker) == 1, "OpenSRO rotation node anchor changed"

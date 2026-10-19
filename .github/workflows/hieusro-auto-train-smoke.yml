@@ -1,0 +1,50 @@
+name: HieuSRO Auto Train external smoke
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/hieusro-auto-train-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  external:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Verify live TEST serves Auto Train runtime and native game endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://hieusro-drive-test-20261019.onrender.com"
+          for i in $(seq 1 15); do
+            status=$(curl -sSL --connect-timeout 10 --max-time 30 -o /tmp/hieusro-index -w '%{http_code}' "$base/" || true)
+            if [[ "$status" == "200" ]] && grep -iq '<html' /tmp/hieusro-index; then break; fi
+            echo "Waiting for TEST Render to wake: attempt $i code=$status"
+            sleep 10
+          done
+          [[ "$status" == "200" ]]
+          echo 'PASS: TEST frontend HTTP 200'
+
+          script=$(grep -oE 'src="/assets/[^"]+\.js"' /tmp/hieusro-index | head -n 1 | cut -d '"' -f2)
+          [[ "$script" == /assets/* ]] || { echo "No game script discovered"; exit 1; }
+          curl -fsSL --max-time 40 "$base$script" > /tmp/hieusro-client.js
+          [[ $(wc -c < /tmp/hieusro-client.js) -gt 100000 ]] || exit 1
+          echo 'PASS: browser client JS loads'
+
+          grep -q 'hieusro-auto-train-root' /tmp/hieusro-client.js || {
+            echo "FAIL: the live browser bundle does not contain actual Auto Train runtime"; exit 1;
+          }
+          grep -q 'AUTO: TẮT' /tmp/hieusro-client.js || {
+            echo "FAIL: Auto Train UI missing from the live browser"; exit 1;
+          }
+          echo 'PASS: integrated Auto Train controls and controller ship in live client'
+
+          ready=$(curl -sS --max-time 20 -o /tmp/hieusro-ready -w '%{http_code}' "$base/readyz")
+          [[ "$ready" == "200" ]] || exit 1
+          servers=$(curl -sS --max-time 20 -o /tmp/hieusro-servers -w '%{http_code}' -H 'X-OpenSRO-Protocol: 6' "$base/api/title/servers")
+          [[ "$servers" == "200" ]] && grep -q HieuSRO /tmp/hieusro-servers
+          echo 'PASS: server readiness and public shard catalogue'
+
+          unauthorized=$(curl -sS --max-time 15 -o /tmp/hieusro-gm -w '%{http_code}' "$base/gm/api/status")
+          [[ "$unauthorized" == "401" ]] || exit 1
+          echo 'PASS: GM access still requires authentication'

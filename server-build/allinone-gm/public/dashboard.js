@@ -1,6 +1,7 @@
 import { initAccounts } from './accounts.js';
 import { initOperations, updateOperationsStatus } from './operations.js';
 import { initNewCharacterSettings } from './new-character.js';
+import { initAutoPolicy } from './auto-policy.js';
 
 const $ = id => document.getElementById(id);
 let pollTimer = null;
@@ -215,6 +216,7 @@ export function initDashboard(api, showLogin) {
   initAccounts(api, msg);
   initOperations(api);
   initNewCharacterSettings(api, msg);
+  initAutoPolicy(api);
   refreshStatus();
   refreshVersions(api);
   pollTimer = setInterval(refreshStatus, 12000);

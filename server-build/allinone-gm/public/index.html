@@ -40,6 +40,7 @@
         <a href="#itemPanel">Tạo vật phẩm</a>
         <a href="#eventPanel">Event / Boss</a>
         <a href="#economyPanel">Kinh tế</a>
+        <a href="#autoPolicyPanel">Auto Train</a>
         <a href="#versionPanel">Rollback</a>
       </nav>
 
@@ -152,6 +153,21 @@
           <div class="mini-metrics economy-metrics"><div><span>Tổng nhân vật</span><b id="ecoCharacters">—</b></div><div><span>Tổng Gold</span><b id="ecoGold">—</b></div><div><span>Tổng Silk</span><b id="ecoSilk">—</b></div><div><span>Item +9 trở lên</span><b id="ecoPlus9">—</b></div><div><span>Item +12 trở lên</span><b id="ecoPlus12">—</b></div><div><span>Risk Score</span><b id="ecoRisk">—</b></div></div>
           <div class="split-grid"><div><h3>Top Gold</h3><div id="richestList" class="table-wrap"></div></div><div><h3>Cảnh báo duplicate UID</h3><div id="duplicateList" class="table-wrap"></div></div></div>
           <p id="economyMessage" class="message"></p>
+        </section>
+
+        <section id="autoPolicyPanel" class="panel wide">
+          <div class="panel-head">
+            <div><p class="eyebrow">AUTO TRAIN CONTROL</p><h2>Quản lý Auto Online</h2>
+              <p class="muted">Cấu hình client HieuSRO TEST đang kết nối; cập nhật thông thường trong 15 giây. Chưa áp dụng cho Auto Offline.</p></div>
+            <span id="autoPolicyBadge" class="badge warn">Đang tải</span>
+          </div>
+          <form id="autoPolicyForm" class="rate-grid">
+            <label class="toggle-row"><span><b>Cho phép Auto Online</b><small>Tắt để dừng những client Auto đang chạy</small></span><input id="autoPolicyEnabled" type="checkbox" checked></label>
+            <label>Giới hạn bán kính train (m)<input id="autoPolicyRadius" type="number" min="10" max="100" step="10" value="100" required></label>
+            <label>Giới hạn một phiên Auto (phút)<input id="autoPolicyMinutes" type="number" min="15" max="1440" step="15" value="1440" required></label>
+            <div class="form-actions"><button class="primary" type="submit">Lưu quy định Auto</button><button id="autoPolicyReload" class="ghost" type="button">Làm mới</button><span id="autoPolicyMessage" class="message"></span></div>
+          </form>
+          <p class="muted">Lưu ý: giai đoạn này áp dụng ở client Online và không phải lớp chống bot cấp máy chủ. Cấu hình TEST Render Free mất hiệu lực khi container được tạo lại; GameWorld vẫn kiểm tra toàn bộ lệnh combat.</p>
         </section>
 
         <section id="versionPanel" class="panel wide">

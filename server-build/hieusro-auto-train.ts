@@ -154,8 +154,14 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     currentGid = null;
     attackOrigin = null;
     avoid.clear();
-    // Intentionally don't send a fake move or an attack-cancel command here.
-    // Native server may finish the last basic swing. Manual input replaces it.
+    // This is the existing native movement command path. It first emits the
+    // target-action cancel packet to stop continued basic attacks. A same-pose
+    // destination avoids an unwanted step away from the marked train point.
+    if (frame?.world && frame.gameplay?.pose && frame.local?.appearanceState?.[0] !== 2 &&
+        !reason.includes('điều khiển trực tiếp') && !reason.includes('thao tác trực tiếp') &&
+        !reason.includes('rời khỏi thế giới')) {
+      send({ kind: 'move', destination: { ...frame.gameplay.pose } });
+    }
     update();
   };
 

@@ -52,6 +52,27 @@ try {
   await buff.locator('.auto-icon-search').press('Escape');
   assert.equal(await buff.locator('.auto-icon-dropdown').isHidden(),true);
 
+  // Exercise the real createAutoTrain overlay that ships in HieuSRO,
+  // including the dynamic slot 2 and persistent game command ID mapping.
+  const hud=page.locator('#hieusro-auto-train-root');
+  await hud.locator('#auto-settings').click();
+  assert.ok(await hud.locator('.auto-icon-picker').count() >= 2,
+    'Full Auto HUD must mount both Attack and Buff real-icon controls');
+  await hud.locator('#auto-add-skill').click();
+  assert.ok(await hud.locator('.auto-icon-picker').count() >= 3,
+    'Additional skill rotation slot must also use the icon picker');
+  const second = hud.locator('#auto-extra-skills .auto-icon-picker').first();
+  await second.locator('.auto-icon-trigger').click();
+  await second.locator('[data-skill-id="322"]').click();
+  const idAndSaved = await page.evaluate(() => ({
+    id: document.getElementById('hieusro-auto-train-root').shadowRoot.querySelector('#auto-extra-skills select').value,
+    saved: JSON.parse(localStorage.getItem('hieusro:auto-train:profile:v2:Auto Icon Test Character') || '{}')
+  }));
+  assert.equal(idAndSaved.id,'322','Full Auto HUD native second skill must be updated');
+  assert.equal(idAndSaved.saved.extraSkillIds[0],322,'Selected icon must persist actual gameplay Skill ID');
+  assert.ok(await hud.locator('#auto-buff-skill + .auto-icon-picker .auto-skill-icon img').count() >= 0);
+  await page.evaluate(() => window.__autoIconTest.dispose());
+
   // No HTML injection: skill labels must be rendered as text, not interpreted as markup.
   const injected = await page.locator('body img[onerror]').count();
   assert.equal(injected,0);

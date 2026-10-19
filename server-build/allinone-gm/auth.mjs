@@ -57,5 +57,5 @@ export function validSession(req) {
 }
 
 export function sessionCookie(token, seconds = Math.floor(TTL_MS / 1000)) {
-  return `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${seconds}`;
+  return `${COOKIE}=${encodeURIComponent(token)}; Path=/gm; HttpOnly; Secure; SameSite=Strict; Max-Age=${seconds}`;
 }

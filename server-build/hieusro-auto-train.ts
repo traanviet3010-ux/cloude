@@ -8,7 +8,7 @@ import type { GameplayCommand, GameplayState, Pose } from '@/engine/contracts/ga
 import { autoPotionEntry, autoPotionWord, defaultAutoPotion } from '@/engine/foundation/gameplay/auto-potion';
 import { skillCooldown } from '@/engine/foundation/gameplay/skill-cooldowns';
 import { SKILL_TARGET_MONSTER, SKILL_TARGET_SELF, skillMpCost, type SkillMetadata } from '@/engine/foundation/gameplay/skill-catalog';
-import { createSkillIconPicker } from './auto-train/skill-picker';
+import { createSkillIconPicker } from './skill-picker.ts';
 
 const UNIT_PER_METER = 10;
 const REGION_SIZE = 1920;

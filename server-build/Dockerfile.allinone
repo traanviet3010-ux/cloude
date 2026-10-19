@@ -116,6 +116,15 @@ RUN node /tmp/build-server-world.mjs
 RUN node scripts/build/server/buildServerGameDataBundle.mjs \
  && node apps/server-observatory/tools/item-catalog.mjs
 
+# TEST-only client patch; leave the pinned upstream source and LIVE untouched.
+# Run deterministic rotation regression tests before publishing a new image.
+COPY patch-particle-rotation.py /tmp/patch-particle-rotation.py
+COPY hieusro-particle-rotation.test.mjs /tmp/hieusro-particle-rotation.test.mjs
+RUN python /tmp/patch-particle-rotation.py \
+ && cp /tmp/hieusro-particle-rotation.test.mjs apps/client-next/tests/runtime/hieusro-particle-rotation.test.mjs \
+ && cd apps/client-next \
+ && node --test tests/runtime/hieusro-particle-rotation.test.mjs
+
 # Build the browser client from the SAME pinned OpenSRO source as this
 # image, rather than fetching stale output from another Render deployment.
 RUN corepack pnpm --filter @sro/client-next build \

@@ -61,3 +61,9 @@ jobs:
           curl --fail-with-body -sS -L --connect-timeout 10 --max-time 35 "$BASE$script_path" -o /tmp/hieusro-module.js
           [[ $(wc -c < /tmp/hieusro-module.js) -gt 1000 ]]
           echo "PASS: browser JS module delivered successfully."
+          grep -q 'bootstrap-DKYMt9-z.js' /tmp/hieusro-index.html || {
+            echo "ERROR: Render is not serving the new patched Web client bundle";
+            exit 1;
+          }
+          echo "PASS: patched particle-rotation browser bundle fingerprint verified."
+

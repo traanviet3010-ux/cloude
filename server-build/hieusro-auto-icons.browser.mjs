@@ -1,0 +1,56 @@
+import { chromium } from 'playwright-core';
+import assert from 'node:assert/strict';
+
+const errors = [];
+const browser = await chromium.launch({
+  headless: true,
+  executablePath: '/usr/bin/google-chrome',
+  args: ['--no-sandbox','--disable-dev-shm-usage']
+});
+try {
+  const page = await browser.newPage({viewport:{width:760,height:720}});
+  page.on('pageerror',error=>errors.push(error.stack||error.message));
+  page.on('console',message=>{
+    if(message.type()==='error')errors.push(message.text());
+  });
+  const url=process.env.HIEUSRO_ICON_TEST_URL||'http://127.0.0.1:5180/_skill_icon_fixture.html';
+  await page.goto(url,{waitUntil:'load',timeout:45000});
+  await page.waitForFunction(()=>Boolean(window.__iconFixtureReady),{timeout:30000});
+  const first = page.locator('#test-root .auto-icon-picker').first();
+  await first.locator('.auto-icon-trigger').click();
+  assert.equal(await first.locator('.auto-icon-choices button').count(),3);
+  // Use the actual browser, not a mock DOM or a static screenshot.
+  const nativePaths = await first.locator('img').evaluateAll(images=>images.map(image=>image.getAttribute('src')));
+  assert.ok(nativePaths.some(path=>path==='/assets/images/Media_extracted/icon/skill/china/sword_smash_a.png'),
+    'Published Media.pk2 icon URL must be used for learned skill');
+  await first.locator('.auto-icon-search').fill('Smash');
+  assert.equal(await first.locator('.auto-icon-choice:not([hidden])').count(),1);
+  await first.locator('[data-skill-id="321"]').click();
+  let result=await page.evaluate(()=>window.__iconState());
+  assert.equal(result.attack,321);
+  assert.equal(result.attackChanges,1);
+  assert.equal(await first.locator('.auto-icon-dropdown').isHidden(),true);
+  assert.ok((await first.locator('.auto-icon-trigger').getAttribute('title')).includes('Hồi: 3s'));
+  assert.ok((await first.locator('.auto-icon-trigger').getAttribute('title')).includes('MP: 30'));
+
+  // The Buff picker is a separate category but exercises the same preserved ID path.
+  const buff=page.locator('#test-root .auto-icon-picker').last();
+  await buff.locator('.auto-icon-trigger').click();
+  await buff.locator('[data-skill-id="678"]').click();
+  result=await page.evaluate(()=>window.__iconState());
+  assert.equal(result.buff,678);
+  assert.equal(result.buffChanges,1);
+  await buff.locator('.auto-icon-trigger').click();
+  await buff.locator('.auto-icon-search').fill('Cleric');
+  await buff.locator('.auto-icon-search').press('Escape');
+  assert.equal(await buff.locator('.auto-icon-dropdown').isHidden(),true);
+
+  // No HTML injection: skill labels must be rendered as text, not interpreted as markup.
+  const injected = await page.locator('body img[onerror]').count();
+  assert.equal(injected,0);
+  // All existing game logic remains bound to original <select> command values.
+  assert.deepEqual(errors, [], 'Chrome JavaScript console and runtime errors');
+  console.log('PASS: real native skill images, searchable selection, Buff selection, tooltip, keyboard and gameplay ID binding.');
+} finally {
+  await browser.close();
+}

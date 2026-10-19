@@ -62,6 +62,28 @@ export function pickAutoTrainMonster(
   return selected;
 }
 
+export function pickAutoTrainDrop(
+  entities: readonly EntityState[],
+  center: Pose,
+  local: Pose,
+  radiusMeters: number,
+  playerGid: number,
+  lastVictimGid: number,
+  goldEnabled: boolean,
+  itemsEnabled: boolean,
+  blocked: ReadonlySet<number> = new Set()
+): EntityState | null {
+  const candidates = entities.filter(e => {
+    if (e.kind !== 'ground-item' || !e.groundItem || blocked.has(e.gid)) return false;
+    if (e.groundItem.claimantGid && e.groundItem.claimantGid !== playerGid) return false;
+    if (e.groundItem.dropperGid && e.groundItem.dropperGid !== lastVictimGid) return false;
+    if (distance(center, e) > radiusMeters * UNIT_PER_METER) return false;
+    return e.groundItem.goldAmount > 0 ? goldEnabled : itemsEnabled;
+  });
+  candidates.sort((a,b) => distance(local,a) - distance(local,b));
+  return candidates[0] ?? null;
+}
+
 function storedRadius(): number {
   try {
     const n = Number(localStorage.getItem(RADIUS_STORAGE));
@@ -526,16 +548,11 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       update();
     }
     if (next.now - lastPickup < PICKUP_WAIT_MS) return true;
-    const drops = next.entities.filter(e => {
-      if (e.kind !== 'ground-item' || !e.groundItem) return false;
-      if (e.groundItem.claimantGid && e.groundItem.claimantGid !== game.localGid) return false;
-      if (e.groundItem.dropperGid && e.groundItem.dropperGid !== lastVictim) return false;
-      if (distance(center!, e) > radius * UNIT_PER_METER) return false;
-      if (lootedItems.get(e.gid) && lootedItems.get(e.gid)! > next.now) return false;
-      return e.groundItem.goldAmount > 0 ? goldOn : itemsOn;
-    });
-    drops.sort((a, b) => distance(game.pose!, a) - distance(game.pose!, b));
-    const drop = drops[0];
+    const drop = pickAutoTrainDrop(
+      next.entities, center!, game.pose!, radius, game.localGid, lastVictim,
+      goldOn, itemsOn,
+      new Set([...lootedItems].filter(([, until]) => until > next.now).map(([gid]) => gid))
+    );
     if (!drop) return true; // Wait briefly for server's drop publication.
     send({ kind: 'pickup', gid: drop.gid });
     pendingLootGid = drop.gid;

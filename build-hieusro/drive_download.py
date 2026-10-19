@@ -62,7 +62,11 @@ def download(gdown, file_id: str, destination: Path, expected: int | None = None
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--manifest", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--manifest", type=Path,
+                        help="Private JSON containing file IDs")
+    source.add_argument("--folder-url", type=str,
+                        help="Shared Google Drive folder link; IDs discovered at runtime")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     try:
@@ -70,9 +74,41 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit("Install: python3 -m pip install gdown==5.2.0") from exc
 
-    cfg = json.loads(args.manifest.read_text(encoding="utf-8"))
+    if args.manifest:
+        cfg = json.loads(args.manifest.read_text(encoding="utf-8"))
+    else:
+        if not args.folder_url.startswith("https://drive.google.com/drive/folders/"):
+            raise SystemExit("--folder-url must be a Google Drive folder URL")
+        print("Listing linked Drive folder (no download yet)...", flush=True)
+        found = gdown.download_folder(url=args.folder_url, skip_download=True,
+                                      quiet=True, remaining_ok=True,
+                                      use_cookies=False)
+        if not found:
+            raise SystemExit("Cannot list Drive folder: check 'Anyone with link' access")
+        # gdown exposes (id, path, local_path), no client archives are downloaded in this step.
+        file_ids = {}
+        for item in found:
+            basename = Path(item.path.replace("\\\\", "/")).name
+            if basename in file_ids:
+                raise SystemExit(f"Ambiguous duplicate Drive filename: {basename}")
+            file_ids[basename] = item.id
+        cfg = {}
+        for name in EXPECTED:
+            if name in PART_SIZES and all(
+                    f"{name}.part{index:03}" in file_ids
+                    for index in range(1, len(PART_SIZES[name]) + 1)):
+                cfg[name] = {"parts": [
+                    file_ids[f"{name}.part{index:03}"]
+                    for index in range(1, len(PART_SIZES[name]) + 1)
+                ]}
+            elif name in file_ids:
+                cfg[name] = {"single": file_ids[name]}
+            else:
+                raise SystemExit(f"{name} not found in supplied Drive folder")
+        print("Six required input files identified; PK2 chunks preferred where available.",
+              flush=True)
     if set(cfg) != set(EXPECTED):
-        raise SystemExit(f"Private manifest must have exactly: {', '.join(EXPECTED)}")
+        raise SystemExit(f"Drive input must include exactly: {', '.join(EXPECTED)}")
     out = args.output.expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
     report = {}

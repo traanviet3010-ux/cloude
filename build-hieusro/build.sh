@@ -51,7 +51,7 @@ python3 -c 'import sys; assert sys.version_info >= (3, 12)' || {
 go version
 node --version
 corepack pnpm --version
-ffmpeg -version | head -n 1
+ffmpeg -version
 
 export SRO_GAME_ROOT="$GAME_ROOT"
 export HIEUSRO_BUILD_SOURCE="$ZIP"

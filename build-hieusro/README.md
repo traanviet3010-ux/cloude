@@ -14,9 +14,19 @@ This directory provides a **reproducible build procedure**, not a deployed or pl
 bash build-hieusro/build.sh --source-zip /private/opensro-main.zip --game-root /private/legend3-client --work-dir /private/hieusro-test-build
 ```
 
-## Path B: private Drive download configuration
+## Path B: download directly from the linked Drive folder
 
-Create a **private** JSON file outside Git and provide file IDs only there. Google Drive must allow the build machine to download those files. Supported strategies are `single` (one file ID) and `parts` (ordered part IDs). Do **not** commit your private link or PK2 files to Git.
+The downloader can list the supplied, link-shared Drive folder at runtime and automatically select the required files (preferring the ordered Data/Map chunks). No file IDs or retail files are committed to this repository. On a build machine with access to the link:
+
+```sh
+python3 -m pip install gdown==5.2.0
+python3 build-hieusro/drive_download.py \
+  --folder-url "https://drive.google.com/drive/folders/YOUR_FOLDER_ID" \
+  --output /private/legend3-client
+bash build-hieusro/build.sh --source-zip /private/opensro-main.zip --game-root /private/legend3-client --work-dir /private/hieusro-test-build
+```
+
+An optional `--manifest` file can be used instead if folder discovery is blocked. Keep this JSON **outside Git** and provide the file IDs privately. Supported strategies are `single` (one file ID) and `parts` (ordered part IDs). Do **not** commit your private link or PK2 files to Git.
 
 ```json
 {

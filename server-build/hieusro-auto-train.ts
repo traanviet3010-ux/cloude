@@ -165,10 +165,32 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   const radiusInput = byId<HTMLInputElement>('auto-radius');
   const radiusLabel = byId<HTMLElement>('auto-radius-label');
   const centerText = byId<HTMLElement>('auto-center');
+  const notice = byId<HTMLElement>('auto-notice');
+  const skillToggle = byId<HTMLInputElement>('auto-skills-on');
+  const buffToggle = byId<HTMLInputElement>('auto-buffs-on');
+  const attackSelect = byId<HTMLSelectElement>('auto-attack-skill');
+  const buffSelect = byId<HTMLSelectElement>('auto-buff-skill');
+  const hpToggle = byId<HTMLInputElement>('auto-hp-on');
+  const mpToggle = byId<HTMLInputElement>('auto-mp-on');
+  const hpSelect = byId<HTMLSelectElement>('auto-hp-slot');
+  const mpSelect = byId<HTMLSelectElement>('auto-mp-slot');
+  const hpPercentInput = byId<HTMLInputElement>('auto-hp-percent');
+  const mpPercentInput = byId<HTMLInputElement>('auto-mp-percent');
+  const goldToggle = byId<HTMLInputElement>('auto-gold');
+  const itemToggle = byId<HTMLInputElement>('auto-items');
+  const returnToggle = byId<HTMLInputElement>('auto-return');
   let radius = storedRadius();
   let frame: AutoFrame | null = null;
   let active = false;
-  let selected = 0;
+  let selected = 0, looted = 0, casts = 0;
+  let startedAt = 0, lastCastAt = -Infinity, lastBuffAt = -Infinity;
+  let activeProfile = '', cachedSkillSignature = '', cachedItemSignature = '';
+  let attackSkillId = 0, buffSkillId = 0;
+  let skillsOn = false, buffsOn = false, goldOn = true, itemsOn = true, returnOn = true;
+  let hpOn = false, mpOn = false, hpSlot = 0, mpSlot = 0, hpPercent = 60, mpPercent = 40;
+  let collectingUntil = 0, lastVictim = 0, lastPickup = 0, pendingLootGid = 0, lastReturn = -Infinity;
+  let stuckReturnCount = 0, returnOrigin: Pose | null = null;
+  const lootedItems = new Map<number, number>();
   let currentGid: number | null = null;
   let lastStep = -Infinity;
   let actionAt = 0;
@@ -178,6 +200,152 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   let visibleWorld = false;
   let stoppedReason = 'Chưa bật Auto';
   const avoid = new Map<number, number>();
+  const inputFields = [ skillToggle, buffToggle, attackSelect, buffSelect, hpToggle, mpToggle,
+    hpSelect, mpSelect, hpPercentInput, mpPercentInput, goldToggle, itemToggle, returnToggle ];
+
+  function persist() {
+    if (!activeProfile) return;
+    try {
+      localStorage.setItem(PROFILE_PREFIX + activeProfile, JSON.stringify({
+        version: 2, radius, skillsOn, buffsOn, attackSkillId, buffSkillId,
+        goldOn, itemsOn, returnOn, hpOn, mpOn, hpSlot, mpSlot, hpPercent, mpPercent
+      }));
+    } catch { /* Client gameplay still works with storage disabled. */ }
+  }
+
+  function syncInputs() {
+    radiusInput.value = String(radius);
+    radiusLabel.textContent = radius + ' m';
+    skillToggle.checked = skillsOn;
+    buffToggle.checked = buffsOn;
+    goldToggle.checked = goldOn; itemToggle.checked = itemsOn; returnToggle.checked = returnOn;
+    hpToggle.checked = hpOn; mpToggle.checked = mpOn;
+    hpPercentInput.value = String(hpPercent); mpPercentInput.value = String(mpPercent);
+    byId<HTMLElement>('auto-hp-label').textContent = hpPercent + '%';
+    byId<HTMLElement>('auto-mp-label').textContent = mpPercent + '%';
+    attackSelect.value = String(attackSkillId); buffSelect.value = String(buffSkillId);
+    hpSelect.value = String(hpSlot); mpSelect.value = String(mpSlot);
+  }
+
+  function loadProfile(identity: string) {
+    if (activeProfile === identity) return;
+    if (active) stop('Thay đổi nhân vật, Auto đã dừng.');
+    activeProfile = identity;
+    // No full-session identifiers or credentials are stored, only UI settings.
+    try {
+      const raw = localStorage.getItem(PROFILE_PREFIX + identity);
+      const data = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      if (data.version === 2) {
+        if (typeof data.radius === 'number' && data.radius >= 10 && data.radius <= 100) radius = data.radius;
+        for (const [key, setter] of [
+          ['skillsOn', (v: boolean) => { skillsOn = v; }],
+          ['buffsOn', (v: boolean) => { buffsOn = v; }],
+          ['goldOn', (v: boolean) => { goldOn = v; }],
+          ['itemsOn', (v: boolean) => { itemsOn = v; }],
+          ['returnOn', (v: boolean) => { returnOn = v; }],
+          ['hpOn', (v: boolean) => { hpOn = v; }],
+          ['mpOn', (v: boolean) => { mpOn = v; }]
+        ] as const) {
+          if (typeof data[key] === 'boolean') setter(data[key] as boolean);
+        }
+        for (const [key, setter, min, max] of [
+          ['attackSkillId', (v: number) => { attackSkillId = v; }, 0, 65535],
+          ['buffSkillId', (v: number) => { buffSkillId = v; }, 0, 65535],
+          ['hpSlot', (v: number) => { hpSlot = v; }, 0, 40],
+          ['mpSlot', (v: number) => { mpSlot = v; }, 0, 40],
+          ['hpPercent', (v: number) => { hpPercent = v; }, 10, 90],
+          ['mpPercent', (v: number) => { mpPercent = v; }, 10, 90]
+        ] as const) {
+          if (typeof data[key] === 'number' && Number.isInteger(data[key]) && data[key] >= min && data[key] <= max) setter(data[key]);
+        }
+      }
+    } catch { /* Corrupt saved UI profile falls back to defaults. */ }
+    cachedSkillSignature = ''; cachedItemSignature = '';
+    syncInputs();
+  }
+
+  function fillSelect(select: HTMLSelectElement, options: readonly { id: number; label: string; }[], selectedValue: number) {
+    select.replaceChildren();
+    for (const option of options) {
+      const el = document.createElement('option');
+      el.value = String(option.id); el.textContent = option.label;
+      select.appendChild(el);
+    }
+    select.value = String(selectedValue);
+    if (!select.value) select.value = '0';
+  }
+
+  function updateSkillOptions(game: GameplayState) {
+    const learned = new Set(game.skills ?? []);
+    const rows = (game.skillCatalog ?? []).filter(row => learned.has(row.id));
+    const signature = rows.map(row => row.id).join(',');
+    if (signature === cachedSkillSignature) return;
+    cachedSkillSignature = signature;
+    fillSelect(attackSelect, [
+      { id: 0, label: 'Đánh thường (không dùng Skill)' },
+      ...rows.filter(r => (r.targets ?? 0) & SKILL_TARGET_MONSTER)
+        .map(r => ({ id: r.id, label: r.name || 'Skill #' + r.id }))
+    ], attackSkillId);
+    fillSelect(buffSelect, [
+      { id: 0, label: 'Không tự Buff' },
+      ...rows.filter(r => !!((r.targets ?? 0) & SKILL_TARGET_SELF) || !r.targetRequired)
+        .map(r => ({ id: r.id, label: r.name || 'Skill #' + r.id }))
+    ], buffSkillId);
+    // A patch/skill reset can remove a known skill: fall back safely.
+    if (attackSelect.value === '0') attackSkillId = 0;
+    if (buffSelect.value === '0') buffSkillId = 0;
+    syncInputs();
+  }
+
+  function updatePotionSlots(game: GameplayState) {
+    const rows = (game.quickSlots ?? []).filter(row => row.kind === 0x46 && row.slot >= 1 && row.slot <= 40);
+    const signature = rows.map(row => row.slot + ':' + row.payload).join(',');
+    if (signature === cachedItemSignature) return;
+    cachedItemSignature = signature;
+    const options = [
+      { id: 0, label: 'Chọn ô có thuốc trong hotbar' },
+      ...rows.map(row => ({
+        id: row.slot,
+        label: 'Ô ' + row.slot + ' · ' + (game.inventory.find(item => item.slot === row.payload + 13)?.name || 'Vật phẩm đã gán')
+      }))
+    ];
+    fillSelect(hpSelect, options, hpSlot);
+    fillSelect(mpSelect, options, mpSlot);
+    if (hpSelect.value === '0') hpSlot = 0;
+    if (mpSelect.value === '0') mpSlot = 0;
+  }
+
+  function savePotions() {
+    if (!frame?.world || !frame.gameplay) {
+      notice.textContent = 'Vào nhân vật trước khi lưu cài đặt thuốc HP/MP.';
+      return false;
+    }
+    const game = frame.gameplay;
+    const assigned = new Set((game.quickSlots ?? []).filter(r => r.kind === 0x46).map(r => r.slot));
+    if (hpOn && (!hpSlot || !assigned.has(hpSlot)) || mpOn && (!mpSlot || !assigned.has(mpSlot))) {
+      notice.textContent = 'Hãy gán thuốc HP/MP vào hotbar rồi chọn đúng ô trước khi bật.';
+      return false;
+    }
+    const previous = game.autoPotion ?? defaultAutoPotion();
+    send({ kind: 'auto-potion-save', settings: {
+      hp: autoPotionWord({ enabled: hpOn, percent: hpPercent, slot: hpSlot }),
+      mp: autoPotionWord({ enabled: mpOn, percent: mpPercent, slot: mpSlot }),
+      cure: previous.cure, timing: previous.timing
+    } });
+    notice.textContent = 'Đã gửi cấu hình HP/MP tới Game Server.';
+    persist();
+    return true;
+  }
+
+  function isSkillAvailable(game: GameplayState, skillId: number, now: number): boolean {
+    const row = game.skillIndex?.get(skillId) ?? game.skillCatalog?.find(r => r.id === skillId);
+    if (!row || !game.skills?.includes(skillId)) return false;
+    if (skillCooldown(game.skillCooldowns ?? [], skillId, row.cooldownGroup ?? 0, now)) return false;
+    const vitals = game.vitals.find(v => v.gid === game.localGid);
+    if (vitals?.mp !== undefined && vitals.maxMp !== undefined &&
+        vitals.mp < skillMpCost(row, vitals.maxMp)) return false;
+    return true;
+  }
   radiusInput.value = String(radius);
   radiusLabel.textContent = String(radius) + ' m';
 

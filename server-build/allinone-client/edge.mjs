@@ -325,6 +325,6 @@ server.on("upgrade", (req, clientSocket, head) => {
   clientSocket.on("error", close);
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "127.0.0.1", () => {
   console.log(`HieuSRO client edge listening on :${PORT}; assets=${ASSET_UPSTREAM_HOST}; game=${GAME_UPSTREAM_HOST}; defaultLang=vi`);
 });

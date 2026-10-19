@@ -226,6 +226,39 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   let visibleWorld = false;
   let stoppedReason = 'Chưa bật Auto';
   const avoid = new Map<number, number>();
+  let gmPolicy = { enabled: true, maxRadius: 100, maxMinutes: 1440 };
+  let policyReady = false;
+  let policyTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function refreshAutoPolicy() {
+    try {
+      const response = await fetch('/auto-policy.json', { cache: 'no-store', credentials: 'same-origin' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const data = await response.json() as Record<string, unknown>;
+      if (typeof data.enabled !== 'boolean' || !Number.isInteger(data.maxRadius) ||
+          (data.maxRadius as number) < 10 || (data.maxRadius as number) > 100 ||
+          !Number.isInteger(data.maxMinutes) || (data.maxMinutes as number) < 15 ||
+          (data.maxMinutes as number) > 1440) throw new Error('Phản hồi GM không hợp lệ');
+      gmPolicy = { enabled: data.enabled, maxRadius: data.maxRadius as number, maxMinutes: data.maxMinutes as number };
+      policyReady = true;
+      radiusInput.max = String(gmPolicy.maxRadius);
+      if (radius > gmPolicy.maxRadius) {
+        radius = gmPolicy.maxRadius;
+        syncInputs();
+        persist();
+      }
+      if (!gmPolicy.enabled) {
+        stop('GM đã tắt Auto Online trên server này.');
+        notice.textContent = 'GM hiện không cho phép sử dụng Auto Online.';
+      }
+      if (active && performance.now() - startedAt > gmPolicy.maxMinutes * 60000) {
+        stop('Đã đạt giới hạn thời lượng Auto do GM thiết lập.');
+      }
+    } catch (error) {
+      if (!policyReady) notice.textContent = 'Chưa kết nối được chính sách Auto từ GM: ' + String(error);
+      // Retain last known policy when the network temporarily interrupts.
+    }
+  }
   function persist() {
     if (!activeProfile) return;
     try {
@@ -448,6 +481,11 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   };
 
   const start = () => {
+    if (!policyReady || !gmPolicy.enabled) {
+      stoppedReason = policyReady ? 'GM đã tắt Auto Online.' : 'Đang tải chính sách Auto từ Game Server.';
+      update();
+      return;
+    }
     if (!frame?.world || !frame.gameplay?.pose || !frame.local || frame.local.appearanceState?.[0] === 2) {
       stoppedReason = 'Cần vào game bằng nhân vật còn sống trước khi bật Auto.';
       update();
@@ -540,6 +578,8 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     switchAuto();
   };
   window.addEventListener('keydown', onKey, true);
+  void refreshAutoPolicy();
+  policyTimer = setInterval(() => { void refreshAutoPolicy(); }, 15000);
 
   // Server-issued inventory and ownership checks are authoritative. The
   // controller only tries eligible nearby drops after its own target falls.
@@ -660,6 +700,14 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       updateSkillOptions(game);
       updatePotionSlots(game);
       if (!active) return;
+      if (!gmPolicy.enabled || !policyReady) {
+        stop('GM đã vô hiệu hóa Auto Online.');
+        return;
+      }
+      if (next.now - startedAt >= gmPolicy.maxMinutes * 60000) {
+        stop('Đã hết thời lượng Auto do GM cho phép.');
+        return;
+      }
       if (lastLocalGid !== game.localGid) {
         stop('Đã dừng Auto: thay đổi nhân vật.');
         return;
@@ -729,6 +777,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     dispose() {
       stop();
       window.removeEventListener('keydown', onKey, true);
+      if (policyTimer) clearInterval(policyTimer);
       host.remove();
     }
   };

@@ -9,6 +9,13 @@ const browser = await chromium.launch({
 });
 try {
   const page = await browser.newPage({viewport:{width:760,height:720}});
+  // The CI source-only checkout intentionally has no copyrighted PK2 art.
+  // Supply a valid image byte only to exercise actual <img> rendering;
+  // production uses the unchanged native Media.pk2 path verified separately.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8Gr0UAAAAASUVORK5CYII=', 'base64');
+  await page.route('**/assets/images/Media_extracted/icon/**', route =>
+    route.fulfill({status:200,contentType:'image/png',body:png})
+  );
   page.on('pageerror',error=>errors.push(error.stack||error.message));
   page.on('console',message=>{
     if(message.type()==='error')errors.push(message.text());

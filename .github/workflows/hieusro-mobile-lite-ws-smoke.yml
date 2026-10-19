@@ -1,0 +1,40 @@
+name: HieuSRO Mobile Lite WebSocket Proxy Smoke
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-mobile-lite-ws-smoke.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ws-proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify same-origin Agent and GameWorld handshake without game credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          const base='https://hieusro-mobile-lite-20261020.onrender.com';
+          const response=await fetch(base+'/api/title/servers',{headers:{'X-OpenSRO-Protocol':'6'}});
+          assert.equal(response.status,200,'GameWorld shard list must proxy from Preview TEST');
+          const body=await response.text();
+          assert.ok(body.includes('HieuSRO'),'Shards must include HieuSRO TEST');
+          console.log('PASS: same-origin game Agent shard catalogue');
+
+          const url='wss://hieusro-mobile-lite-20261020.onrender.com/shards/global-official/transport/ws';
+          const ws=new WebSocket(url);
+          const result=await new Promise((resolve,reject)=>{
+            const timer=setTimeout(()=>reject(Error('WebSocket 101 upgrade timeout')),16000);
+            ws.addEventListener('open',()=>{clearTimeout(timer);resolve('open')},{once:true});
+            ws.addEventListener('error',()=>{clearTimeout(timer);reject(Error('WebSocket upgrade/Origin failed'))},{once:true});
+            ws.addEventListener('close',evt=>{clearTimeout(timer);reject(Error('WebSocket closed before open: '+evt.code))},{once:true});
+          });
+          assert.equal(result,'open');
+          console.log('PASS: WSS WebSocket upgrade to actual TEST GameWorld (no account used)');
+          ws.close();
+          JS

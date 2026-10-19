@@ -569,12 +569,18 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
         lastLocalGid = null;
         return;
       }
+      const game = next.gameplay;
+      const identity = next.local.name || String(game.localGid);
+      if (identity && identity !== activeProfile) loadProfile(identity);
+      updateSkillOptions(game);
+      updatePotionSlots(game);
       if (!active) return;
-      if (lastLocalGid !== next.gameplay.localGid) {
+      if (lastLocalGid !== game.localGid) {
         stop('Đã dừng Auto: thay đổi nhân vật.');
         return;
       }
-      if (next.local.appearanceState?.[0] === 2) {
+      const life = game.vitals.find(v => v.gid === game.localGid);
+      if (next.local.appearanceState?.[0] === 2 || life?.deathState || life?.hp === 0) {
         stop('Đã dừng Auto: nhân vật đã chết.');
         return;
       }
@@ -582,23 +588,45 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
         stop('Đã dừng Auto: nhân vật đang cưỡi thú.');
         return;
       }
-      if (!center || next.now - lastStep < ACTION_INTERVAL_MS) return;
+      if (next.now - lastStep < ACTION_INTERVAL_MS) return;
       lastStep = next.now;
+      if (!center) return;
       for (const [gid, expires] of avoid) if (expires <= next.now) avoid.delete(gid);
-      const current = next.entities.find(e => e.gid === currentGid && e.kind === 'monster' && e.appearanceState?.[0] !== 2);
+      for (const [gid, expires] of lootedItems) if (expires <= next.now) lootedItems.delete(gid);
+      if (returnHome(next)) return;
+
+      let current = currentGid ? next.entities.find(e => e.gid === currentGid) ?? null : null;
+      // Server despawn/death is the only reason to enter post-kill pickup.
+      if (currentGid && (!current || current.kind !== 'monster' || current.appearanceState?.[0] === 2)) {
+        lastVictim = currentGid;
+        collectingUntil = next.now + LOOT_WINDOW_MS;
+        current = null;
+        currentGid = null;
+        update();
+      }
+      if (collectingUntil && lootAfterKill(next)) return;
+
       if (current && distance(center, current) <= radius * UNIT_PER_METER) {
         if (attackOrigin && next.now - actionAt > STUCK_AFTER_MS &&
-            distance(next.gameplay.pose, attackOrigin) < MIN_MOVEMENT_UNITS &&
-            distance(next.gameplay.pose, current) > 80) {
+            distance(game.pose, attackOrigin) < MIN_MOVEMENT_UNITS &&
+            distance(game.pose, current) > 80 ||
+            next.now - actionAt > 90000) {
           avoid.set(current.gid, next.now + STUCK_RETRY_MS);
           currentGid = null;
           attackOrigin = null;
+          notice.textContent = 'Bỏ qua quái bị kẹt hoặc không phản hồi.';
           update();
+          return;
         }
+        rotateCombat(next, current);
+        update();
         return;
       }
+
       currentGid = null;
-      const chosen = pickAutoTrainMonster(next.entities, center, next.gameplay.pose, radius, new Set(avoid.keys()));
+      // Self-buff in idle moments, but do not need a hostile target to cast.
+      if (rotateCombat(next, null)) return;
+      const chosen = pickAutoTrainMonster(next.entities, center, game.pose, radius, new Set(avoid.keys()));
       if (!chosen) {
         update();
         return;
@@ -606,8 +634,9 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       currentGid = chosen.gid;
       selected++;
       actionAt = next.now;
-      attackOrigin = { ...next.gameplay.pose };
-      // Commands go through the same gameplay simulation/server authority as clicks.
+      attackOrigin = { ...game.pose };
+      collectingUntil = 0; pendingLootGid = 0;
+      // Server still decides damage, range, path, cooldown, EXP and drops.
       send({ kind: 'select', gid: chosen.gid });
       send({ kind: 'attack', gid: chosen.gid });
       update();

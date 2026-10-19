@@ -1,4 +1,4 @@
-import './helpers/native-source-loader.mjs';
+import '../helpers/native-source-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

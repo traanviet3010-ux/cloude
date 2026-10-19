@@ -147,6 +147,14 @@ RUN corepack pnpm --filter @sro/client-next build \
  && cp -a apps/client-next/temp/artifacts/dist/. /out/client/ \
  && test -s /out/client/index.html
 
+# Pack native PK2 skill icons into the same local client as the JS bundles.
+# The upstream game-assets host cannot be relied on for this licensed pack.
+COPY package-native-skill-icons.py /tmp/package-native-skill-icons.py
+RUN python /tmp/package-native-skill-icons.py \
+  /src/opensro/.generated/intermediate/images/Media_extracted/icon/skill \
+  /out/client/assets/images/Media_extracted/icon/skill \
+ && test -s /out/client/assets/images/Media_extracted/icon/skill/china/sword_smash_a.png
+
 
 RUN set -eux; \
     mkdir -p /out; \

@@ -7,6 +7,17 @@ import { fileURLToPath } from "node:url";
 import { normalizeVietnameseCatalogue } from "./tcvn3.mjs";
 
 const PORT = Number(process.env.PORT || 10000);
+const AUTO_POLICY_FILE = process.env.HIEUSRO_AUTO_POLICY_FILE || '/opt/hieusro/server/.state/auto-policy.json';
+function publicAutoPolicy() {
+  try {
+    const row = JSON.parse(fs.readFileSync(AUTO_POLICY_FILE,'utf8'));
+    if (typeof row.enabled !== 'boolean' || !Number.isInteger(row.maxRadius) ||
+        row.maxRadius < 10 || row.maxRadius > 100 || !Number.isInteger(row.maxMinutes) ||
+        row.maxMinutes < 15 || row.maxMinutes > 1440) throw Error('invalid GM Auto policy');
+    return {enabled:row.enabled,maxRadius:row.maxRadius,maxMinutes:row.maxMinutes,updatedAt:row.updatedAt||0};
+  } catch { return {enabled:true,maxRadius:100,maxMinutes:1440,updatedAt:0}; }
+}
+
 const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
 const ASSET_UPSTREAM_HOST = process.env.OPENSRO_ASSET_UPSTREAM_HOST || "opensro.online";
 const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-game-server.onrender.com";
@@ -263,6 +274,18 @@ function serveStatic(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://local").pathname);
+
+    if (pathname === '/auto-policy.json') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405,{'Allow':'GET, HEAD'}).end();
+        return;
+      }
+      secureHeaders(res);
+      res.setHeader('Content-Type','application/json; charset=utf-8');
+      res.setHeader('Cache-Control','no-store');
+      res.end(req.method === 'HEAD' ? '' : JSON.stringify(publicAutoPolicy()));
+      return;
+    }
 
     if (pathname.startsWith("/assets/") && localFileExists(pathname)) {
       serveStatic(req, res);

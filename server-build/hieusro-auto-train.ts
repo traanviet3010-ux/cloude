@@ -26,6 +26,7 @@ type AutoFrame = {
   readonly local: EntityState | null | undefined;
   readonly entities: readonly EntityState[];
   readonly now: number;
+  readonly simNow?: number;
 };
 
 function point(p: Pick<Pose | EntityState, 'regionId' | 'x' | 'z'>): readonly [number, number] {
@@ -200,9 +201,6 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   let visibleWorld = false;
   let stoppedReason = 'Chưa bật Auto';
   const avoid = new Map<number, number>();
-  const inputFields = [ skillToggle, buffToggle, attackSelect, buffSelect, hpToggle, mpToggle,
-    hpSelect, mpSelect, hpPercentInput, mpPercentInput, goldToggle, itemToggle, returnToggle ];
-
   function persist() {
     if (!activeProfile) return;
     try {
@@ -356,6 +354,10 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     state.textContent = active ? (currentGid ? 'Đang truy đuổi / đánh mục tiêu' : 'Đang tìm quái gần nhất') : stoppedReason;
     targetText.textContent = currentGid ? String(currentGid) : '—';
     countText.textContent = String(selected);
+    byId<HTMLElement>('auto-looted').textContent = String(looted);
+    byId<HTMLElement>('auto-casts').textContent = String(casts);
+    const seconds = active ? Math.max(0, Math.floor((performance.now() - startedAt) / 1000)) : 0;
+    byId<HTMLElement>('auto-elapsed').textContent = String(Math.floor(seconds / 60)).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
     centerText.textContent = center ? 'Điểm train: vùng ' + center.regionId + ' • ' + Math.round(center.x) + ', ' + Math.round(center.z) : 'Điểm train: chưa lưu';
   };
 
@@ -366,6 +368,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     currentGid = null;
     attackOrigin = null;
     avoid.clear();
+    collectingUntil = 0; pendingLootGid = 0; lastVictim = 0;
     // This is the existing native movement command path. It first emits the
     // target-action cancel packet to stop continued basic attacks. A same-pose
     // destination avoids an unwanted step away from the marked train point.
@@ -384,17 +387,47 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       return;
     }
     center = { ...frame.gameplay.pose };
-    selected = 0;
+    selected = 0; looted = 0; casts = 0;
+    startedAt = performance.now(); lastCastAt = -Infinity; lastBuffAt = -Infinity;
+    collectingUntil = 0; lastVictim = 0; pendingLootGid = 0; lastPickup = 0;
+    lootedItems.clear(); returnOrigin = null; stuckReturnCount = 0; lastReturn = -Infinity;
     currentGid = null;
     lastStep = -Infinity;
     actionAt = 0;
     lastLocalGid = frame.gameplay.localGid;
     active = true;
     avoid.clear();
+    if (hpOn || mpOn) {
+      // Uses OpenSRO's native recovery loop; invalid/missing potion
+      // assignments must never leave the player with a falsely active UI.
+      if (!savePotions()) { active = false; update(); return; }
+    }
+    notice.textContent = 'Auto Online bắt đầu. Tất cả phần thưởng do server xác nhận.';
     update();
   };
 
   const switchAuto = () => active ? stop() : start();
+  function saveCombat() {
+    skillsOn = skillToggle.checked; buffsOn = buffToggle.checked;
+    attackSkillId = Number(attackSelect.value); buffSkillId = Number(buffSelect.value);
+    goldOn = goldToggle.checked; itemsOn = itemToggle.checked;
+    returnOn = returnToggle.checked;
+    persist();
+  }
+  for (const field of [skillToggle, buffToggle, attackSelect, buffSelect, goldToggle, itemToggle, returnToggle]) {
+    field.addEventListener('change', saveCombat);
+  }
+  for (const field of [hpToggle, mpToggle, hpSelect, mpSelect, hpPercentInput, mpPercentInput]) {
+    field.addEventListener('change', () => {
+      hpOn = hpToggle.checked; mpOn = mpToggle.checked;
+      hpSlot = Number(hpSelect.value); mpSlot = Number(mpSelect.value);
+      hpPercent = Number(hpPercentInput.value); mpPercent = Number(mpPercentInput.value);
+      syncInputs(); persist();
+      // Save immediately through native worker while in world, not just UI.
+      if (frame?.world) savePotions();
+    });
+  }
+  byId<HTMLButtonElement>('auto-save-potions').addEventListener('click', savePotions);
   toggle.addEventListener('click', switchAuto);
   settings.addEventListener('click', () => panel.classList.toggle('hidden'));
   byId<HTMLButtonElement>('auto-close').addEventListener('click', () => panel.classList.add('hidden'));
@@ -403,6 +436,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       center = { ...frame.gameplay.pose };
       currentGid = null;
       avoid.clear();
+      persist();
       update();
     }
   });
@@ -410,6 +444,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     radius = Number(radiusInput.value);
     radiusLabel.textContent = String(radius) + ' m';
     try { localStorage.setItem(RADIUS_STORAGE, String(radius)); } catch { /* optional */ }
+    persist();
     update();
   });
 

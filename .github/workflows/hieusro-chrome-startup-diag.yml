@@ -1,0 +1,70 @@
+name: HieuSRO Chrome Startup Diagnosis
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-chrome-startup-diag.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser driver
+        run: npm install --prefix /tmp/hieusro-browser --no-save playwright-core@1.63.0
+      - name: Browse public TEST, collect JS exceptions and failed loads
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/hieusro-browser/diagnostic.mjs <<'JS'
+          import {chromium} from 'playwright-core';
+          import fs from 'node:fs';
+          const bin = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+          const browser = await chromium.launch({
+            headless:true,
+            executablePath:bin,
+            args:['--no-sandbox','--enable-unsafe-webgpu','--enable-features=Vulkan','--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader']
+          });
+          const context=await browser.newContext({viewport:{width:1440,height:900}});
+          const page=await context.newPage();
+          const errors=[];
+          let responses=[];
+          page.on('pageerror',e=>{const d='PAGEERROR '+(e.stack||e.message); errors.push(d);console.log(d.slice(0,2500))});
+          page.on('console',m=>{if(m.type()==='error'||m.type()==='warning'){const d='CONSOLE '+m.type()+' '+m.text();errors.push(d);console.log(d.slice(0,1600))}});
+          page.on('requestfailed',r=>{const d='REQUESTFAIL '+r.url()+' '+r.failure()?.errorText; errors.push(d);console.log(d.slice(0,700))});
+          page.on('response',r=>{
+            if(r.status()>=400){const d='HTTP '+r.status()+' '+r.url();responses.push(d);console.log(d.slice(0,400))}
+          });
+          const url='https://hieusro-drive-test-20261019.onrender.com/';
+          console.log('Starting navigation to '+url+' with '+bin);
+          await page.goto(url,{waitUntil:'domcontentloaded',timeout:90000});
+          await page.waitForTimeout(55000);
+          const result=await page.evaluate(()=>({
+            title:document.title,ready:document.readyState,
+            bodyText:document.body?.innerText?.slice(0,1500),
+            autoRoot:!!document.getElementById('hieusro-auto-train-root'),
+            source:[...document.scripts].map(x=>x.src).filter(Boolean).slice(0,10),
+            webgpu:!!navigator.gpu,
+            errorCount:document.querySelectorAll('[role=alert]').length
+          }));
+          console.log('BROWSER_STATE '+JSON.stringify(result));
+          console.log('REQUEST_HTTP_ERRORS '+JSON.stringify(responses.slice(0,20)));
+          console.log('BROWSER_ERRORS '+JSON.stringify(errors.slice(0,30)));
+          fs.writeFileSync('/tmp/hieusro-browser/result.json',JSON.stringify({result,errors,responses},null,2));
+          await page.screenshot({path:'/tmp/hieusro-browser/screenshot.png',fullPage:true}).catch(e=>console.log('screen failed '+e.message));
+          await browser.close();
+          if(errors.some(e=>e.startsWith('PAGEERROR')))process.exitCode=1;
+          JS
+          node /tmp/hieusro-browser/diagnostic.mjs
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-diagnosis
+          path: |
+            /tmp/hieusro-browser/result.json
+            /tmp/hieusro-browser/screenshot.png
+          if-no-files-found: ignore

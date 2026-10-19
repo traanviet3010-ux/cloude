@@ -1,0 +1,50 @@
+name: HieuSRO Auto Train Stage 1 CI
+on:
+  push:
+    branches: [hieusro-auto-train-stage1]
+    paths:
+      - 'server-build/hieusro-auto-train.ts'
+      - 'server-build/hieusro-auto-train.test.mjs'
+      - 'server-build/patch-auto-train.py'
+      - 'server-build/Dockerfile.allinone'
+      - '.github/workflows/hieusro-auto-train-stage1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  auto-train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check python patch syntax
+        run: python3 -m py_compile server-build/patch-auto-train.py
+      - name: Checkout exact OpenSRO source (no user database/media)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro
+          cd /tmp/opensro
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Apply isolated Auto UI/controller and regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/opensro/apps/client-next/src/engine/runtime/auto-train
+          cp server-build/hieusro-auto-train.ts /tmp/opensro/apps/client-next/src/engine/runtime/auto-train/auto-train.ts
+          cp server-build/hieusro-auto-train.test.mjs /tmp/opensro/apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
+          HIEUSRO_OPENSRO_ROOT=/tmp/opensro python3 server-build/patch-auto-train.py
+          cd /tmp/opensro/apps/client-next
+          node --test tests/runtime/hieusro-auto-train.test.mjs
+      - name: Compile complete real browser client with the feature
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/opensro
+          corepack pnpm --filter @sro/client-next build
+          corepack pnpm --filter @sro/client-next exec tsc --noEmit --project tsconfig.json

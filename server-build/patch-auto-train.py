@@ -44,7 +44,8 @@ replace_once(
     '\t\t\t\tgameplay: presentation.gameplay(),\n'
     '\t\t\t\tlocal: presentation.gameplay()?.localGid ? presentation.read( presentation.gameplay()!.localGid ) : null,\n'
     '\t\t\t\tentities: presentation.entities(),\n'
-    '\t\t\t\tnow\n'
+    '\t\t\t\tnow,\n'
+    '\t\t\t\tsimNow: simulationTimeMs\n'
     '\t\t\t} );\n'
     '\t\t\tconst semantics = ui.step(\n'
 )

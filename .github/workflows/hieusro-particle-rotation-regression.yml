@@ -1,0 +1,48 @@
+name: HieuSRO Particle Rotation Regression
+
+on:
+  push:
+    branches:
+      - hieusro-render-drive-test-20261019
+    paths:
+      - 'server-build/patch-particle-rotation.py'
+      - 'server-build/hieusro-particle-rotation.test.mjs'
+      - '.github/workflows/hieusro-particle-rotation-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rotation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download fixed version of OpenSRO and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/hieusro-upstream
+          cd /tmp/hieusro-upstream
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Patch TEST client and exercise synthetic particle effects
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HIEUSRO_OPENSRO_ROOT=/tmp/hieusro-upstream
+          python3 server-build/patch-particle-rotation.py
+          cp server-build/hieusro-particle-rotation.test.mjs /tmp/hieusro-upstream/apps/client-next/tests/runtime/hieusro-particle-rotation.test.mjs
+          cd /tmp/hieusro-upstream/apps/client-next
+          node --test tests/runtime/hieusro-particle-rotation.test.mjs
+      - name: Confirm client build under exact patched upstream sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/hieusro-upstream
+          corepack pnpm --filter @sro/client-next build

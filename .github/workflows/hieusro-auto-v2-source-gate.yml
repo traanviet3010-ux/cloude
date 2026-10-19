@@ -44,3 +44,5 @@ jobs:
           set -euo pipefail
           cd /tmp/opensro-v150
           corepack pnpm --filter @sro/client-next build
+
+# Stage-2 source gate retries after feature-side patch fixes.

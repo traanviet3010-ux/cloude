@@ -163,7 +163,6 @@ export function createSkillIconPicker(
       trigger.focus();
     }
   });
-  select.addEventListener('change', current);
   container.append(trigger, grid);
   current();
   return container;

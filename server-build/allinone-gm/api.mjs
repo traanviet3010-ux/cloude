@@ -1,4 +1,5 @@
 import { issueSession, loginEnabled, passwordMatches, sessionCookie, validSession } from './auth.mjs';
+import { readAutoPolicy, saveAutoPolicy } from './auto-policy.mjs';
 
 const CONTROL_URL = (process.env.GAME_CONTROL_URL || 'https://hieusro-game-server.onrender.com/gm-api').replace(/\/$/, '');
 const VERSION_CONTROL_URL = (process.env.GAME_VERSION_CONTROL_URL || 'https://hieusro-game-server.onrender.com/gm-version-api').replace(/\/$/, '');
@@ -123,6 +124,14 @@ export async function handleApi(req, res, url) {
 
   if (!authenticated(req, res)) return;
 
+  if (url.pathname === '/api/auto-policy' && req.method === 'GET') {
+    return json(res, 200, {ok:true,policy:readAutoPolicy(),enforcement:'online-client-only'});
+  }
+  if (url.pathname === '/api/auto-policy' && req.method === 'PUT') {
+    const policy = await readJson(req);
+    try { return json(res,200,{ok:true,policy:saveAutoPolicy(policy)}); }
+    catch (error) { return json(res,400,{ok:false,message:error.message}); }
+  }
   if (req.method === 'GET' && url.pathname === '/api/status') {
     const out = await control('/v1/status');
     return json(res, out.status, out.data);

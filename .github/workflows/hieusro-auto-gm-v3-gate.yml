@@ -1,0 +1,63 @@
+name: HieuSRO GM Auto Policy V3 Gate
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-auto-gm-v3-gate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy-and-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hieusro-auto-gm-policy-20261019
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax-check all GM and browser-edge backend changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check server-build/allinone-gm/auto-policy.mjs
+          node --check server-build/allinone-gm/api.mjs
+          node --check server-build/allinone-gm/public/dashboard.js
+          node --check server-build/allinone-gm/public/auto-policy.js
+          node --check server-build/allinone-client/edge.mjs
+          python3 -m py_compile server-build/patch-auto-train.py
+      - name: Test policy validation and real on-disk persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HIEUSRO_AUTO_POLICY_FILE="$RUNNER_TEMP/hieusro-auto-policy.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {readAutoPolicy,saveAutoPolicy} from './server-build/allinone-gm/auto-policy.mjs';
+          assert.equal(readAutoPolicy().enabled,true);
+          const value=saveAutoPolicy({enabled:false,maxRadius:30,maxMinutes:120});
+          assert.equal(value.enabled,false);
+          assert.equal(readAutoPolicy().maxRadius,30);
+          assert.equal(readAutoPolicy().maxMinutes,120);
+          assert.throws(()=>saveAutoPolicy({enabled:'false',maxRadius:30,maxMinutes:120}),/true\/false/);
+          assert.throws(()=>saveAutoPolicy({enabled:true,maxRadius:105,maxMinutes:120}),/10–100/);
+          assert.throws(()=>saveAutoPolicy({enabled:true,maxRadius:30,maxMinutes:10000}),/15–1440/);
+          console.log('PASS: verified persistent GM Auto policy and rejected invalid inputs');
+          NODE
+      - name: Rebuild pristine pinned OpenSRO with full Auto V3 integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-v150
+          cd /tmp/opensro-v150
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          mkdir -p apps/client-next/src/engine/runtime/auto-train
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-train.ts" apps/client-next/src/engine/runtime/auto-train/auto-train.ts
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-train.test.mjs" apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
+          HIEUSRO_OPENSRO_ROOT=/tmp/opensro-v150 python3 "$GITHUB_WORKSPACE/server-build/patch-auto-train.py"
+          cd apps/client-next
+          node --test tests/runtime/hieusro-auto-train.test.mjs
+          cd ../..
+          corepack pnpm --filter @sro/client-next build

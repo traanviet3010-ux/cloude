@@ -258,6 +258,13 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     try {
       const raw = localStorage.getItem(PROFILE_PREFIX + identity);
       const data = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      if (data.version !== 2 && frame?.gameplay?.autoPotion) {
+        const nativeHp = autoPotionEntry(frame.gameplay.autoPotion.hp);
+        const nativeMp = autoPotionEntry(frame.gameplay.autoPotion.mp);
+        hpOn = nativeHp.enabled; mpOn = nativeMp.enabled;
+        hpSlot = nativeHp.slot; mpSlot = nativeMp.slot;
+        hpPercent = nativeHp.percent || 60; mpPercent = nativeMp.percent || 40;
+      }
       if (data.version === 2) {
         if (typeof data.radius === 'number' && data.radius >= 10 && data.radius <= 100) radius = data.radius;
         if (Array.isArray(data.extraSkillIds)) {

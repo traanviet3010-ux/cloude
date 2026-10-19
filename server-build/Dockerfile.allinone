@@ -116,6 +116,15 @@ RUN node /tmp/build-server-world.mjs
 RUN node scripts/build/server/buildServerGameDataBundle.mjs \
  && node apps/server-observatory/tools/item-catalog.mjs
 
+# Build the browser client from the SAME pinned OpenSRO source as this
+# image, rather than fetching stale output from another Render deployment.
+RUN corepack pnpm --filter @sro/client-next build \
+ && test -s apps/client-next/temp/artifacts/dist/index.html \
+ && mkdir -p /out/client \
+ && cp -a apps/client-next/temp/artifacts/dist/. /out/client/ \
+ && test -s /out/client/index.html
+
+
 RUN set -eux; \
     mkdir -p /out; \
     SROGZ="$(find /src/opensro -type f -path '*/game-data/1.150/server.srogz' -print -quit)"; \
@@ -188,29 +197,23 @@ COPY allinone-client /opt/hieusro/client-edge
 COPY allinone-gm /opt/hieusro/gm-web
 COPY allinone-start.sh /opt/hieusro/allinone-start.sh
 
-# Snapshot the already-verified client build once into this paid image. The
-# running service no longer depends on the old free client instance after build.
+# Embed the freshly built frontend directly into the TEST image; no
+# legacy Render client service or live endpoint is required at build time.
+COPY --from=builder /out/client/ /opt/hieusro/client-edge/public/
 RUN set -eux; \
     mkdir -p /opt/hieusro/client-edge/public/assets/fonts; \
-    fetch() { \
-      src="$1"; dst="$2"; \
-      mkdir -p "$(dirname "$dst")"; \
-      curl -fsSL --retry 15 --retry-delay 4 --retry-all-errors --connect-timeout 10 --max-time 120 \
-        -H 'Accept-Encoding: identity' \
-        "$CLIENT_SNAPSHOT_ORIGIN/$src" -o "$dst"; \
-      test -s "$dst"; \
-    }; \
-    fetch index.html /opt/hieusro/client-edge/public/index.html; \
-    fetch viewer.html /opt/hieusro/client-edge/public/viewer.html; \
-    fetch assets/entry-CJKUbK94.js /opt/hieusro/client-edge/public/assets/entry-CJKUbK94.js; \
-    fetch assets/entry-B5zvI0hO.js /opt/hieusro/client-edge/public/assets/entry-B5zvI0hO.js; \
-    fetch assets/index-Be6MmX2a.css /opt/hieusro/client-edge/public/assets/index-Be6MmX2a.css; \
-    fetch assets/bootstrap-BE_ylLXC.js /opt/hieusro/client-edge/public/assets/bootstrap-BE_ylLXC.js; \
-    fetch assets/fonts/native-ui-font-atlas.json /opt/hieusro/client-edge/public/assets/fonts/native-ui-font-atlas.json; \
-    fetch assets/fonts/native-ui-font-atlas.png /opt/hieusro/client-edge/public/assets/fonts/native-ui-font-atlas.png; \
     cp /opt/hieusro/client-edge/hieusro-language.js /opt/hieusro/client-edge/public/hieusro-language.js; \
-    grep -q 'hieusro-language.js' /opt/hieusro/client-edge/public/index.html; \
-    grep -q 'bootstrap-BE_ylLXC.js' /opt/hieusro/client-edge/public/index.html
+    python - <<'PY'
+from pathlib import Path
+p = Path('/opt/hieusro/client-edge/public/index.html')
+s = p.read_text(encoding='utf-8')
+if 'hieusro-language.js' not in s:
+    if '</body>' not in s:
+        raise SystemExit('Browser client index missing body end tag')
+    s = s.replace('</body>', '<script defer src="/hieusro-language.js"></script></body>', 1)
+p.write_text(s, encoding='utf-8')
+print('Embedded newly compiled OpenSRO browser client into image')
+PY
 
 # Run the standalone GM web safely under /gm/ on the shared public hostname.
 RUN python - <<'PY'

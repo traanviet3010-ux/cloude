@@ -41,8 +41,8 @@ patch("runtime/renderer/renderer.ts", [
     ('const renderScale = experimental.renderScale,',
      '// iPhone uses a stable 75% scene target; do not repeatedly resize GPU\n'
      '\t\t\t\t// textures as temperature or instantaneous FPS fluctuates.\n'
-     '\t\t\t\tconst renderScale = mobileLiteEnabled() ? Math.min( experimental.renderScale, MOBILE_LITE_RENDER_SCALE ) as 50 | 75 : experimental.renderScale,')
-    , ('device.recoverable() && recoveries < 3',
+     '\t\t\t\tconst renderScale = mobileLiteEnabled() ? Math.min( experimental.renderScale, MOBILE_LITE_RENDER_SCALE ) as 50 | 75 : experimental.renderScale,'),
+    ('device.recoverable() && recoveries < 3',
        'device.recoverable() && recoveries < (mobileLiteEnabled() ? 1 : 3)')
 ])
 patch("runtime/assets/worker/packs/packs.ts", [

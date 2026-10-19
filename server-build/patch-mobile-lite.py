@@ -44,8 +44,6 @@ patch("runtime/renderer/renderer.ts", [
      '\t\t\t\tconst renderScale = mobileLiteEnabled() ? Math.min( experimental.renderScale, MOBILE_LITE_RENDER_SCALE ) as 50 | 75 : experimental.renderScale,')
 ])
 patch("runtime/assets/worker/packs/packs.ts", [
-    ('import ', 'import ') # no-op anchor rejected? replaced below.
-] if False else [
     ('(128 << 20) && cache.size',
      '(typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? (32 << 20) : (128 << 20)) && cache.size')
 ])

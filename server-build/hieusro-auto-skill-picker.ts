@@ -109,30 +109,34 @@ export function createSkillIconPicker(
     trigger.setAttribute('aria-expanded', 'false');
   }
 
-  for (const row of nativeOptions) {
-    const skill = byId.get(row.id);
-    const choice = document.createElement('button');
-    choice.type = 'button';
-    choice.className = 'auto-icon-choice';
-    choice.dataset.skillId = String(row.id);
-    choice.title = caption(skill, row.label);
-    choice.setAttribute('aria-label', row.label);
-    choice.setAttribute('role', 'option');
-    choice.append(icon(skill, row.label));
-    const name = document.createElement('span');
-    name.className = 'auto-icon-choice-name';
-    name.textContent = row.label;
-    choice.append(name);
-    choice.addEventListener('mouseenter', () => { info.textContent = caption(skill, row.label); });
-    choice.addEventListener('focus', () => { info.textContent = caption(skill, row.label); });
-    choice.addEventListener('click', () => {
-      select.value = String(row.id);
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      current();
-      close();
-      trigger.focus();
-    });
-    choices.append(choice);
+  function buildChoicesOnDemand() {
+    if (choices.childElementCount) return;
+    for (const row of nativeOptions) {
+      const skill = byId.get(row.id);
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = 'auto-icon-choice';
+      choice.dataset.skillId = String(row.id);
+      choice.title = caption(skill, row.label);
+      choice.setAttribute('aria-label', row.label);
+      choice.setAttribute('role', 'option');
+      choice.append(icon(skill, row.label));
+      const name = document.createElement('span');
+      name.className = 'auto-icon-choice-name';
+      name.textContent = row.label;
+      choice.append(name);
+      choice.addEventListener('mouseenter', () => { info.textContent = caption(skill, row.label); });
+      choice.addEventListener('focus', () => { info.textContent = caption(skill, row.label); });
+      choice.addEventListener('click', () => {
+        select.value = String(row.id);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        current();
+        close();
+        trigger.focus();
+      });
+      choices.append(choice);
+    }
+
   }
 
   search.addEventListener('input', () => {
@@ -149,6 +153,7 @@ export function createSkillIconPicker(
       for (const other of root.querySelectorAll<HTMLElement>('.auto-icon-dropdown')) other.hidden = true;
       for (const other of root.querySelectorAll<HTMLButtonElement>('.auto-icon-trigger')) other.setAttribute('aria-expanded', 'false');
     }
+    buildChoicesOnDemand();
     grid.hidden = false;
     trigger.setAttribute('aria-expanded', 'true');
     search.value = '';

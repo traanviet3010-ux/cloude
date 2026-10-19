@@ -5,7 +5,7 @@
 import "../helpers/native-source-loader.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createEffectPrograms } from "../../src/engine/runtime/assets/worker/effects/program/program.ts";
+const { createEffectPrograms } = await import("../../src/engine/runtime/assets/worker/effects/program/program.ts");
 
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const operation = (name = "SetRotation", step = 1) => ({

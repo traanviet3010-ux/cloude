@@ -381,7 +381,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     extraSkillRoot.replaceChildren();
     const options = [...attackSelect.options].map(o => ({ id: Number(o.value), label: o.textContent || '' }));
     extraSkillIds.forEach((id, i) => {
-      const row = document.createElement('label');
+      const row = document.createElement('div');
       row.className = 'field';
       const title = document.createElement('span');
       title.textContent = 'Kỹ năng ' + (i + 2);

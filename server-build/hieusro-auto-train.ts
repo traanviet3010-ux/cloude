@@ -410,7 +410,8 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     const learned = new Set(game.skills ?? []);
     const rows = (game.skillCatalog ?? []).filter(row => learned.has(row.id));
     learnedSkillRows = rows;
-    // Include icon metadata: catalogs may arrive after the learned IDs.\n    const signature = rows.map(row => row.id + ':' + (row.icon ?? '') + ':' + (row.name ?? '')).join('|');
+    // Include icon metadata: catalogs may arrive after the learned IDs.
+    const signature = rows.map(row => row.id + ':' + (row.icon ?? '') + ':' + (row.name ?? '')).join('|');
     if (signature === cachedSkillSignature) return;
     cachedSkillSignature = signature;
     fillSelect(attackSelect, [

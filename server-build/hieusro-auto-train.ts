@@ -5,6 +5,9 @@
  */
 import type { EntityState } from '@/engine/contracts/world';
 import type { GameplayCommand, GameplayState, Pose } from '@/engine/contracts/gameplay';
+import { autoPotionEntry, autoPotionWord, defaultAutoPotion } from '@/engine/foundation/gameplay/auto-potion';
+import { skillCooldown } from '@/engine/foundation/gameplay/skill-cooldowns';
+import { SKILL_TARGET_MONSTER, SKILL_TARGET_SELF, skillMpCost } from '@/engine/foundation/gameplay/skill-catalog';
 
 const UNIT_PER_METER = 10;
 const REGION_SIZE = 1920;
@@ -13,6 +16,9 @@ const STUCK_AFTER_MS = 14000;
 const STUCK_RETRY_MS = 18000;
 const MIN_MOVEMENT_UNITS = 12;
 const RADIUS_STORAGE = 'hieusro:auto-train:radius:v1';
+const PROFILE_PREFIX = 'hieusro:auto-train:profile:v2:';
+const SKILL_WAIT_MS = 1350, BUFF_WAIT_MS = 7000, PICKUP_WAIT_MS = 1500;
+const LOOT_WINDOW_MS = 5500, RETURN_WAIT_MS = 3200;
 
 type AutoFrame = {
   readonly world: boolean;
@@ -90,6 +96,16 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     'label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0}',
     'input[type=range]{width:100%;accent-color:#f3c977;min-height:28px}',
     '.row{display:flex;gap:8px}.row button{flex:1}.help{font-size:11px;color:#a7b9cf;margin:12px 0 0}',
+    'details{background:#152437;border:1px solid #304765;border-radius:10px;margin:10px 0;padding:10px}',
+    'summary{color:#f6d78a;font-weight:800;cursor:pointer;min-height:30px}',
+    '.line{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;min-height:36px}',
+    '.line input[type=checkbox]{width:20px;height:20px;accent-color:#d3a74d;flex:none}',
+    '.line label{margin:0;flex:1}',
+    'select{border:1px solid #486382;background:#0a1626;border-radius:8px;color:#fff;min-height:40px;padding:8px;width:100%;font:inherit}',
+    '.field{display:grid;gap:5px;margin:10px 0}.field label{color:#b7ccdf}',
+    '.compact{font-size:11px;color:#89b39c}.notice{color:#ffcc8b;font-size:12px;line-height:1.45}',
+    '.stats-four{grid-template-columns:1fr 1fr}.stats-four strong{font-size:14px}',
+    '.panel{scrollbar-width:thin;scrollbar-color:#547395 transparent}',
     '@media(max-height:440px){.tools{bottom:10px}.panel{bottom:64px;max-height:calc(100vh - 75px)}}',
     '</style>',
     '<div class="tools hidden" id="auto-tools">',
@@ -99,13 +115,41 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     '<section id="auto-panel" class="panel hidden" role="dialog" aria-label="Cài đặt Auto Train">',
     '  <div class="top"><h2>AUTO TRAIN <span class="sub">v1.0</span></h2><button id="auto-close" type="button">✕</button></div>',
     '  <div id="auto-state" class="state" role="status">Chưa bật Auto</div>',
-    '  <div class="stat"><div><small>Đã chọn mục tiêu</small><strong id="auto-count">0</strong></div>',
-    '  <div><small>Mục tiêu hiện tại</small><strong id="auto-target">—</strong></div></div>',
+    '  <div class="stat stats-four"><div><small>Mục tiêu đã đánh</small><strong id="auto-count">0</strong></div>',
+    '  <div><small>Đã nhặt thành công</small><strong id="auto-looted">0</strong></div>',
+    '  <div><small>Đã dùng kỹ năng</small><strong id="auto-casts">0</strong></div>',
+    '  <div><small>Thời gian chạy</small><strong id="auto-elapsed">00:00</strong></div></div>',
     '  <label for="auto-radius">Bán kính train <strong id="auto-radius-label">40 m</strong></label>',
     '  <input id="auto-radius" type="range" min="10" max="100" step="10" value="40"/>',
     '  <div class="row"><button id="auto-home" type="button">Lấy vị trí hiện tại</button></div>',
     '  <p id="auto-center" class="sub">Điểm train: chưa lưu</p>',
-    '  <p class="help">F6 bật/tắt. Nhân vật tự chọn quái gần nhất, server tự đuổi và đánh thường. Click vào bản đồ để dừng Auto. Chưa có Skill, Buff, nhặt đồ hoặc Offline Auto.</p>',
+    '  <details open><summary>⚔ Chiến đấu và Buff</summary>',
+    '    <div class="line"><label for="auto-skills-on">Dùng kỹ năng đánh quái</label><input id="auto-skills-on" type="checkbox"></div>',
+    '    <div class="field"><label for="auto-attack-skill">Kỹ năng ưu tiên</label><select id="auto-attack-skill"><option value="0">Đánh thường</option></select></div>',
+    '    <div class="line"><label for="auto-buffs-on">Tự duy trì Buff</label><input id="auto-buffs-on" type="checkbox"></div>',
+    '    <div class="field"><label for="auto-buff-skill">Buff ưu tiên</label><select id="auto-buff-skill"><option value="0">Không sử dụng Buff</option></select></div>',
+    '    <p class="sub">Chỉ hiển thị kỹ năng nhân vật đã học. Server vẫn kiểm tra cooldown, MP và mục tiêu.</p>',
+    '  </details>',
+    '  <details><summary>❤️ Hồi phục HP / MP</summary>',
+    '    <div class="line"><label for="auto-hp-on">Tự dùng thuốc HP</label><input id="auto-hp-on" type="checkbox"></div>',
+    '    <div class="field"><label for="auto-hp-slot">Ô hotbar thuốc HP</label><select id="auto-hp-slot"><option value="0">Chọn ô thuốc đã gán vào hotbar</option></select></div>',
+    '    <label for="auto-hp-percent">Dùng khi HP dưới <b id="auto-hp-label">60%</b></label>',
+    '    <input id="auto-hp-percent" type="range" min="10" max="90" step="5" value="60">',
+    '    <div class="line"><label for="auto-mp-on">Tự dùng thuốc MP</label><input id="auto-mp-on" type="checkbox"></div>',
+    '    <div class="field"><label for="auto-mp-slot">Ô hotbar thuốc MP</label><select id="auto-mp-slot"><option value="0">Chọn ô thuốc đã gán vào hotbar</option></select></div>',
+    '    <label for="auto-mp-percent">Dùng khi MP dưới <b id="auto-mp-label">40%</b></label>',
+    '    <input id="auto-mp-percent" type="range" min="10" max="90" step="5" value="40">',
+    '    <button id="auto-save-potions" type="button">Áp dụng HP/MP vào game</button>',
+    '    <p class="sub">Sử dụng hệ thống Auto Potion gốc của OpenSRO; thuốc phải có sẵn trong túi và được gán lên thanh kỹ năng.</p>',
+    '  </details>',
+    '  <details><summary>💰 Nhặt đồ và khu vực train</summary>',
+    '    <div class="line"><label for="auto-gold">Tự nhặt vàng</label><input id="auto-gold" type="checkbox" checked></div>',
+    '    <div class="line"><label for="auto-items">Tự nhặt vật phẩm</label><input id="auto-items" type="checkbox" checked></div>',
+    '    <div class="line"><label for="auto-return">Tự trở về tâm bãi train</label><input id="auto-return" type="checkbox" checked></div>',
+    '    <p class="sub">Chỉ nhặt trong bán kính đã lưu. Không nhặt vật phẩm có chủ sở hữu khác.</p>',
+    '  </details>',
+    '  <p id="auto-notice" class="notice" role="status"></p>',
+    '  <p class="help">F6 bật/tắt. Chạm vào bản đồ để dừng ngay. Đóng tab thì Auto dừng. Nhân vật chết / mất kết nối sẽ tự dừng. Offline Auto chưa hỗ trợ.</p>',
     '</section>'
   ].join('');
   document.body.appendChild(host);

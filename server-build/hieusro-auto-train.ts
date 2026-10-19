@@ -460,6 +460,94 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     switchAuto();
   };
   window.addEventListener('keydown', onKey, true);
+
+  // Server-issued inventory and ownership checks are authoritative. The
+  // controller only tries eligible nearby drops after its own target falls.
+  function lootAfterKill(next: AutoFrame): boolean {
+    const game = next.gameplay!;
+    if (next.now > collectingUntil || !lastVictim || !(goldOn || itemsOn)) {
+      collectingUntil = 0; pendingLootGid = 0;
+      return false;
+    }
+    if (pendingLootGid && !next.entities.some(e => e.gid === pendingLootGid)) {
+      looted++;
+      pendingLootGid = 0;
+      update();
+    }
+    if (next.now - lastPickup < PICKUP_WAIT_MS) return true;
+    const drops = next.entities.filter(e => {
+      if (e.kind !== 'ground-item' || !e.groundItem) return false;
+      if (e.groundItem.claimantGid && e.groundItem.claimantGid !== game.localGid) return false;
+      if (e.groundItem.dropperGid && e.groundItem.dropperGid !== lastVictim) return false;
+      if (distance(center!, e) > radius * UNIT_PER_METER) return false;
+      if (lootedItems.get(e.gid) && lootedItems.get(e.gid)! > next.now) return false;
+      return e.groundItem.goldAmount > 0 ? goldOn : itemsOn;
+    });
+    drops.sort((a, b) => distance(game.pose!, a) - distance(game.pose!, b));
+    const drop = drops[0];
+    if (!drop) return true; // Wait briefly for server's drop publication.
+    send({ kind: 'pickup', gid: drop.gid });
+    pendingLootGid = drop.gid;
+    lootedItems.set(drop.gid, next.now + 5000);
+    lastPickup = next.now;
+    notice.textContent = 'Đang nhặt ' + (drop.groundItem!.goldAmount > 0 ? 'vàng' : 'vật phẩm') + ' qua Game Server.';
+    return true;
+  }
+
+  function returnHome(next: AutoFrame): boolean {
+    if (!center || !next.gameplay?.pose || !returnOn) return false;
+    const away = distance(next.gameplay.pose, center);
+    if (away <= radius * UNIT_PER_METER + 40) {
+      stuckReturnCount = 0;
+      returnOrigin = null;
+      return false;
+    }
+    if (next.now - lastReturn < RETURN_WAIT_MS) return true;
+    if (returnOrigin && distance(returnOrigin, next.gameplay.pose) < MIN_MOVEMENT_UNITS) {
+      stuckReturnCount++;
+    } else stuckReturnCount = 0;
+    if (stuckReturnCount >= 3) {
+      stop('Không tìm được đường về tâm train. Kiểm tra vật cản / bản đồ.');
+      return true;
+    }
+    returnOrigin = { ...next.gameplay.pose };
+    lastReturn = next.now;
+    currentGid = null; collectingUntil = 0;
+    send({ kind: 'move', destination: center });
+    notice.textContent = 'Đang trở về tâm bãi train…';
+    update();
+    return true;
+  }
+
+  function rotateCombat(next: AutoFrame, target: EntityState | null): boolean {
+    const game = next.gameplay!;
+    const at = next.simNow ?? next.now;
+    if (buffsOn && buffSkillId && next.now - lastBuffAt > BUFF_WAIT_MS) {
+      const metadata = game.skillIndex?.get(buffSkillId) ?? game.skillCatalog?.find(r => r.id === buffSkillId);
+      const buffAlive = game.buffSlots?.some(slot => slot.state === 'active' && slot.effect.skill === buffSkillId);
+      if (metadata && !buffAlive && isSkillAvailable(game, buffSkillId, at) &&
+          (!metadata.targetRequired || metadata.targetSelf || ((metadata.targets ?? 0) & SKILL_TARGET_SELF))) {
+        lastBuffAt = next.now;
+        send({ kind: 'skill', skillId: buffSkillId,
+          ...(metadata.targetRequired ? { gid: game.localGid } : {}) });
+        casts++;
+        notice.textContent = 'Đang sử dụng Buff: ' + metadata.name;
+        update();
+        return true;
+      }
+    }
+    if (!target || !skillsOn || !attackSkillId || next.now - lastCastAt < SKILL_WAIT_MS) return false;
+    const metadata = game.skillIndex?.get(attackSkillId) ?? game.skillCatalog?.find(r => r.id === attackSkillId);
+    if (!metadata || !((metadata.targets ?? 0) & SKILL_TARGET_MONSTER) ||
+        !isSkillAvailable(game, attackSkillId, at)) return false;
+    lastCastAt = next.now;
+    send({ kind: 'skill', skillId: attackSkillId, gid: target.gid });
+    casts++;
+    notice.textContent = 'Kỹ năng: ' + metadata.name;
+    update();
+    return true;
+  }
+
   update();
 
   return {

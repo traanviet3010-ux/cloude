@@ -68,6 +68,20 @@ jobs:
           const attack=field('attack',[[0,'Đánh thường'],[321,"Strike n' Smash"],[322,'Lightning Shot']]);
           const buff=field('buff',[[0,'Không Buff'],[678,'Cleric Recovery']]);
           window.__iconState=()=>({attack:Number(attack.value),buff:Number(buff.value),...events});
+          // Also create the complete production Auto UI, not only the isolated picker.
+          const {createAutoTrain}=await import('/src/engine/runtime/auto-train/auto-train.ts');
+          const auto=createAutoTrain(()=>{});
+          const pose={regionId:0x0101,x:400,y:0,z:400,angle:0};
+          auto.step({
+            world:true,now:performance.now(),simNow:0,entities:[],
+            local:{gid:11,name:'Auto Icon Test Character',kind:'player',...pose},
+            gameplay:{
+              localGid:11,pose,skills:[321,322,678],
+              skillCatalog:rows.map(row=>({...row,targets:row.id===678?1:4,targetRequired:true})),
+              inventory:[],quickSlots:[],buffSlots:[],skillCooldowns:[],vitals:[]
+            }
+          });
+          window.__autoIconTest=auto;
           window.__iconFixtureReady=true;
           </script></body></html>
           HTML

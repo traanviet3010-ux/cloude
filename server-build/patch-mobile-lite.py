@@ -66,4 +66,73 @@ patch("runtime/runtime.ts", [
      '\t\tcatch (error) { console.warn("Mobile Lite UI unavailable", error); }\n'
      '\t\tconst frontend = own(\n\t\t\tcreateFrontend(')
 ])
+
+# Preflight must run before game assets / renderer are even created. An
+# unsupported or temporarily unavailable GPU must show a retry UI rather than
+# repeatedly downloading content, raising No WebGPU adapter or reloading.
+patch("../bootstrap.ts", [
+    ('import { startRuntime, startViewerRuntime } from "./engine/runtime/runtime";',
+     'import { startRuntime, startViewerRuntime } from "./engine/runtime/runtime";\n'
+     'import { mobileLiteEnabled } from "./engine/foundation/rendering/mobile-lite";\n'
+     'import { createMobileLiteHud } from "./engine/runtime/mobile-lite/mobile-hud";'),
+    (
+     'export const runtime = document.documentElement.dataset.page === "viewer" ? startViewer() : startGame();',
+     '''async function startMobileGame() {
+    // No page reload loop. Only an explicit user gesture re-checks WebGPU.
+    let started = false, checking = false;
+    let failureHud: ReturnType<typeof createMobileLiteHud> | null = null;
+    const detail = document.querySelector<HTMLElement>( "#startup-loading .sro-boot-loading__detail" );
+    const controls = document.createElement( "div" );
+    controls.style.cssText = "margin:16px auto 0;text-align:center;max-width:310px;color:#ffe2ac;font:13px system-ui";
+    const explanation = document.createElement( "p" );
+    explanation.setAttribute( "role", "alert" );
+    const retry = document.createElement( "button" );
+    retry.type = "button";
+    retry.textContent = "Thử lại GPU";
+    retry.style.cssText = "border:1px solid #d9bd70;border-radius:8px;padding:12px 18px;background:#233448;color:#fff;font:14px system-ui;cursor:pointer;min-height:44px";
+    controls.append( explanation, retry );
+    const showFailure = (reason: string) => {
+        if (detail) detail.textContent = "Safari không cấp được WebGPU";
+        explanation.textContent = reason + " Hãy đóng tab khác, để iPhone nguội; sau đó bấm Thử lại GPU.";
+        if (!controls.isConnected) (document.querySelector( "#startup-loading .sro-boot-loading__inner" ) || document.body).append( controls );
+        failureHud ??= createMobileLiteHud( () => ({ phase:"failed", error:reason }) );
+    };
+    async function probe() {
+        if (started || checking) return;
+        checking = true;
+        retry.disabled = true;
+        if (detail) detail.textContent = "Đang kiểm tra GPU trên iPhone…";
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+            const gpu = navigator.gpu;
+            if (!gpu) throw new Error( "WebGPU không có trên Safari hiện tại." );
+            const adapter = await Promise.race( [
+                gpu.requestAdapter(),
+                new Promise<null>( resolve => { timer = setTimeout( () => resolve( null ), 10000 ); } )
+            ] );
+            if (!adapter) throw new Error( "WebGPU adapter không khả dụng hoặc quá thời gian 10 giây." );
+            started = true;
+            controls.remove();
+            failureHud?.dispose();
+            failureHud = null;
+            if (detail) detail.textContent = "Đang mở HieuSRO Mobile Lite…";
+            // Never alter the account, shard, movement or combat stack.
+            return startGame();
+        } catch (error) {
+            showFailure( String( error ) );
+        } finally {
+            if (timer !== null) clearTimeout(timer);
+            checking = false;
+            retry.disabled = false;
+        }
+    }
+    retry.addEventListener( "click", () => { void probe(); } );
+    await probe();
+}
+
+export const runtime = document.documentElement.dataset.page === "viewer" ?
+    startViewer() : mobileLiteEnabled() ? startMobileGame() : startGame();'''
+    )
+])
+
 print("HieuSRO iPhone Mobile Lite patch complete.")

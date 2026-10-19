@@ -2,7 +2,7 @@ import '../helpers/native-source-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { pickAutoTrainMonster } = await import('../../src/engine/runtime/auto-train/auto-train.ts');
+const { pickAutoTrainMonster, pickAutoTrainDrop } = await import('../../src/engine/runtime/auto-train/auto-train.ts');
 const center = { regionId: 0x0101, x: 400, y: 0, z: 400, angle: 0 };
 const entity = (gid, kind, x, z, options = {}) => ({
   gid, kind, regionId: 0x0101, x, y: 0, z, heading: 0,
@@ -47,4 +47,27 @@ test('cross-region monster uses global map distance rather than local coordinate
 test('does not mistake same-region equal distance, tie resolves by GID', () => {
   const mobs=[entity(21,'monster',410,400),entity(6,'monster',390,400)];
   assert.equal(pickAutoTrainMonster(mobs,center,center,10)?.gid,6);
+});
+
+test('post-kill loot respects ownership, dropper and gold/item filters', () => {
+  const drop = (gid, gold, claimantGid, dropperGid) => ({
+    ...entity(gid,'ground-item',400+gid,400),
+    groundItem:{typeFlags:1,goldAmount:gold,tint:0,claimantGid,dropperGid}
+  });
+  const list=[
+    drop(1,400,321,90), // another player's gold
+    drop(2,100,42,91), // unrelated kill
+    drop(3,200,42,90),
+    drop(4,0,42,90)
+  ];
+  assert.equal(pickAutoTrainDrop(list,center,center,40,42,90,true,false)?.gid,3);
+  assert.equal(pickAutoTrainDrop(list,center,center,40,42,90,false,true)?.gid,4);
+  assert.equal(pickAutoTrainDrop(list,center,center,40,42,90,false,false),null);
+  assert.equal(pickAutoTrainDrop(list,center,center,40,42,90,true,true,new Set([3]))?.gid,4);
+});
+
+test('server drop with no claim still remains in saved train area', () => {
+  const item={...entity(12,'ground-item',1400,400),
+    groundItem:{typeFlags:1,goldAmount:0,tint:0}};
+  assert.equal(pickAutoTrainDrop([item],center,center,40,1,90,true,true),null);
 });

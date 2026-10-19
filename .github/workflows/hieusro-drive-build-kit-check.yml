@@ -1,0 +1,26 @@
+name: HieuSRO Drive Build Kit Checks
+
+on:
+  push:
+    branches:
+      - hieusro-drive-build-20261019
+    paths:
+      - 'build-hieusro/**'
+      - '.github/workflows/hieusro-drive-build-kit-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell entrypoint
+        run: bash -n build-hieusro/build.sh
+      - name: Validate Python downloader
+        run: python3 -m py_compile build-hieusro/drive_download.py
+      - name: Show safe help
+        run: bash build-hieusro/build.sh --help

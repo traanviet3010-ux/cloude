@@ -1,4 +1,5 @@
 name: HieuSRO Auto Train Stage 1 CI
+# Isolated source validation: no production assets, character DB or live deployment.
 on:
   push:
     branches: [hieusro-auto-train-stage1]

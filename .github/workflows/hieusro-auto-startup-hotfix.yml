@@ -1,0 +1,37 @@
+name: HieuSRO Auto Startup Hotfix Gate
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-auto-startup-hotfix.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hieusro-auto-startup-hotfix-20261019
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Rebuild fixed v1.150 client and test full Auto HUD DOM contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile server-build/patch-auto-train.py
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-v150
+          cd /tmp/opensro-v150
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          mkdir -p apps/client-next/src/engine/runtime/auto-train
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-train.ts" apps/client-next/src/engine/runtime/auto-train/auto-train.ts
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-train.test.mjs" apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
+          HIEUSRO_OPENSRO_ROOT=/tmp/opensro-v150 python3 "$GITHUB_WORKSPACE/server-build/patch-auto-train.py"
+          cd apps/client-next
+          node --test tests/runtime/hieusro-auto-train.test.mjs
+          cd ../..
+          corepack pnpm --filter @sro/client-next build
+          echo 'PASS: Auto Train startup regression gate and browser production build'

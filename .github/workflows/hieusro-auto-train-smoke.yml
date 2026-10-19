@@ -37,6 +37,13 @@ jobs:
           grep -q 'AUTO: TẮT' /tmp/hieusro-client.js || {
             echo "FAIL: Auto Train UI missing from the live browser"; exit 1;
           }
+          for feature in auto-extra-skills auto-save-potions auto-buff-skill auto-hp-slot auto-mp-slot auto-gold auto-items auto-return; do
+            grep -q "$feature" /tmp/hieusro-client.js || {
+              echo "FAIL: Auto V2 feature $feature missing from published client"
+              exit 1
+            }
+          done
+          echo 'PASS: all Auto V2 settings and combat controls shipped in production-built browser bundle'
           echo 'PASS: integrated Auto Train controls and controller ship in live client'
 
           ready=$(curl -sS --max-time 20 -o /tmp/hieusro-ready -w '%{http_code}' "$base/readyz")

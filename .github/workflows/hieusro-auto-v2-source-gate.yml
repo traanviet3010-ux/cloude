@@ -32,6 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           export HIEUSRO_OPENSRO_ROOT=/tmp/opensro-v150
+          mkdir -p /tmp/opensro-v150/apps/client-next/src/engine/runtime/auto-train
           cp server-build/hieusro-auto-train.ts /tmp/opensro-v150/apps/client-next/src/engine/runtime/auto-train/auto-train.ts
           cp server-build/hieusro-auto-train.test.mjs /tmp/opensro-v150/apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
           python3 server-build/patch-auto-train.py

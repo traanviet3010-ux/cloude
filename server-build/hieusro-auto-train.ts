@@ -229,7 +229,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   let active = false;
   let selected = 0, looted = 0, casts = 0;
   let startedAt = 0, lastCastAt = -Infinity, lastBuffAt = -Infinity;
-  let activeProfile = '', cachedSkillSignature = '', cachedItemSignature = '';
+  let activeProfile = '', cachedSkillSignature = '__uninitialized__', cachedItemSignature = '';
   let learnedSkillRows: readonly SkillMetadata[] = [];
   let attackSkillId = 0, extraSkillIds: number[] = [], buffSkillId = 0, nextSkillIndex = 0;
   let skillsOn = false, buffsOn = false, goldOn = true, itemsOn = true, returnOn = true;
@@ -348,7 +348,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
         }
       }
     } catch { /* Corrupt saved UI profile falls back to defaults. */ }
-    cachedSkillSignature = ''; cachedItemSignature = '';
+    cachedSkillSignature = '__uninitialized__'; cachedItemSignature = '';
     nextSkillIndex = 0;
     syncInputs();
   }
@@ -410,7 +410,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     const learned = new Set(game.skills ?? []);
     const rows = (game.skillCatalog ?? []).filter(row => learned.has(row.id));
     learnedSkillRows = rows;
-    const signature = rows.map(row => row.id).join(',');
+    // Include icon metadata: catalogs may arrive after the learned IDs.\n    const signature = rows.map(row => row.id + ':' + (row.icon ?? '') + ':' + (row.name ?? '')).join('|');
     if (signature === cachedSkillSignature) return;
     cachedSkillSignature = signature;
     fillSelect(attackSelect, [

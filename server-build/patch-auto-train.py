@@ -21,8 +21,16 @@ replace_once(
 replace_once(
     '\t\tconst simulation = own( createSimulationHost() );',
     '\t\tconst simulation = own( createSimulationHost() );\n'
-    '\t\t// Auto is a disposable owner of the real gameplay command lane.\n'
-    '\t\tconst autoTrain = own( createAutoTrain( command => simulation.session( { kind: "gameplay", command } ) ) );'
+    '\t\t// Auto initialization must never prevent the game from loading.\n'
+    '\t\tlet autoTrainFailed = false;\n'
+    '\t\tconst autoTrain = own( (() => {\n'
+    '\t\t\ttry { return createAutoTrain( command => simulation.session( { kind: "gameplay", command } ) ); }\n'
+    '\t\t\tcatch ( error ) {\n'
+    '\t\t\t\tconsole.error( "HieuSRO Auto Train initialization disabled: ", error );\n'
+    '\t\t\t\tautoTrainFailed = true;\n'
+    '\t\t\t\treturn { step() {}, manual() {}, stop() {}, dispose() {} };\n'
+    '\t\t\t}\n'
+    '\t\t} )() );'
 )
 replace_once(
     '\t\tfunction sessionCommand( command: import("@/engine/contracts/session").SessionCommand ) {\n',
@@ -39,14 +47,17 @@ replace_once(
     '\t\t\tconst semantics = ui.step(\n',
     '\t\t\t// Runs at the presentation boundary after all authoritative entity\n'
     '\t\t\t// events have been applied. Never synthesizes health or rewards.\n'
-    '\t\t\tautoTrain.step( {\n'
+    '\t\t\tif ( !autoTrainFailed ) try { autoTrain.step( {\n'
     '\t\t\t\tworld: frontendState.phase === "world" && sessionState?.phase === "world" && readySent,\n'
     '\t\t\t\tgameplay: presentation.gameplay(),\n'
     '\t\t\t\tlocal: presentation.gameplay()?.localGid ? presentation.read( presentation.gameplay()!.localGid ) : null,\n'
     '\t\t\t\tentities: presentation.entities(),\n'
     '\t\t\t\tnow,\n'
     '\t\t\t\tsimNow: simulationTimeMs\n'
-    '\t\t\t} );\n'
+    '\t\t\t} ); } catch ( error ) {\n'
+    '\t\t\t\tautoTrainFailed = true;\n'
+    '\t\t\t\tconsole.error( "HieuSRO Auto Train runtime disabled: ", error );\n'
+    '\t\t\t}\n'
     '\t\t\tconst semantics = ui.step(\n'
 )
 path.write_text(source,encoding="utf-8")

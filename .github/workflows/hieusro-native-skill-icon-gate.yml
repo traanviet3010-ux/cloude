@@ -1,0 +1,95 @@
+name: HieuSRO Native Skill Icon Gate
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-native-skill-icon-gate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-icons:
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hieusro-auto-skill-icons-20261019
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned OpenSRO and prepare safe client-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-v150
+          cd /tmp/opensro-v150
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          mkdir -p apps/client-next/src/engine/runtime/auto-train
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-train.ts" apps/client-next/src/engine/runtime/auto-train/auto-train.ts
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-skill-picker.ts" apps/client-next/src/engine/runtime/auto-train/skill-picker.ts
+          cp "$GITHUB_WORKSPACE/server-build/hieusro-auto-train.test.mjs" apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
+          HIEUSRO_OPENSRO_ROOT=/tmp/opensro-v150 python3 "$GITHUB_WORKSPACE/server-build/patch-auto-train.py"
+          cd apps/client-next
+          node --test tests/runtime/hieusro-auto-train.test.mjs
+          cd ../..
+          corepack pnpm --filter @sro/client-next build
+          echo 'PASS: full Auto icon source compiles and existing gameplay/DOM tests pass'
+      - name: Create tiny real-browser test (no live game / credentials)
+        shell: bash
+        run: |
+          cat > /tmp/opensro-v150/apps/client-next/_skill_icon_fixture.html <<'HTML'
+          <!doctype html><html lang="vi"><meta charset="utf-8"><title>Real skill icon controller fixture</title><body>
+          <div id="test-root"></div>
+          <script type="module">
+          import {createSkillIconPicker} from '/src/engine/runtime/auto-train/skill-picker.ts';
+          const root=document.querySelector('#test-root');
+          const shadow=root.attachShadow({mode:'open'});
+          const style=document.createElement('style');
+          style.textContent='.auto-icon-dropdown[hidden],.auto-icon-choice[hidden]{display:none!important}';
+          shadow.append(style);
+          const rows=[
+            {id:321,name:"Strike n' Smash",icon:'skill\\china\\sword_smash_a.ddj',cooldownMs:3000,mp:30},
+            {id:322,name:'Lightning Shot',icon:'skill\\china\\sword_smash_a.ddj',cooldownMs:0,mp:12},
+            {id:678,name:'Cleric Recovery',icon:'skill\\china\\sword_smash_a.ddj',cooldownMs:1000,mp:18}
+          ];
+          const events={attackChanges:0,buffChanges:0};
+          function field(kind,options){
+            const parent=document.createElement('div');parent.dataset.kind=kind;
+            const select=document.createElement('select');
+            for(const [id,label] of options){
+              const option=document.createElement('option');option.value=String(id);option.textContent=label;select.append(option);
+            }
+            select.value='0';
+            select.addEventListener('change',()=>{events[kind+'Changes']++});
+            parent.append(select,createSkillIconPicker(select,rows));shadow.append(parent);
+            return select;
+          }
+          const attack=field('attack',[[0,'Đánh thường'],[321,"Strike n' Smash"],[322,'Lightning Shot']]);
+          const buff=field('buff',[[0,'Không Buff'],[678,'Cleric Recovery']]);
+          window.__iconState=()=>({attack:Number(attack.value),buff:Number(buff.value),...events});
+          window.__iconFixtureReady=true;
+          </script></body></html>
+          HTML
+      - name: Start Vite with actual imported game icon picker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/opensro-v150
+          corepack pnpm --filter @sro/client-next dev >/tmp/skill-vite.log 2>&1 &
+          for i in $(seq 1 35); do
+            if curl -fsS http://127.0.0.1:5180/_skill_icon_fixture.html >/dev/null; then
+              echo 'PASS: Vite test fixture ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/skill-vite.log
+          exit 1
+      - name: Exercise real Chrome mouse, keyboard and original Skill ID control
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix /tmp/hieusro-icon-test --no-save playwright-core@1.63.0
+          cp server-build/hieusro-auto-icons.browser.mjs /tmp/hieusro-icon-test/check.mjs
+          node /tmp/hieusro-icon-test/check.mjs

@@ -21,7 +21,7 @@ COPY hieusro-mobile-lite.test.mjs /tmp/hieusro-mobile-lite.test.mjs
 COPY patch-mobile-lite.py /tmp/patch-mobile-lite.py
 
 ENV HIEUSRO_OPENSRO_ROOT=/opt/opensro
-RUN mkdir -p apps/client-next/src/engine/runtime/{auto-train,mobile-lite} \
+RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src/engine/runtime/mobile-lite \
  && cp /tmp/hieusro-auto-train.ts apps/client-next/src/engine/runtime/auto-train/auto-train.ts \
  && cp /tmp/hieusro-auto-skill-picker.ts apps/client-next/src/engine/runtime/auto-train/skill-picker.ts \
  && cp /tmp/hieusro-auto-train.test.mjs apps/client-next/tests/runtime/hieusro-auto-train.test.mjs \

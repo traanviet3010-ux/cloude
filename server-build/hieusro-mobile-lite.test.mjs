@@ -59,3 +59,13 @@ test("iPhone scene output is capped to stable render scale (not dynamic resizing
   const packs=readFileSync(new URL("../../src/engine/runtime/assets/worker/packs/packs.ts",import.meta.url),"utf8");
   assert.match(packs,/\(32 << 20\)/);
 });
+
+test("WebGPU preflight executes before 3D runtime boot and never auto-reloads Safari", () => {
+  const source=readFileSync(new URL("../../src/bootstrap.ts",import.meta.url),"utf8");
+  assert.match(source,/async function startMobileGame/);
+  assert.match(source,/gpu.requestAdapter\(\)/);
+  assert.match(source,/Thử lại GPU/);
+  assert.match(source,/mobileLiteEnabled\(\) \? startMobileGame\(\) : startGame\(\)/);
+  assert.ok(!source.includes("location.reload("));
+  assert.ok(!source.includes("location.replace("));
+});

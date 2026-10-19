@@ -126,7 +126,9 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     '  <p id="auto-center" class="sub">Điểm train: chưa lưu</p>',
     '  <details open><summary>⚔ Chiến đấu và Buff</summary>',
     '    <div class="line"><label for="auto-skills-on">Dùng kỹ năng đánh quái</label><input id="auto-skills-on" type="checkbox"></div>',
-    '    <div class="field"><label for="auto-attack-skill">Kỹ năng ưu tiên</label><select id="auto-attack-skill"><option value="0">Đánh thường</option></select></div>',
+    '    <div class="field"><label for="auto-attack-skill">Kỹ năng 1</label><select id="auto-attack-skill"><option value="0">Đánh thường</option></select></div>',
+    '    <div id="auto-extra-skills" class="field"></div>',
+    '    <div class="row"><button id="auto-add-skill" type="button">+ Thêm Skill</button><button id="auto-remove-skill" type="button">− Bớt Skill</button></div>',
     '    <div class="line"><label for="auto-buffs-on">Tự duy trì Buff</label><input id="auto-buffs-on" type="checkbox"></div>',
     '    <div class="field"><label for="auto-buff-skill">Buff ưu tiên</label><select id="auto-buff-skill"><option value="0">Không sử dụng Buff</option></select></div>',
     '    <p class="sub">Chỉ hiển thị kỹ năng nhân vật đã học. Server vẫn kiểm tra cooldown, MP và mục tiêu.</p>',
@@ -170,6 +172,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   const skillToggle = byId<HTMLInputElement>('auto-skills-on');
   const buffToggle = byId<HTMLInputElement>('auto-buffs-on');
   const attackSelect = byId<HTMLSelectElement>('auto-attack-skill');
+  const extraSkillRoot = byId<HTMLElement>('auto-extra-skills');
   const buffSelect = byId<HTMLSelectElement>('auto-buff-skill');
   const hpToggle = byId<HTMLInputElement>('auto-hp-on');
   const mpToggle = byId<HTMLInputElement>('auto-mp-on');
@@ -186,7 +189,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   let selected = 0, looted = 0, casts = 0;
   let startedAt = 0, lastCastAt = -Infinity, lastBuffAt = -Infinity;
   let activeProfile = '', cachedSkillSignature = '', cachedItemSignature = '';
-  let attackSkillId = 0, buffSkillId = 0;
+  let attackSkillId = 0, extraSkillIds: number[] = [], buffSkillId = 0, nextSkillIndex = 0;
   let skillsOn = false, buffsOn = false, goldOn = true, itemsOn = true, returnOn = true;
   let hpOn = false, mpOn = false, hpSlot = 0, mpSlot = 0, hpPercent = 60, mpPercent = 40;
   let collectingUntil = 0, lastVictim = 0, lastPickup = 0, pendingLootGid = 0, lastReturn = -Infinity;
@@ -205,7 +208,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     if (!activeProfile) return;
     try {
       localStorage.setItem(PROFILE_PREFIX + activeProfile, JSON.stringify({
-        version: 2, radius, skillsOn, buffsOn, attackSkillId, buffSkillId,
+        version: 2, radius, skillsOn, buffsOn, attackSkillId, extraSkillIds, buffSkillId,
         goldOn, itemsOn, returnOn, hpOn, mpOn, hpSlot, mpSlot, hpPercent, mpPercent
       }));
     } catch { /* Client gameplay still works with storage disabled. */ }
@@ -235,6 +238,11 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       const data = raw ? JSON.parse(raw) as Record<string, unknown> : {};
       if (data.version === 2) {
         if (typeof data.radius === 'number' && data.radius >= 10 && data.radius <= 100) radius = data.radius;
+        if (Array.isArray(data.extraSkillIds)) {
+          extraSkillIds = data.extraSkillIds.slice(0, 11).filter(n =>
+            typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 65535
+          );
+        }
         for (const [key, setter] of [
           ['skillsOn', (v: boolean) => { skillsOn = v; }],
           ['buffsOn', (v: boolean) => { buffsOn = v; }],
@@ -259,6 +267,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
       }
     } catch { /* Corrupt saved UI profile falls back to defaults. */ }
     cachedSkillSignature = ''; cachedItemSignature = '';
+    nextSkillIndex = 0;
     syncInputs();
   }
 
@@ -271,6 +280,34 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     }
     select.value = String(selectedValue);
     if (!select.value) select.value = '0';
+  }
+
+  function renderExtraSkillOptions() {
+    extraSkillRoot.replaceChildren();
+    const options = [...attackSelect.options].map(o => ({ id: Number(o.value), label: o.textContent || '' }));
+    extraSkillIds.forEach((id, i) => {
+      const row = document.createElement('label');
+      row.className = 'field';
+      const title = document.createElement('span');
+      title.textContent = 'Kỹ năng ' + (i + 2);
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', 'Kỹ năng ' + (i + 2));
+      select.dataset.skillOrder = String(i + 2);
+      for (const option of options) {
+        const node = document.createElement('option');
+        node.value = String(option.id); node.textContent = option.label;
+        select.appendChild(node);
+      }
+      select.value = String(id);
+      if (!select.value) { select.value = '0'; extraSkillIds[i] = 0; }
+      select.addEventListener('change', () => {
+        extraSkillIds[i] = Number(select.value);
+        nextSkillIndex = 0;
+        persist();
+      });
+      row.append(title, select);
+      extraSkillRoot.append(row);
+    });
   }
 
   function updateSkillOptions(game: GameplayState) {
@@ -292,6 +329,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     // A patch/skill reset can remove a known skill: fall back safely.
     if (attackSelect.value === '0') attackSkillId = 0;
     if (buffSelect.value === '0') buffSkillId = 0;
+    renderExtraSkillOptions();
     syncInputs();
   }
 
@@ -389,6 +427,7 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
     center = { ...frame.gameplay.pose };
     selected = 0; looted = 0; casts = 0;
     startedAt = performance.now(); lastCastAt = -Infinity; lastBuffAt = -Infinity;
+    nextSkillIndex = 0;
     collectingUntil = 0; lastVictim = 0; pendingLootGid = 0; lastPickup = 0;
     lootedItems.clear(); returnOrigin = null; stuckReturnCount = 0; lastReturn = -Infinity;
     currentGid = null;
@@ -410,10 +449,22 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
   function saveCombat() {
     skillsOn = skillToggle.checked; buffsOn = buffToggle.checked;
     attackSkillId = Number(attackSelect.value); buffSkillId = Number(buffSelect.value);
+    nextSkillIndex = 0;
     goldOn = goldToggle.checked; itemsOn = itemToggle.checked;
     returnOn = returnToggle.checked;
     persist();
   }
+  byId<HTMLButtonElement>('auto-add-skill').addEventListener('click', () => {
+    if (extraSkillIds.length >= 11) return;
+    extraSkillIds.push(0);
+    renderExtraSkillOptions();
+    persist();
+  });
+  byId<HTMLButtonElement>('auto-remove-skill').addEventListener('click', () => {
+    extraSkillIds.pop();
+    renderExtraSkillOptions();
+    persist();
+  });
   for (const field of [skillToggle, buffToggle, attackSelect, buffSelect, goldToggle, itemToggle, returnToggle]) {
     field.addEventListener('change', saveCombat);
   }
@@ -536,16 +587,26 @@ export function createAutoTrain(send: (command: GameplayCommand) => void) {
         return true;
       }
     }
-    if (!target || !skillsOn || !attackSkillId || next.now - lastCastAt < SKILL_WAIT_MS) return false;
-    const metadata = game.skillIndex?.get(attackSkillId) ?? game.skillCatalog?.find(r => r.id === attackSkillId);
-    if (!metadata || !((metadata.targets ?? 0) & SKILL_TARGET_MONSTER) ||
-        !isSkillAvailable(game, attackSkillId, at)) return false;
-    lastCastAt = next.now;
-    send({ kind: 'skill', skillId: attackSkillId, gid: target.gid });
-    casts++;
-    notice.textContent = 'Kỹ năng: ' + metadata.name;
-    update();
-    return true;
+    if (!target || !skillsOn || next.now - lastCastAt < SKILL_WAIT_MS) return false;
+    const rotation = [attackSkillId, ...extraSkillIds].filter(id => id > 0);
+    if (!rotation.length) return false;
+    // Round-robin over up to twelve learned skills. Skip a cooldown, missing
+    // MP, or unsuitable target without spamming the game protocol.
+    for (let i = 0; i < rotation.length; i++) {
+      const offset = (nextSkillIndex + i) % rotation.length;
+      const id = rotation[offset]!;
+      const metadata = game.skillIndex?.get(id) ?? game.skillCatalog?.find(r => r.id === id);
+      if (!metadata || !((metadata.targets ?? 0) & SKILL_TARGET_MONSTER) ||
+          !isSkillAvailable(game, id, at)) continue;
+      lastCastAt = next.now;
+      nextSkillIndex = (offset + 1) % rotation.length;
+      send({ kind: 'skill', skillId: id, gid: target.gid });
+      casts++;
+      notice.textContent = 'Kỹ năng: ' + metadata.name;
+      update();
+      return true;
+    }
+    return false;
   }
 
   update();

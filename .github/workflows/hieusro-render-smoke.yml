@@ -32,7 +32,9 @@ jobs:
           done
           [[ "$ok" == 1 ]] || { echo "ERROR: homepage did not return browser client HTML"; exit 1; }
 
+          echo "Testing public Agent readyz via Nginx"
           curl --fail-with-body -sS --connect-timeout 10 --max-time 25 "$BASE/readyz" > /tmp/hieusro-ready
+          echo "Testing public server catalogue via Nginx (no self-proxy loops)"
           curl --fail-with-body -sS -H "X-OpenSRO-Protocol: 6" --connect-timeout 10 --max-time 25 "$BASE/api/title/servers" > /tmp/hieusro-title.json
           grep -q 'HieuSRO' /tmp/hieusro-title.json
           echo "PASS: HTTP homepage, Agent readiness, and HieuSRO server catalogue."

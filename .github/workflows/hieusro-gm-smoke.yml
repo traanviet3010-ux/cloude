@@ -1,0 +1,43 @@
+name: HieuSRO TEST GM public smoke
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-gm-smoke.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Check admin panel and authentication guard only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=https://hieusro-drive-test-20261019.onrender.com
+          for trial in $(seq 1 18); do
+            home=$(curl -sS -L --max-time 15 -o /tmp/gm-home -w '%{http_code}' "$base/gm/" || true)
+            if [[ "$home" == "200" ]] && grep -q 'Đăng nhập GM' /tmp/gm-home; then break; fi
+            echo "GM panel is waking up ($trial)"
+            sleep 10
+          done
+          [[ "$home" == "200" ]] || { echo "GM login page unavailable"; exit 1; }
+          echo "PASS: GM login UI HTTP 200"
+
+          script=$(curl -sS -L --max-time 15 -o /tmp/gm-script -w '%{http_code}' "$base/gm/app.js")
+          [[ "$script" == "200" ]] && grep -q 'loginForm' /tmp/gm-script
+          echo "PASS: GM login JavaScript bundle"
+
+          me=$(curl -sS --max-time 15 -o /tmp/gm-me -w '%{http_code}' "$base/gm/api/me")
+          [[ "$me" == "401" ]] && grep -q '"ok":false' /tmp/gm-me
+          echo "PASS: unauthenticated session refused"
+
+          status=$(curl -sS --max-time 15 -o /tmp/gm-status -w '%{http_code}' "$base/gm/api/status")
+          [[ "$status" == "401" ]]
+          echo "PASS: server controls require valid GM session"
+
+          login=$(curl -sS --max-time 15 -o /tmp/gm-login -w '%{http_code}' \
+            -H "Origin: $base" -H 'Content-Type: application/json' \
+            --data '{"password":"smoke-test-invalid-password"}' "$base/gm/api/login")
+          [[ "$login" == "401" ]] || { echo "GM login expected 401 with invalid password but returned $login"; exit 1; }
+          echo "PASS: GM password activated, wrong password rejected (no real credential used)"

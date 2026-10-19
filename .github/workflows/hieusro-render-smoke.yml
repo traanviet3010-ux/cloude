@@ -61,9 +61,13 @@ jobs:
           curl --fail-with-body -sS -L --connect-timeout 10 --max-time 35 "$BASE$script_path" -o /tmp/hieusro-module.js
           [[ $(wc -c < /tmp/hieusro-module.js) -gt 1000 ]]
           echo "PASS: browser JS module delivered successfully."
-          grep -q 'bootstrap-DKYMt9-z.js' /tmp/hieusro-index.html || {
-            echo "ERROR: Render is not serving the new patched Web client bundle";
+          grep -q 'hieusro:auto-train:radius:v1' /tmp/hieusro-module.js || {
+            echo "ERROR: Render browser bundle does not contain Auto Train stage1 controller";
             exit 1;
           }
-          echo "PASS: patched particle-rotation browser bundle fingerprint verified."
+          grep -q 'AUTO TRAIN' /tmp/hieusro-module.js || {
+            echo "ERROR: Auto Train UI is missing from the served browser bundle";
+            exit 1;
+          }
+          echo "PASS: full Auto Train UI + controller shipped on the public Render URL."
 

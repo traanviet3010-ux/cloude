@@ -32,7 +32,7 @@ jobs:
           page.on('pageerror',e=>errors.push(e.message));
           page.on('console',m=>{if(m.type()==='error')errors.push(m.text().slice(0,200));});
           try{
-            await page.goto('https://hieusro-babylon-webgl2-test.onrender.com/',{waitUntil:'domcontentloaded',timeout:90000});
+            await page.goto('https://hieusro-babylon-webgl2-test.onrender.com/?debug=1',{waitUntil:'domcontentloaded',timeout:90000});
             await page.locator('#gpu').waitFor({state:'visible',timeout:20000});
             const gpu=await page.locator('#gpu').innerText();
             console.log('BROWSER_RENDERER='+gpu);
@@ -44,6 +44,16 @@ jobs:
             const state=await page.locator('#asset-state').innerText();
             console.log('BROWSER_TERRAIN_STATE='+state);
             if(!state.includes('cell GPU'))throw Error('Real SRO world cells not rendered in Babylon');
+            try {
+              await page.waitForFunction(()=>{
+                const line=document.getElementById('status')?.textContent||'';
+                return /texture Silkroad [1-9][0-9]*/.test(line);
+              },null,{timeout:65000});
+              console.log('REAL_SRO_NATIVE_TEXTURE_GPU_OK=1',await page.locator('#status').innerText());
+            } catch (error) {
+              console.log('NATIVE_TEXTURE_NOT_YET_READY='+ (await page.locator('#status').innerText()));
+              throw error;
+            }
             await page.screenshot({path:'webgl2-safari-layout.png',fullPage:true});
             if(errors.length)console.log('BROWSER_CONSOLE_ERRORS='+JSON.stringify(errors.slice(0,12)));
             console.log('BABYLON_TERRAIN_BROWSER_RENDER_OK=1');

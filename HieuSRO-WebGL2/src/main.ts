@@ -31,19 +31,42 @@ async function request<T>(path:string,body?:object):Promise<T> {
   if(!response.ok)throw Error("API "+response.status+" — "+path);
   return data;
 }
+let serverLoop:AbortController|null=null;
+function delay(ms:number,signal:AbortSignal):Promise<void> {
+  return new Promise((resolve,reject)=>{
+    if(signal.aborted){reject(Error("Đã hủy"));return;}
+    const timer=setTimeout(()=>{signal.removeEventListener("abort",cancel);resolve();},ms);
+    const cancel=()=>{clearTimeout(timer);signal.removeEventListener("abort",cancel);reject(Error("Đã hủy"));};
+    signal.addEventListener("abort",cancel,{once:true});
+  });
+}
 async function servers() {
-  try{
-    const list=await request<ServerRow[]>("/api/title/servers");
-    const select=$<HTMLSelectElement>("server");select.replaceChildren();
-    if(!Array.isArray(list))throw Error("Danh sách server không hợp lệ");
-    for(const s of list){
-      if(!s.id || !s.name)continue;
-      const o=document.createElement("option");o.value=s.id;o.textContent=s.name;
-      o.disabled=s.operating===false;select.appendChild(o);
+  serverLoop?.abort(); serverLoop=new AbortController();
+  const signal=serverLoop.signal;
+  const select=$<HTMLSelectElement>("server");
+  const button=$<HTMLButtonElement>("login");button.disabled=true;
+  select.replaceChildren(new Option("Đang chờ GameWorld khởi động…",""));
+  for(let n=0;n<20;n++){
+    try{
+      if(signal.aborted)return;
+      const list=await request<ServerRow[]>("/api/title/servers");
+      if(!Array.isArray(list))throw Error("Danh sách server không hợp lệ");
+      const ready=list.filter(s=>s.id&&s.name&&s.operating!==false);
+      if(!ready.length)throw Error("GameWorld chưa sẵn sàng");
+      select.replaceChildren();
+      for(const s of ready){
+        const o=document.createElement("option");o.value=s.id!;
+        o.textContent=s.name!;select.appendChild(o);
+      }
+      text(authState,"Danh sách server đã sẵn sàng. Dùng tài khoản TEST độc lập.");
+      button.disabled=false;return;
+    }catch(e){
+      if(signal.aborted)return;
+      text(authState,`Backend TEST đang khởi động (${n+1}/20). ${explain(e)}; tự thử lại, không cần F5.`);
+      if(n<19)try{await delay(12000,signal);}catch{return;}
     }
-    if(!select.options.length)throw Error("GameWorld chưa sẵn sàng");
-    text(authState,"Đã kết nối danh sách server HieuSRO. Dùng tài khoản TEST độc lập.");
-  }catch(e){text(authState,"Máy chủ TEST chưa sẵn sàng: "+explain(e)+". Thử tải lại danh sách sau.");}
+  }
+  text(authState,"Máy chủ chưa sẵn sàng sau 4 phút. Bấm 'Kết nối lại' khi muốn thử tiếp.");
 }
 async function login(){
   const button=$<HTMLButtonElement>("login");button.disabled=true;
@@ -121,6 +144,7 @@ async function loadRegion(){
   finally{button.disabled=false;}
 }
 $("login").addEventListener("click",()=>void login());
+$("reconnect").addEventListener("click",()=>void servers());
 $("load-region").addEventListener("click",()=>void loadRegion());
 for(const name of ["left","right","forward","back"]as const){
   const el=$<HTMLButtonElement>(name);
@@ -145,7 +169,7 @@ document.addEventListener("keydown",controls);
 let closed=false;
 const cleanup=()=>{
  if(closed)return;closed=true;
- controller?.abort();document.removeEventListener("keydown",controls);
+ controller?.abort();serverLoop?.abort();document.removeEventListener("keydown",controls);
  world?.dispose();world=null;token=null;reader.reset();
 };
 window.addEventListener("pagehide",cleanup,{once:true});

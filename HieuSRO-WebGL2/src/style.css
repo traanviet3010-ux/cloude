@@ -26,3 +26,7 @@ nav{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 18px);right:12px
 #character-creator summary{font-size:13px;cursor:pointer;line-height:1.7}
 #character-creator label{margin-top:7px}
 #character-creator label select{margin-top:3px}
+
+#roster-list li{margin:6px 0;line-height:1.6}
+#roster-list .world-probe-button{width:auto;min-height:32px;font-size:11px;margin-left:8px;padding:5px 8px}
+#world-admission-state{padding:6px;border:1px solid #466378;border-radius:5px;overflow-wrap:anywhere}

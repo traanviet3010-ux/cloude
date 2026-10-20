@@ -10,6 +10,21 @@
       <label>Máy chủ <select id="server"><option>Đang tải danh sách…</option></select></label>
       <button id="login" disabled>Đăng nhập TEST</button><button id="reconnect">Kết nối lại máy chủ</button>
       <p id="auth-state" role="status">Đang kết nối backend TEST…</p>
+      <div id="character-panel" hidden>
+        <h3>Nhân vật TEST</h3>
+        <p id="roster-state" role="status">Đang lấy danh sách nhân vật…</p>
+        <ul id="roster-list" aria-label="Danh sách nhân vật"></ul>
+        <button id="refresh-roster" type="button">Làm mới danh sách</button>
+        <details id="character-creator">
+          <summary>Tạo nhân vật thật trên server TEST</summary>
+          <label>Tên nhân vật <input id="character-name" autocomplete="off" maxlength="12" placeholder="2–12 ký tự Latin/số"></label>
+          <label>Chủng tộc <select id="character-race"><option value="CH">Trung Hoa</option><option value="EU">Châu Âu</option></select></label>
+          <label>Giới tính <select id="character-gender"><option value="MAN">Nam</option><option value="WOMAN">Nữ</option></select></label>
+          <p>Trang bị đầu game lấy theo bộ mặc định của OpenSRO. Nhân vật sẽ được tạo trên backend TEST thật.</p>
+          <button id="create-character" type="button">Xác nhận tạo nhân vật</button>
+          <p id="creation-state" role="status"></p>
+        </details>
+      </div>
     </section>
     <section id="world-menu">
       <label>Vùng bản đồ Silkroad <select id="region" aria-label="Region bản đồ"><option>Đang đọc danh mục vùng…</option></select></label>

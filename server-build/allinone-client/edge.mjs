@@ -20,6 +20,9 @@ function publicAutoPolicy() {
 
 const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
 const ASSET_UPSTREAM_HOST = process.env.OPENSRO_ASSET_UPSTREAM_HOST || "opensro.online";
+// Only immutable SROPACK2 packs use the independently verified 213-pack CDN.
+// All game APIs, WebSocket, localization and other assets retain their routes.
+const PACK_CDN_HOST = process.env.HIEUSRO_PACK_CDN_HOST || "hieusro-assets-cdn-test-20261020.onrender.com";
 const GAME_UPSTREAM_HOST = process.env.HIEUSRO_GAME_UPSTREAM_HOST || "hieusro-game-server.onrender.com";
 const LANGUAGE_COOKIE = "hieusro_lang";
 const LOCALIZED_TEXT = /^\/assets\/text\/(textuisystem|textzonename|textdataname|texthelp)\.en\.json$/;
@@ -100,6 +103,7 @@ function copyProxyHeaders(source, target) {
 }
 
 function upstreamFor(pathname) {
+  if (pathname.startsWith("/assets/packs/")) return PACK_CDN_HOST;
   if (pathname.startsWith("/assets/") || pathname === "/assets") {
     return ASSET_UPSTREAM_HOST;
   }
@@ -121,6 +125,13 @@ function proxyHttp(req, res) {
   // forward it after language selection. Localized JSON is intentionally read
   // as identity bytes so it can be normalized safely before it reaches WebGL UI.
   if (pathname.startsWith("/assets/")) delete headers.cookie;
+  if (pathname.startsWith("/assets/packs/")) {
+    // A pack is a public static file. Do not leak login headers to CDN.
+    delete headers.authorization;
+    delete headers.origin;
+    delete headers.referer;
+    headers["accept-encoding"] = "identity"; // preserve HTTP Range byte offsets
+  }
   if (localized) {
     headers["accept-encoding"] = "identity";
     delete headers["if-none-match"];

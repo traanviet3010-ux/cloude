@@ -1,0 +1,44 @@
+name: HieuSRO Babylon WebGL2 build gate
+on:
+  push:
+    branches:
+      - hieusro-babylon-webgl2-client-20261020
+    paths:
+      - 'HieuSRO-WebGL2/**'
+      - '.github/workflows/hieusro-webgl2-build.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install and build real Babylon WebGL2 renderer
+        working-directory: HieuSRO-WebGL2
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          node --check server.mjs
+      - name: Verify no production URL, real terrain pipeline, and authenticated backend routes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('HieuSRO-WebGL2')
+          world=(p/'src/world.ts').read_text()
+          assets=(p/'src/pack.ts').read_text()
+          app=(p/'src/main.ts').read_text()
+          server=(p/'server.mjs').read_text()
+          assert 'new Engine(canvas,true' in world and 'webGLVersion!==2' in world
+          assert 'block.heights[z*17+x]' in world and 'new VertexData()' in world
+          assert 'tiles.delete(key)' in world and 'mesh.dispose(' in world
+          assert 'SROPACK2' in assets and 'SHA-256' in assets and '206' in assets
+          assert 'world-region-catalog.json' in app
+          assert '/api/title/login' in app and '/api/character/list' in app
+          assert 'proxy.ws(' in server and '/assets/packs/' in server
+          assert 'play.143-198-217-75.sslip.io' not in server
+          assert 'hieusro-icons-preview-20261019.onrender.com' not in server
+          print('WEBGL2_STATIC_GATES_OK=1')
+          PY

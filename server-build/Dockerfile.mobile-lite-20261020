@@ -43,8 +43,8 @@ RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src
 RUN corepack pnpm --filter @sro/client-next build \
  && test -s apps/client-next/temp/artifacts/dist/index.html \
  && python3 /tmp/extract-mobile-ui-from-packs.py \
- && test -s apps/client-next/temp/artifacts/dist/assets/images/media_extracted/interface/outer/logo-big.png \
- && test -s apps/client-next/temp/artifacts/dist/assets/images/media_extracted/interface/loading/nowloading.png
+ && test -s apps/client-next/temp/artifacts/dist/assets/images/Media_extracted/interface/outer/logo-big.png \
+ && test -s apps/client-next/temp/artifacts/dist/assets/images/Media_extracted/interface/loading/nowloading.png
 
 FROM nginx:stable-alpine
 COPY nginx.mobile-lite-20261020.conf /etc/nginx/nginx.conf

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/><meta name="theme-color" content="#111827"/><title>HieuSRO · WebGL2 TEST</title></head>
+<body>
+  <div id="app">
+    <canvas id="world" aria-label="HieuSRO - bản đồ 3D WebGL2"></canvas>
+    <header><b>HieuSRO <small>WebGL2 • TEST</small></b><div id="gpu">Đang kiểm tra WebGL2</div></header>
+    <section id="auth">
+      <label>Tài khoản <input id="account" autocomplete="username" placeholder="ID TEST"></label>
+      <label>Mật khẩu <input id="password" type="password" autocomplete="current-password" placeholder="Mật khẩu"></label>
+      <label>Máy chủ <select id="server"><option>Đang tải danh sách…</option></select></label>
+      <button id="login">Đăng nhập TEST</button>
+      <p id="auth-state" role="status">Đang kết nối backend TEST…</p>
+    </section>
+    <section id="world-menu">
+      <label>Vùng bản đồ Silkroad <select id="region" aria-label="Region bản đồ"><option>Đang đọc danh mục vùng…</option></select></label>
+      <button id="load-region">Tải bản đồ thật</button>
+      <p id="asset-state" role="status">Đang chuẩn bị dữ liệu SROPACK2…</p>
+    </section>
+    <nav><button id="left" aria-label="Xoay trái">◀</button><button id="forward" aria-label="Tiến tới">▲</button><button id="back" aria-label="Lùi">▼</button><button id="right" aria-label="Xoay phải">▶</button></nav>
+    <div id="status">WebGL2 thật · Bản thử dựng địa hình và kết nối API, chưa phải gameplay MMO đầy đủ.</div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body></html>

@@ -60,8 +60,8 @@ export class NativeUiWebgl2Renderer {
   private readonly budgetBytes:number;
   private readonly onLost=(event:Event)=>{event.preventDefault();this.lost=true;};
   private lost=false;
-  constructor(private readonly canvas:HTMLCanvasElement, budgetMB?:number) {
-    const gl=canvas.getContext("webgl2",{alpha:true,antialias:false,stencil:false,
+  constructor(private readonly canvas:HTMLCanvasElement, budgetMB?:number, sharedGl?:WebGL2RenderingContext) {
+    const gl=sharedGl??canvas.getContext("webgl2",{alpha:true,antialias:false,stencil:false,
       depth:false,preserveDrawingBuffer:false,premultipliedAlpha:false});
     if(!gl)throw Error("Original HieuSRO UI requires WebGL2");
     this.gl=gl;
@@ -162,7 +162,7 @@ export class NativeUiWebgl2Renderer {
     if(this.used+required>this.budgetBytes)
       throw Error("Native UI memory pressure: cannot evict currently protected textures");
   }
-  draw(scene:UiScene){
+  draw(scene:UiScene, clearBackground=true){
     if(this.closed||this.lost)throw Error("Native UI renderer unavailable; must be rebuilt after context loss");
     // Validate whole frame *before* changing GPU state: no partial/misleading UI frame.
     const commands=compileNativeUi(scene);
@@ -180,8 +180,10 @@ export class NativeUiWebgl2Renderer {
     gl.uniform1i(gl.getUniformLocation(this.program,"uSampler"),0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(this.vao);
-    gl.scissor(0,0,this.canvas.width,this.canvas.height);
-    gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+    if(clearBackground){
+      gl.scissor(0,0,this.canvas.width,this.canvas.height);
+      gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+    }
     const sx=this.canvas.width/scene.width,sy=this.canvas.height/scene.height;
     for(const cmd of commands){
       const [x,y,w,h]=cmd.clip;

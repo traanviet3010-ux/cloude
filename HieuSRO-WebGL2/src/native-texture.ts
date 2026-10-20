@@ -48,7 +48,7 @@ export function decodeSroNativeTexture(bytes:Uint8Array,halve=false):NativeImage
   if(chosenW>LIMIT||chosenH>LIMIT)throw Error("Mip texture quá lớn cho WebGL2 TEST");
   const pixels=new Uint8Array(chosenW*chosenH*4);
   if(fmt==="bgra"){
-    for(let p=0;p<p<pixels.length;p+=4){
+    for(let p=0;p<pixels.length;p+=4){
       pixels[p]=chosen[p+2]!;pixels[p+1]=chosen[p+1]!;
       pixels[p+2]=chosen[p]!;pixels[p+3]=chosen[p+3]!;
     }

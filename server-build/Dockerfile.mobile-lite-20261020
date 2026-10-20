@@ -19,6 +19,9 @@ COPY hieusro-mobile-lite.ts /tmp/hieusro-mobile-lite.ts
 COPY hieusro-mobile-hud.ts /tmp/hieusro-mobile-hud.ts
 COPY hieusro-mobile-lite.test.mjs /tmp/hieusro-mobile-lite.test.mjs
 COPY patch-mobile-lite.py /tmp/patch-mobile-lite.py
+COPY hieusro-mobile-memory.ts /tmp/hieusro-mobile-memory.ts
+COPY patch-mobile-memory-v2.py /tmp/patch-mobile-memory-v2.py
+COPY hieusro-mobile-memory.test.mjs /tmp/hieusro-mobile-memory.test.mjs
 
 ENV HIEUSRO_OPENSRO_ROOT=/opt/opensro
 RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src/engine/runtime/mobile-lite \
@@ -30,8 +33,11 @@ RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src
  && cp /tmp/hieusro-mobile-hud.ts apps/client-next/src/engine/runtime/mobile-lite/mobile-hud.ts \
  && cp /tmp/hieusro-mobile-lite.test.mjs apps/client-next/tests/runtime/hieusro-mobile-lite.test.mjs \
  && python3 /tmp/patch-mobile-lite.py \
+ && cp /tmp/hieusro-mobile-memory.ts apps/client-next/src/engine/foundation/rendering/mobile-memory.ts \
+ && cp /tmp/hieusro-mobile-memory.test.mjs apps/client-next/tests/runtime/hieusro-mobile-memory.test.mjs \
+ && python3 /tmp/patch-mobile-memory-v2.py \
  && cd apps/client-next \
- && node --test tests/runtime/hieusro-auto-train.test.mjs tests/runtime/hieusro-mobile-lite.test.mjs
+ && node --test tests/runtime/hieusro-auto-train.test.mjs tests/runtime/hieusro-mobile-lite.test.mjs tests/runtime/hieusro-mobile-memory.test.mjs
 
 RUN corepack pnpm --filter @sro/client-next build \
  && test -s apps/client-next/temp/artifacts/dist/index.html

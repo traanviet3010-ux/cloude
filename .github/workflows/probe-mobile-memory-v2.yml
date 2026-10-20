@@ -1,4 +1,5 @@
 name: Probe Render HieuSRO Mobile Lite V2 TEST
+# Post-deploy verification after aligning worker and host request capacities.
 on:
   push:
     branches: [hieusro-mobile-memory-v2-test-20261020]

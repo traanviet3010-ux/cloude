@@ -47,41 +47,54 @@ function delay(ms:number,signal:AbortSignal):Promise<void> {
   });
 }
 async function servers() {
-  serverLoop?.abort(); serverLoop=new AbortController();
-  text(authState,"Đang kiểm tra tình trạng GameWorld TEST. Anh vẫn có thể nhập tài khoản…");
+  serverLoop?.abort();
+  serverLoop=new AbortController();
   const signal=serverLoop.signal;
   const select=$<HTMLSelectElement>("server");
-  const button=$<HTMLButtonElement>("login");button.disabled=true;
-  select.replaceChildren(new Option("Đang chờ GameWorld khởi động…",""));
-  for(let n=0;n<48;n++){
+  const button=$<HTMLButtonElement>("login");
+  button.disabled=true;
+  serverRows.clear();
+  select.replaceChildren(new Option("Kiểm tra máy chủ TEST…",""));
+  // Native title remains responsive. A disconnected TEST backend cannot be
+  // fixed by trying hundreds of HTTP requests or by switching to LIVE.
+  for(let n=0;n<8;n++){
+    const attempt=new AbortController();
+    const cancel=()=>attempt.abort();
+    signal.addEventListener("abort",cancel,{once:true});
+    const timeout=setTimeout(()=>attempt.abort(),11000);
+    let lastError="";
     try{
       if(signal.aborted)return;
-      const list=await request<ServerRow[]>("/api/title/servers",undefined,signal);
-      if(!Array.isArray(list))throw Error("Danh sách server không hợp lệ");
-      const ready=list.filter(s=>s.id&&s.name&&s.operating!==false);
-      if(!ready.length)throw Error("GameWorld chưa sẵn sàng");
+      const list=await request<ServerRow[]>("/api/title/servers",undefined,attempt.signal);
+      if(!Array.isArray(list))throw Error("Danh sách máy chủ không đúng schema");
+      const ready=list.filter(row=>typeof row.id==="string"&&row.id.length>0&&
+        typeof row.name==="string"&&row.name.length>0&&row.operating!==false);
+      if(!ready.length)throw Error("GameWorld TEST chưa công bố shard hoạt động");
       select.replaceChildren();
-      serverRows.clear();
-      for(const s of ready){
-        serverRows.set(s.id!,s);
-        const o=document.createElement("option");o.value=s.id!;
-        o.textContent=s.name!;select.appendChild(o);
+      for(const row of ready){
+        serverRows.set(row.id!,row);
+        select.appendChild(new Option(row.name!,row.id!));
       }
-      text(authState,"Danh sách server đã sẵn sàng. Dùng tài khoản TEST độc lập.");
+      text(authState,"GameWorld TEST đã sẵn sàng. Đăng nhập bằng tài khoản TEST độc lập.");
       button.disabled=false;return;
     }catch(e){
       if(signal.aborted)return;
-      if(e instanceof BackendError && !e.retryable){
-        text(authState,"Không lấy được server: "+e.message);
+      lastError=e instanceof BackendError?e.message:explain(e);
+      if(e instanceof BackendError&&!e.retryable){
+        text(authState,"Máy chủ TEST từ chối yêu cầu: "+lastError);
         return;
       }
-      text(authState,n<3?"GameWorld TEST đang thức dậy từ chế độ nghỉ. Màn hình đăng nhập vẫn sẵn sàng.":
-        `GameWorld TEST chưa trả server (lần ${n+1}/48). Đây là backend Render TEST, không phải lỗi WebGL2.`);
-      if(n<47)try{await delay(5000,signal);}catch{return;}
+    }finally{
+      clearTimeout(timeout);signal.removeEventListener("abort",cancel);
     }
+    text(authState,n<2?
+      "Đang kiểm tra máy chủ TEST. Nếu Render đang ngủ, quá trình khởi động có thể mất thời gian.":
+      `Backend GameWorld TEST chưa phản hồi (${n+1}/8). ${lastError} Không liên quan tới tài khoản hoặc GPU.`);
+    if(n<7)try{await delay(n<3?4500:7500,signal);}catch{return;}
   }
-  text(authState,"Máy chủ chưa sẵn sàng sau 4 phút. Bấm 'Kết nối lại' khi muốn thử tiếp.");
+  text(authState,"GameWorld TEST hiện không sẵn sàng. Bấm 'Kiểm tra server' để thử lại; không cần tải lại trang hay chuyển sang LIVE.");
 }
+
 async function login(){
   worldProbeController?.abort();activeTransport=null;
   const button=$<HTMLButtonElement>("login");button.disabled=true;

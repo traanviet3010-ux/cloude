@@ -1,0 +1,94 @@
+name: Verify isolated SRWeb-inspired Icons Preview TEST
+on:
+  push:
+    branches: [hieusro-icons-srweb-mobile-stage-20261020]
+    paths: ['.github/workflows/verify-isolated-icons-srweb-test.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  external-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Read-only HTTP, asset Range, API and UI smoke tests
+        env:
+          TEST: https://hieusro-icons-srweb-stage-20261020.onrender.com
+          CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,time,urllib.request,urllib.error
+          from html.parser import HTMLParser
+          t=os.environ["TEST"]; cdn=os.environ["CDN"]
+          def fetch(origin,path,headers=None,timeout=65,method="GET"):
+              req=urllib.request.Request(origin+path,headers={"Accept-Encoding":"identity","X-OpenSRO-Protocol":"6",**(headers or {})},method=method)
+              with urllib.request.urlopen(req,timeout=timeout) as r:
+                  data=r.read(18*1024*1024) if "manifest.json" in path else r.read(10*1024*1024)
+                  return r.status,{k.lower():v for k,v in r.headers.items()},data
+          # New Free all-in-one must bootstrap GameWorld; can take multiple minutes.
+          for i in range(48):
+              try:
+                  status,_,_=fetch(t,"/healthz",timeout=8)
+                  ready,_,_=fetch(t,"/readyz",timeout=8)
+                  s,_,b=fetch(t,"/api/title/servers",timeout=8)
+                  servers=json.loads(b)
+                  if status==200 and ready==200 and s==200 and any(x.get("name")=="HieuSRO" for x in servers):
+                      print("SERVER_CATALOG_OK=1",flush=True)
+                      break
+              except Exception as e:
+                  if i%5==0:print("WAITING_FOR_TEST_BOOT",i+1,type(e).__name__,flush=True)
+              time.sleep(8)
+          else:
+              raise AssertionError("GameWorld/Agent did not become ready")
+          status,headers,html=fetch(t,"/")
+          assert status==200 and b"<html" in html.lower()
+          print("GAME_SHELL_OK=1",flush=True)
+          class Html(HTMLParser):
+              def __init__(self): super().__init__();self.js=[];self.css=[]
+              def handle_starttag(self,tag,attrs):
+                  d=dict(attrs)
+                  if tag=="script" and d.get("src"):self.js.append(d["src"])
+                  if tag=="link" and d.get("rel")=="stylesheet" and d.get("href"):self.css.append(d["href"])
+          page=Html();page.feed(html.decode("utf8","replace"))
+          assert page.js,"Missing client entry"
+          for url in page.js[:2]+page.css[:2]:
+              if url.startswith("./"): url=url[1:]
+              assert url.startswith("/"),url
+              code,h,data=fetch(t,url)
+              assert code==200 and len(data)>100,(url,code,len(data))
+              print("CLIENT_ASSET_OK",url,len(data),flush=True)
+          for path in [
+             "/assets/images/Media_extracted/interface/outer/logo-big.png",
+             "/assets/images/Media_extracted/interface/loading/nowloading.png",
+             "/assets/images/Media_extracted/interface/loading/loading_form.png",
+          ]:
+              code,h,data=fetch(t,path)
+              assert code==200 and data.startswith(b"\x89PNG\r\n\x1a\n"),path
+              print("LOCAL_UI_OK",path,flush=True)
+          code,h,raw=fetch(t,"/assets/packs/manifest.json")
+          assert code==200 and len(raw)>1000000
+          _,_,cdndata=fetch(cdn,"/assets/packs/manifest.json")
+          assert hashlib.sha256(raw).digest()==hashlib.sha256(cdndata).digest()
+          manifest=json.loads(raw)
+          packs=[p for g in manifest["groups"] for p in g["packs"]]
+          assert len(manifest["groups"])==17 and len(packs)==213 and len(manifest["assets"])==36843
+          print("MIRRORED_MANIFEST_OK=213",flush=True)
+          largest=max(packs,key=lambda x:x["bytes"])
+          for start,end in [(0,15),(largest["bytes"]//2,largest["bytes"]//2+1023)]:
+              code,h,blob=fetch(t,largest["path"],{"Range":f"bytes={start}-{end}"})
+              assert code==206 and len(blob)==end-start+1
+              assert h.get("content-range")==f"bytes {start}-{end}/{largest['bytes']}"
+              if start==0: assert blob[:8]==b"SROPACK2"
+              print("PACK_RANGE_OK",start,end,flush=True)
+          code,h,raw=fetch(t,"/auto-policy.json")
+          assert code==200 and isinstance(json.loads(raw).get("enabled"),bool)
+          print("AUTO_TRAIN_POLICY_OK=1",flush=True)
+          try:
+              code,h,_=fetch(t,"/gm/")
+              assert code==200
+              print("GM_SHELL_OK=1",flush=True)
+          except urllib.error.HTTPError as exc:
+              assert exc.code in (401,403),f"Unexpected GM status {exc.code}"
+              print("GM_AUTH_GUARD_OK=1",flush=True)
+          print("ISOLATED_ICONS_SRWEB_TEST_HTTP_GATES_PASSED=1",flush=True)
+          PY

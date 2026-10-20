@@ -1,6 +1,6 @@
 name: HieuSRO OpenSRO Asset Inventory Read Only
 on:
-  push:
+  pull_request:
     paths:
       - .github/workflows/hieusro-opensro-assets-inventory.yml
   workflow_dispatch:

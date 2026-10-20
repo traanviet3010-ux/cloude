@@ -1,0 +1,46 @@
+name: Validate Icons Preview SRWeb-inspired mobile staging
+on:
+  push:
+    branches: [hieusro-icons-srweb-mobile-stage-20261020]
+    paths:
+      - 'server-build/patch-srweb-mobile-profile.py'
+      - 'server-build/srweb-mobile-profile.test.mjs'
+      - 'server-build/extract-mobile-ui-from-packs.py'
+      - 'server-build/Dockerfile.srweb-mobile-ci'
+      - 'server-build/Dockerfile.auto-icons-preview'
+      - 'server-build/allinone-client/edge.mjs'
+      - '.github/workflows/validate-icons-srweb-mobile.yml'
+permissions:
+  contents: read
+jobs:
+  client-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile build scripts
+        run: |
+          python3 -m py_compile server-build/patch-srweb-mobile-profile.py server-build/extract-mobile-ui-from-packs.py
+          node --check server-build/allinone-client/edge.mjs
+      - name: Verify separate pack CDN routing without touching API/WS
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          edge=Path('server-build/allinone-client/edge.mjs').read_text()
+          docker=Path('server-build/Dockerfile.auto-icons-preview').read_text()
+          assert 'pathname.startsWith("/assets/packs/")' in edge
+          assert 'hieusro-assets-cdn-test-20261020.onrender.com' in edge
+          assert 'delete headers.authorization' in edge
+          assert 'headers["accept-encoding"] = "identity"' in edge
+          assert 'const GAME_UPSTREAM_HOST' in edge
+          assert 'function localizedRoute' in edge
+          assert 'pathname.startsWith("/api/")' in edge
+          assert 'pathname.startsWith("/shards/")' in edge
+          assert 'python /tmp/patch-srweb-mobile-profile.py' in docker
+          assert 'HIEUSRO_UI_PUBLISH_ROOT=/out/client' in docker
+          print('ICONS_PREVIEW_ROUTE_ISOLATION_OK=1')
+          PY
+      - name: Compile OpenSRO renderer + HieuSRO Auto Train + local verified UI
+        run: docker build --progress=plain -f server-build/Dockerfile.srweb-mobile-ci -t hieusro-icons-srweb-client:ci server-build

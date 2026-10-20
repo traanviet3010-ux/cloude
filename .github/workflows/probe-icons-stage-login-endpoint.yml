@@ -1,0 +1,37 @@
+name: Check isolated TEST login endpoint
+on:
+  push:
+    branches: [hieusro-icons-srweb-mobile-stage-20261020]
+    paths: ['.github/workflows/probe-icons-stage-login-endpoint.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify server login rejects nonexistent account instead of failing transport
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.error
+          host='https://hieusro-icons-srweb-stage-20261020.onrender.com'
+          def post(path,data):
+              request=urllib.request.Request(host+path,data=json.dumps(data).encode(),headers={
+                'X-OpenSRO-Protocol':'6',
+                'Content-Type':'application/json',
+                'Origin':host,
+                'Accept-Encoding':'identity'})
+              try:
+                with urllib.request.urlopen(request,timeout=25) as response:
+                  return response.status,response.read(2048)
+              except urllib.error.HTTPError as exc:return exc.code,exc.read(2048)
+          session,session_body=post('/api/title/session',{})
+          login,login_body=post('/api/title/login',{'id':'zz_test_nonexistent_never_registered_001',
+             'password':'invalid-not-a-secret','serverId':'global-official'})
+          print('NO_COOKIE_SESSION_STATUS='+str(session))
+          print('NONEXISTENT_LOGIN_STATUS='+str(login))
+          assert session in (400,401,403)
+          assert login==200 and json.loads(login_body).get('ok') is False and json.loads(login_body).get('code')=='INVALID_CREDENTIALS', 'Title login did not issue expected native refusal'
+          print('INVALID_ACCOUNT_REFUSED_IN_JSON=1')
+          print('TEST_LOGIN_API_ROUTING_OK=1')
+          PY

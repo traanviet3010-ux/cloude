@@ -1,0 +1,29 @@
+name: Inspect Icons Preview pack manifest bytes (read only)
+on:
+  push:
+    branches: [hieusro-icons-srweb-mobile-stage-20261020]
+    paths: ['.github/workflows/inspect-icons-manifest.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check current Preview manifest versus verified CDN
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,json,hashlib
+          roots={'preview':'https://hieusro-icons-preview-20261019.onrender.com','cdn':'https://hieusro-assets-cdn-test-20261020.onrender.com'}
+          for name,root in roots.items():
+            request=urllib.request.Request(root+'/assets/packs/manifest.json',headers={'Accept-Encoding':'identity'})
+            try:
+              with urllib.request.urlopen(request,timeout=45) as r:
+                body=r.read(9000000)
+                print('MANIFEST_CHECK',name,'status',r.status,'type',r.headers.get('content-type'),'encoding',r.headers.get('content-encoding'),'length',len(body),'sha',hashlib.sha256(body).hexdigest(),'first_hex',body[:20].hex(),flush=True)
+                try:
+                  obj=json.loads(body)
+                  print('MANIFEST_PARSE_OK',name,'groups',len(obj['groups']),'assets',len(obj['assets']),flush=True)
+                except Exception as e:print('MANIFEST_PARSE_FAILED',name,type(e).__name__,flush=True)
+            except Exception as e:print('MANIFEST_FETCH_FAILED',name,type(e).__name__,flush=True)
+          PY

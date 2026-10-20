@@ -1,0 +1,54 @@
+name: Verify isolated HieuSRO GameWorld WebSocket
+on:
+  push:
+    branches: [hieusro-icons-srweb-mobile-stage-20261020]
+    paths: ['.github/workflows/verify-isolated-icons-websocket.yml']
+permissions:
+  contents: read
+jobs:
+  websocket:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe shard health and authenticated-origin WS upgrade without account access
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,os,socket,ssl,urllib.request
+          host="hieusro-icons-srweb-stage-20261020.onrender.com"
+          base=f"https://{host}/shards/global-official/transport/"
+          for path in ("healthz","readyz"):
+              req=urllib.request.Request(base+path,headers={"Accept-Encoding":"identity","X-OpenSRO-Protocol":"6"})
+              with urllib.request.urlopen(req,timeout=35) as r:
+                  body=r.read(1000)
+                  assert r.status==200,(path,r.status,body)
+                  print("GAMEWORLD_ROUTE_OK",path,r.status,flush=True)
+          key=base64.b64encode(os.urandom(16)).decode()
+          sock=socket.create_connection((host,443),timeout=20)
+          tls=ssl.create_default_context().wrap_socket(sock,server_hostname=host)
+          tls.settimeout(20)
+          try:
+              headers=(
+                f"GET /shards/global-official/transport/ws HTTP/1.1\r\n"
+                f"Host: {host}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n"
+                f"Origin: https://{host}\r\n"
+                "User-Agent: HieuSRO-TEST-WebSocket-Probe/1.0\r\n\r\n"
+              ).encode()
+              tls.sendall(headers)
+              buf=bytearray()
+              while b"\r\n\r\n" not in buf and len(buf)<8192:
+                  chunk=tls.recv(2048)
+                  if not chunk:break
+                  buf.extend(chunk)
+              status=bytes(buf).split(b"\r\n",1)[0].decode("ascii","replace")
+              print("WEBSOCKET_UPGRADE_STATUS",status,flush=True)
+              assert " 101 " in status, "GameWorld WS proxy did not upgrade"
+              expected=base64.b64encode(hashlib.sha1((key+"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+              assert f"Sec-WebSocket-Accept: {expected}".lower().encode() in bytes(buf).lower(),"WebSocket accept digest mismatch"
+              print("GAMEWORLD_WEBSOCKET_UPGRADE_OK=1",flush=True)
+          finally:
+              tls.close()
+          PY

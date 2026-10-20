@@ -1,0 +1,31 @@
+# Lightweight test image: mirrors the client patch order in the actual
+# all-in-one Dockerfile without downloading v1.150 private PK2 source or
+# altering a live game backend.
+FROM node:24-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --filter=blob:none https://github.com/opensro-dev/opensro.git opensro \
+    && cd opensro && git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+WORKDIR /src/opensro
+RUN corepack enable && corepack pnpm install --frozen-lockfile
+COPY hieusro-auto-train.ts /tmp/hieusro-auto-train.ts
+COPY hieusro-auto-skill-picker.ts /tmp/hieusro-auto-skill-picker.ts
+COPY patch-auto-train.py /tmp/patch-auto-train.py
+COPY patch-srweb-mobile-profile.py /tmp/patch-srweb-mobile-profile.py
+COPY srweb-mobile-profile.test.mjs /tmp/srweb-mobile-profile.test.mjs
+COPY extract-mobile-ui-from-packs.py /tmp/extract-mobile-ui-from-packs.py
+COPY allinone-client/edge.mjs /tmp/edge.mjs
+RUN mkdir -p apps/client-next/src/engine/runtime/auto-train \
+    && cp /tmp/hieusro-auto-train.ts apps/client-next/src/engine/runtime/auto-train/auto-train.ts \
+    && cp /tmp/hieusro-auto-skill-picker.ts apps/client-next/src/engine/runtime/auto-train/skill-picker.ts \
+    && python3 /tmp/patch-auto-train.py \
+    && python3 /tmp/patch-srweb-mobile-profile.py \
+    && cp /tmp/srweb-mobile-profile.test.mjs apps/client-next/tests/runtime/srweb-mobile-profile.test.mjs \
+    && cd apps/client-next && node --test tests/runtime/srweb-mobile-profile.test.mjs
+RUN corepack pnpm --filter @sro/client-next build \
+    && test -s apps/client-next/temp/artifacts/dist/index.html \
+    && HIEUSRO_UI_PUBLISH_ROOT=/src/opensro/apps/client-next/temp/artifacts/dist \
+       python3 /tmp/extract-mobile-ui-from-packs.py \
+    && test -s apps/client-next/temp/artifacts/dist/assets/images/Media_extracted/interface/outer/logo-big.png \
+    && test -s apps/client-next/temp/artifacts/dist/assets/images/Media_extracted/interface/loading/nowloading.png

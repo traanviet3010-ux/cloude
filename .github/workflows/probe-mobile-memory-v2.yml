@@ -16,6 +16,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, json, urllib.request, urllib.error, hashlib,re
+          from html.parser import HTMLParser
           base=os.environ['BASE']
           def get(path,headers=None):
             with urllib.request.urlopen(urllib.request.Request(base+path,headers={'Accept-Encoding':'identity',**(headers or {})}),timeout=30) as r:

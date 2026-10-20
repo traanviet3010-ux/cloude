@@ -22,6 +22,7 @@ COPY patch-mobile-lite.py /tmp/patch-mobile-lite.py
 COPY hieusro-mobile-memory.ts /tmp/hieusro-mobile-memory.ts
 COPY patch-mobile-memory-v2.py /tmp/patch-mobile-memory-v2.py
 COPY hieusro-mobile-memory.test.mjs /tmp/hieusro-mobile-memory.test.mjs
+COPY extract-mobile-ui-from-packs.py /tmp/extract-mobile-ui-from-packs.py
 
 ENV HIEUSRO_OPENSRO_ROOT=/opt/opensro
 RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src/engine/runtime/mobile-lite \
@@ -40,7 +41,10 @@ RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src
  && node --test tests/runtime/hieusro-auto-train.test.mjs tests/runtime/hieusro-mobile-lite.test.mjs tests/runtime/hieusro-mobile-memory.test.mjs
 
 RUN corepack pnpm --filter @sro/client-next build \
- && test -s apps/client-next/temp/artifacts/dist/index.html
+ && test -s apps/client-next/temp/artifacts/dist/index.html \
+ && python3 /tmp/extract-mobile-ui-from-packs.py \
+ && test -s apps/client-next/temp/artifacts/dist/assets/images/media_extracted/interface/outer/logo-big.png \
+ && test -s apps/client-next/temp/artifacts/dist/assets/images/media_extracted/interface/loading/nowloading.png
 
 FROM nginx:stable-alpine
 COPY nginx.mobile-lite-20261020.conf /etc/nginx/nginx.conf

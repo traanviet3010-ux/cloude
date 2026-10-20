@@ -174,4 +174,12 @@ const cleanup=()=>{
 };
 window.addEventListener("pagehide",cleanup,{once:true});
 window.addEventListener("beforeunload",cleanup,{once:true});
+// On-device diagnostics; does not expose credentials or sensitive API data.
+const debug=new URLSearchParams(location.search).get("debug")==="1";
+const debugTimer=debug?setInterval(()=>{
+  if(closed)return;
+  const g=world?.stats(),a=reader.stats();
+  text(status,`Babylon WebGL2 | region ${g?.region||"chưa chọn"} | cell GPU ${g?.tiles||0}/${g?.totalBlocks||0} | texture Silkroad ${g?.nativeTextures||0} | asset ${(a.bytes/1048576).toFixed(1)} MiB / ${a.requests} Range`);
+},1800):null;
+window.addEventListener("pagehide",()=>{if(debugTimer!==null)clearInterval(debugTimer);},{once:true});
 void servers();void catalog();

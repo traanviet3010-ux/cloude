@@ -1,0 +1,41 @@
+name: Verify WebGL2 character creation UI on Render
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/check-webgl2-character-ui-20261020.yml']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Confirm Render serves authenticated roster and creation controls
+        run: |
+          python3 - <<'PY'
+          import re,time,urllib.request
+          host='https://hieusro-babylon-webgl2-test.onrender.com'
+          def read(path):
+            req=urllib.request.Request(host+path,headers={'Accept-Encoding':'identity'})
+            with urllib.request.urlopen(req,timeout=18) as r:
+              return r.status,r.read(10_000_000)
+          for n in range(24):
+            try:
+              status,health=read('/__webgl2/health')
+              s,page=read('/')
+              if status==s==200 and b'id="character-panel"' in page and b'id="create-character"' in page:
+                src=re.search(rb'<script[^>]+src="([^"]+\.js)"',page)
+                assert src,'Missing deployed JS'
+                script=src.group(1).decode()
+                jsstatus,js=read(script)
+                assert jsstatus==200 and b'/api/character/create' in js and b'/api/character/list' in js
+                assert b'/api/title/servers' in js
+                print('RENDER_WEBGL2_CHARACTER_CREATOR_LIVE=1')
+                print('RENDER_HTTPS_HEALTH_200=1')
+                print('RENDER_JS_AUTH_AND_CREATION_AVAILABLE=1')
+                break
+            except Exception as exc:
+              if n%5==0: print('WAIT_RENDER_DEPLOY',n+1,type(exc).__name__)
+            time.sleep(5)
+          else: raise AssertionError('Render has not served verified creation UI within probe window')
+          PY

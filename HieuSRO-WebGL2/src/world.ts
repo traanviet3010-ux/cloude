@@ -1,12 +1,14 @@
 import {
   ArcRotateCamera,Color3,Color4,Engine,HemisphericLight,Mesh,MeshBuilder,
-  Scene,StandardMaterial,Vector3,VertexData,DynamicTexture
+  Scene,StandardMaterial,Vector3,VertexData,DynamicTexture,RawTexture,Texture
 } from "@babylonjs/core";
-import type {PackReader,RegionCatalog} from "./pack";
+import type {PackReader} from "./pack";
+import {decodeSroNativeTexture} from "./native-texture";
 
 type Block = {blockX:number;blockZ:number;heights:number[];textureData:number[]};
 type Sector={sectorX:number;sectorY:number;blocks:Block[]};
-type Bundle={source:{sectorX:number;sectorY:number};terrain:{sectors?:Sector[];blocks?:Block[]}};
+type Bundle={source:{sectorX:number;sectorY:number};terrain:{sectors?:Sector[];blocks?:Block[]};
+  terrainTextures?:{tileCatalog?:{referencedTiles?:{textureId:number;imagePublicPath:string}[]}}};
 type RegionRow={area?:string;source?:string;bundlePublicPath:string};
 
 function finiteHeights(b: Block) {
@@ -61,13 +63,30 @@ export function createWorld(canvas:HTMLCanvasElement) {
   mat.specularColor=new Color3(.05,.05,.05);
   mat.backFaceCulling=false;
   const tiles=new Map<string,{mesh:Mesh,c:Vector3,seen:number}>();
+  const realMaterials=new Map<number,StandardMaterial>();
+  const nativeGpuTextures=new Set<RawTexture>();
+  const tileSources=new Map<number,string>();
+  let textureGeneration=0;
+  const dominant=(b:Block)=>{
+    const counts=new Map<number,number>();
+    for(const word of b.textureData??[]){
+      const id=word&1023;
+      counts.set(id,(counts.get(id)??0)+1);
+    }
+    return [...counts].sort((a,b)=>b[1]-a[1])[0]?.[0]??-1;
+  };
   let blocks:{key:string;block:Block;sx:number;sz:number}[]=[];
   let baseX=0,baseZ=0,refRegion="",active=false,tick=0;
   let disposed=false;
   const maxTiles=ios?16:49;
   function clear() {
+    textureGeneration++;
     for(const x of tiles.values())x.mesh.dispose(false,false);
     tiles.clear();blocks=[];active=false;
+    for(const mat of realMaterials.values())mat.dispose(false,false);
+    realMaterials.clear();
+    for(const texture of nativeGpuTextures)texture.dispose();
+    nativeGpuTextures.clear();tileSources.clear();
   }
   function sync() {
     if(!active||disposed)return;
@@ -87,7 +106,9 @@ export function createWorld(canvas:HTMLCanvasElement) {
       const mesh=new Mesh(x.key,scene);
       const vd=new VertexData();vd.positions=data.positions;vd.indices=data.indices;
       vd.normals=data.normals;vd.uvs=data.uvs;vd.applyToMesh(mesh,false);
-      mesh.material=mat;mesh.isPickable=true;mesh.freezeWorldMatrix();
+      const id=dominant(x.block);
+      mesh.material=realMaterials.get(id)??mat;
+      mesh.isPickable=true;mesh.freezeWorldMatrix();
       tiles.set(x.key,{mesh,c:data.center,seen:tick});
     }
   }
@@ -104,7 +125,7 @@ export function createWorld(canvas:HTMLCanvasElement) {
   const restored=()=>{sync();};canvas.addEventListener("webglcontextrestored",restored);
   return {
     engine,scene,camera,
-    stats:()=>({tiles:tiles.size,totalBlocks:blocks.length,region:refRegion,WebGL:engine.webGLVersion}),
+    stats:()=>({tiles:tiles.size,totalBlocks:blocks.length,nativeTextures:nativeGpuTextures.size,region:refRegion,WebGL:engine.webGLVersion}),
     async loadRegion(pack:PackReader,region:string,entry:RegionRow,signal?:AbortSignal) {
       const bundle=await pack.json<Bundle>(entry.bundlePublicPath,signal);
       if(disposed||signal?.aborted)return;
@@ -123,6 +144,39 @@ export function createWorld(canvas:HTMLCanvasElement) {
       camera.setTarget(new Vector3(cx,avg,cz));
       camera.radius=ios?530:750;
       active=true;sync();
+      // Native tile textures are read lazily and only after geometry can be
+      // displayed. GPU textures and material owners live for ONE map generation.
+      tileSources.clear();
+      for(const row of bundle.terrainTextures?.tileCatalog?.referencedTiles??[]) {
+        if(Number.isSafeInteger(row.textureId)&&row.imagePublicPath.startsWith("/assets/"))
+          tileSources.set(row.textureId,row.imagePublicPath);
+      }
+      const thisGeneration=textureGeneration;
+      void (async()=>{
+        const preferred=[...new Set(blocks.map(x=>dominant(x.block)))].filter(x=>tileSources.has(x)).slice(0,ios?8:16);
+        for(const id of preferred) {
+          if(signal?.aborted||disposed||thisGeneration!==textureGeneration)break;
+          try {
+            const image=await pack.read(tileSources.get(id)!,signal);
+            const decoded=decodeSroNativeTexture(image,ios);
+            if(signal?.aborted||disposed||thisGeneration!==textureGeneration)break;
+            // Do not retain raw NTX after the texture has been uploaded.
+            const texture=RawTexture.CreateRGBATexture(decoded.pixels,decoded.width,decoded.height,scene,false,false,Texture.BILINEAR_SAMPLINGMODE);
+            const material=new StandardMaterial("sro-native-tile-"+id,scene);
+            material.diffuseTexture=texture;material.specularColor=new Color3(0,0,0);
+            material.backFaceCulling=false;
+            nativeGpuTextures.add(texture);realMaterials.set(id,material);
+            for(const x of blocks){
+              if(dominant(x.block)===id) {
+                const mesh=tiles.get(x.key)?.mesh;
+                if(mesh)mesh.material=material;
+              }
+            }
+          }catch(error){
+            if(!signal?.aborted)console.warn("Optional native tile texture",id,error instanceof Error?error.message:"unavailable");
+          }
+        }
+      })();
       return {tiles:tiles.size,blocks:blocks.length,source:entry.bundlePublicPath};
     },
     move(direction:"left"|"right"|"forward"|"back", delta:number) {

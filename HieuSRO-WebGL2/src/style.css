@@ -1,0 +1,16 @@
+
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#f8fafc;background:#030712}
+*{box-sizing:border-box}html,body,#app{margin:0;width:100%;height:100%;overflow:hidden}
+#world{position:absolute;width:100%;height:100%;touch-action:none;outline:none}
+header{position:absolute;top:env(safe-area-inset-top);left:8px;right:8px;display:flex;justify-content:space-between;align-items:center;background:#101827c9;border:1px solid #57616a;border-radius:8px;padding:9px;pointer-events:none;gap:8px}
+header small{background:#294754;padding:3px 6px;border-radius:5px;color:#ade8ff;font-size:11px}#gpu{font-size:12px;color:#bdeaf5}
+#auth,#world-menu{position:absolute;left:10px;width:min(350px,calc(100vw - 20px));background:#121c29e8;border:1px solid #536274;border-radius:10px;padding:12px;backdrop-filter:blur(6px)}
+#auth{top:calc(env(safe-area-inset-top) + 58px);display:grid;grid-template-columns:1fr 1fr;gap:7px}
+#auth label:first-child,#auth label:nth-child(3),#auth button,#auth p{grid-column:1/-1}
+#world-menu{bottom:calc(env(safe-area-inset-bottom) + 78px)}label{display:block;font-size:12px;color:#cad7e7}
+input,select,button{font:inherit;min-height:39px;border:1px solid #557086;border-radius:6px;padding:7px;background:#1d2e40;color:#fff;width:100%}
+input{margin-top:3px}button{cursor:pointer;background:#285677}button:disabled{opacity:.45}p{margin:4px 0;font-size:12px;line-height:1.4;color:#c9d7e3}
+#status{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 7px);left:8px;right:8px;color:#e8edf4;text-align:center;background:#101827c9;padding:5px;border-radius:6px;font-size:11px;pointer-events:none}
+nav{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 18px);right:12px;display:grid;grid-template-columns:42px 42px;gap:5px}nav button{width:42px;min-height:42px;touch-action:none}
+@media (max-width:700px){#auth{width:min(265px,calc(100vw - 16px));top:calc(env(safe-area-inset-top) + 54px)}#world-menu{width:min(245px,calc(100vw - 16px));bottom:calc(env(safe-area-inset-bottom) + 44px)}nav{bottom:calc(env(safe-area-inset-bottom) + 44px)}#status{font-size:10px}header{padding:6px}}
+@media (orientation:portrait) and (max-width:700px){#auth{transform:scale(.9);transform-origin:top left}#world-menu{transform:scale(.9);transform-origin:bottom left} }

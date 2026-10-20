@@ -21,6 +21,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
+          npm run test
           node --check server.mjs
       - name: Verify no production URL, real terrain pipeline, and authenticated backend routes
         run: |

@@ -66,14 +66,41 @@ patch("runtime/assets/worker/loader.ts",[
 ])
 
 # Per-scene meshes and GPU work are capped; rescue mode goes further.
+# Propagate the main thread's interrupted-load rescue mode into the asset
+# worker. Workers do not have sessionStorage, and the message runs before reads.
+patch("runtime/assets/assets.ts",[
+    ('name: "sro-assets"\n\t} );',
+     'name: "sro-assets"\n\t} );\n'
+     '\tworker.postMessage( { kind: "hieusro-memory-mode", ultra: rescueMode() } );')
+])
+p=engine/"runtime/assets/assets.ts"
+p.write_text('import { rescueMode } from "@/engine/foundation/rendering/mobile-memory";\n'+p.read_text())
+patch("runtime/assets/worker/entry.ts",[
+    ('port.onmessage = event => loader.receive(event.data);',
+     'port.onmessage = event => {\n'
+     '\tconst control = event.data as unknown as { kind: string; ultra?: boolean };\n'
+     '\tif (control?.kind === "hieusro-memory-mode") { setWorkerRescueMode(control.ultra === true); return; }\n'
+     '\tloader.receive(event.data);\n'
+     '};')
+])
+p=engine/"runtime/assets/worker/entry.ts"
+p.write_text('import { setWorkerRescueMode } from "@/engine/foundation/rendering/mobile-memory";\n'+p.read_text())
+
+# Evaluate worker rescue at read-time, NOT module import-time.
 patch("runtime/assets/worker/world/resources/resources.ts",[
-    ('import type {', 'import type {') if False else
     ('const PARSED_REGION_LIMIT = 12;',
      f'import {{ rescueMode }} from "{M}";\n'
      'import { mobileLiteEnabled } from "@/engine/foundation/rendering/mobile-lite";\n'
-     'const PARSED_REGION_LIMIT = rescueMode() ? 2 : mobileLiteEnabled() ? 5 : 12;'),
+     'const PARSED_REGION_LIMIT = 12;'),
     ('const PARSED_MESH_LIMIT = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? 384 : 1024;',
-     'const PARSED_MESH_LIMIT = rescueMode() ? 160 : mobileLiteEnabled() ? 384 : 1024;'),
+     'const PARSED_MESH_LIMIT = 1024;'),
+    ('regions.get( path ) ?? parse<Region>( await read( path ) ),\n\t\t\tPARSED_REGION_LIMIT',
+     'regions.get( path ) ?? parse<Region>( await read( path ) ),\n'
+     '\t\t\trescueMode() ? 2 : mobileLiteEnabled() ? 5 : PARSED_REGION_LIMIT'),
+    ('return remember( regions, path, region, PARSED_REGION_LIMIT );',
+     'return remember( regions, path, region, rescueMode() ? 2 : mobileLiteEnabled() ? 5 : PARSED_REGION_LIMIT );'),
+    ('return remember( meshes, path, mesh, PARSED_MESH_LIMIT );',
+     'return remember( meshes, path, mesh, rescueMode() ? 160 : mobileLiteEnabled() ? 384 : PARSED_MESH_LIMIT );'),
     ('if ( !dx && !dz ) continue;',
      'if ( !dx && !dz ) continue;\n'
      '\t\t\t\t\tif ( mobileLiteEnabled() && (rescueMode() || Math.abs(dx) + Math.abs(dz) > 1) ) continue;')

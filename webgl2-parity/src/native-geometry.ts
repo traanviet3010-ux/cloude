@@ -1,0 +1,66 @@
+/*
+ * OpenSRO original Geometry contract admission for WebGL2.
+ * Does not create substitutes for unsupported native materials/animation:
+ * failing admission is required until the correct Silkroad draw path exists.
+ */
+import type { Geometry } from "@/engine/contracts/geometry";
+export interface GlNativeGeometry {
+  vertices:Float32Array; // pos3, normals3, uv2, color4
+  indices:Uint32Array;
+  transform:Float32Array;
+  vertexCount:number;
+  triangles:number;
+  byteSize:number;
+}
+const MAX_VERTICES=250_000, MAX_INDICES=900_000;
+const finite=(v:ArrayLike<number>)=>{
+  for(let i=0;i<v.length;i++)if(!Number.isFinite(v[i]))return false;
+  return true;
+};
+export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
+  const {positions,indices,uvs,normals,colors,transform}=source;
+  if(!(positions instanceof Float32Array)||!(indices instanceof Uint32Array)||
+    !(transform instanceof Float32Array)||transform.length!==16)
+    throw Error("Original SRO geometry has invalid array types");
+  const n=positions.length/3;
+  if(!Number.isInteger(n)||n<=0||n>MAX_VERTICES||
+    indices.length%3!==0||indices.length>MAX_INDICES||!indices.length)
+    throw Error("Original SRO geometry exceeds WebGL2 admission budget");
+  if(uvs&&uvs.length!==n*2 || normals&&normals.length!==n*3 ||
+    colors&&colors.length!==n*4 || !finite(positions)||
+    !finite(transform)||(uvs&&!finite(uvs))||(normals&&!finite(normals))||
+    (colors&&!finite(colors)))throw Error("Original geometry stream malformed");
+  for(let k=0;k<indices.length;k++)if(indices[k]!>=n)
+    throw Error("Original geometry index outside admitted vertex buffer");
+  if(source.joints||source.weights||source.bones||source.cloth)
+    throw Error("SRO skeleton/cloth cannot be silently drawn as static geometry");
+  if(source.instances&&source.instances.length>16)
+    throw Error("Original scenery instancing requires true WebGL2 instance backend");
+  const mat=source.material;
+  if(mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
+     mat?.water||mat?.sky||mat?.colorTimeline||mat?.textureFactorPulse||
+     mat?.environmentReflection||mat?.deferredParticle||mat?.blendPair||
+     mat?.fog||mat?.groundDecal||mat?.objectFade||mat?.instanceFade)
+    throw Error("Original material requires native staged WebGL2 shader parity");
+  // Only the minimal unlit vertex format is admitted for the first real draw.
+  // Authored geometry values are preserved without scaling or triangulation.
+  const data=new Float32Array(n*12);
+  for(let i=0;i<n;i++){
+    const o=i*12;
+    data[o]=positions[i*3]!;
+    data[o+1]=positions[i*3+1]!;
+    data[o+2]=positions[i*3+2]!;
+    data[o+3]=normals?.[i*3]??0;
+    data[o+4]=normals?.[i*3+1]??1;
+    data[o+5]=normals?.[i*3+2]??0;
+    data[o+6]=uvs?.[i*2]??0;
+    data[o+7]=uvs?.[i*2+1]??0;
+    data[o+8]=colors?.[i*4]??1;
+    data[o+9]=colors?.[i*4+1]??1;
+    data[o+10]=colors?.[i*4+2]??1;
+    data[o+11]=colors?.[i*4+3]??1;
+  }
+  return {vertices:data,indices:indices.slice(),transform:transform.slice(),
+    vertexCount:n,triangles:indices.length/3,
+    byteSize:data.byteLength+indices.byteLength+transform.byteLength};
+}

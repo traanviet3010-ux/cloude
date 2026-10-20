@@ -1,0 +1,63 @@
+name: HieuSRO OpenSRO Asset Inventory Read Only
+on:
+  push:
+    paths:
+      - .github/workflows/hieusro-opensro-assets-inventory.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: List remote asset manifest without downloading packs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, urllib.request, collections
+          targets = [
+              'https://opensro.online/assets/packs/manifest.json',
+              'https://hieusro-icons-preview-20261019.onrender.com/assets/packs/manifest.json'
+          ]
+          for url in targets:
+              print('BEGIN_SITE',url,flush=True)
+              try:
+                  req=urllib.request.Request(url,headers={'User-Agent':'HieuSRO-Audit-ReadOnly/1.0','Cache-Control':'no-cache'})
+                  with urllib.request.urlopen(req,timeout=35) as r:
+                      raw=r.read(20_000_000)
+                      print('HTTP_STATUS',r.status,'BYTES_MANIFEST',len(raw),'CONTENT_TYPE',r.headers.get('content-type'),flush=True)
+                  data=json.loads(raw)
+                  print('MANIFEST_ROOT',type(data).__name__, list(data.keys())[:30] if isinstance(data,dict) else 'array',flush=True)
+                  p=data.get('packs',[]) if isinstance(data,dict) else data
+                  if isinstance(p,dict):p=list(p.values())
+                  if not isinstance(p,list):print('INVALID_PACK_LIST',str(type(p)));continue
+                  categories=collections.defaultdict(lambda: {'packs':0,'bytes':0,'members':0,'start':0,'lazy':0,'manual':0,'samples':[]})
+                  all_paths=[]
+                  for item in p:
+                      if not isinstance(item,dict):continue
+                      path=str(item.get('path',''))
+                      name=path.split('/')[-1]
+                      # Example game-models-010-SHA.bin -> game-models
+                      import re
+                      grp=re.sub(r'-[0-9]{3}-[a-f0-9]+\.bin$', '',name)
+                      if grp==name:grp=str(item.get('group') or name)
+                      b=int(item.get('bytes') or item.get('size') or 0)
+                      cat=categories[grp]
+                      cat['packs']+=1; cat['bytes']+=b; cat['members']+=len(item.get('entries') or [])
+                      typ=str(item.get('load',''))
+                      if typ in ('startup','lazy','manual'):cat[{'startup':'start','lazy':'lazy','manual':'manual'}[typ]]+=1
+                      if len(cat['samples'])<3:cat['samples'].append(name)
+                      all_paths.append(path)
+                  print('ASSET_TOTAL_PACKS',sum(v['packs'] for v in categories.values()))
+                  print('ASSET_TOTAL_BYTES',sum(v['bytes'] for v in categories.values()))
+                  print('ASSET_TOTAL_MEMBERS',sum(v['members'] for v in categories.values()))
+                  print('ASSET_GROUPS_COUNT',len(categories))
+                  for grp,v in sorted(categories.items(), key=lambda p:-p[1]['bytes']):
+                      print('GROUP',json.dumps({'name':grp,**v},ensure_ascii=False),flush=True)
+                  print('SAMPLE_PATHS',json.dumps(all_paths[:25],ensure_ascii=False),flush=True)
+              except Exception as exc:
+                  print('FETCH_FAILED',type(exc).__name__,str(exc)[:500],flush=True)
+              print('END_SITE',url,flush=True)
+          PY

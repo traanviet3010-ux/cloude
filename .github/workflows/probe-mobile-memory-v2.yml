@@ -1,4 +1,5 @@
 name: Probe Render HieuSRO Mobile Lite V2 TEST
+# Post-deploy smoke after 4-minute Render cold-start retry hotfix.
 # Post-deploy verification after aligning worker and host request capacities.
 on:
   push:

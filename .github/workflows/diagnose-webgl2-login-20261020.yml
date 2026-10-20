@@ -1,0 +1,46 @@
+name: Diagnose Babylon WebGL2 TEST server readiness
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/diagnose-webgl2-login-20261020.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Compare Render backend and WebGL2 gateway without credentials
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,json,time,concurrent.futures
+          targets={
+            'webgl2':'https://hieusro-babylon-webgl2-test.onrender.com',
+            'backend':'https://hieusro-icons-srweb-stage-20261020.onrender.com',
+          }
+          paths=['/__webgl2/health','/healthz','/readyz','/api/title/servers','/api/title/session']
+          def check(task):
+            name,path=task
+            start=time.monotonic()
+            req=urllib.request.Request(targets[name]+path,headers={'Accept-Encoding':'identity','X-OpenSRO-Protocol':'6'},method='GET')
+            try:
+              with urllib.request.urlopen(req,timeout=32) as r:
+                data=r.read(2048)
+                typ=r.headers.get('Content-Type','')
+                valid='json' if typ.lower().startswith('application/json') else typ
+                servers='unknown'
+                if path.endswith('/servers'):
+                  try:
+                    parsed=json.loads(data)
+                    servers='count='+str(len(parsed))+' names='+str([x.get('name') for x in parsed if isinstance(x,dict)])
+                  except Exception: servers='invalid_JSON'
+                return name,path,r.status,round(time.monotonic()-start,1),valid,servers
+            except urllib.error.HTTPError as e:
+              return name,path,e.code,round(time.monotonic()-start,1),e.headers.get('Content-Type',''),'-'
+            except Exception as e:
+              return name,path,type(e).__name__,round(time.monotonic()-start,1),str(e)[:70],'-'
+          with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
+            for v in ex.map(check,[(name,path) for name in targets for path in paths]):
+              print('ROUTE_CHECK',*v,sep=' | ',flush=True)
+          print('DIAGNOSTIC_DONE=1',flush=True)
+          PY

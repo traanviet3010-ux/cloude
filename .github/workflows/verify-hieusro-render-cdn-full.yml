@@ -1,0 +1,75 @@
+name: Verify full HieuSRO Render CDN after publish
+
+on:
+  push:
+    branches:
+      - hieusro-render-asset-cdn-test-20261020
+    paths:
+      - '.github/workflows/verify-hieusro-render-cdn-full.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'traanviet3010-ux/cloude'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Verify full manifest, all published pack HEADs, and HTTP Range
+        env:
+          BASE_URL: https://hieusro-assets-cdn-test-20261020.onrender.com
+          TEST_ORIGIN: https://hieusro-mobile-lite-20261020.onrender.com
+        run: |
+          python3 - <<'PY'
+          import concurrent.futures, hashlib, json, os, urllib.request
+          from collections import defaultdict
+          root=os.environ['BASE_URL']; origin=os.environ['TEST_ORIGIN']
+          def fetch(path,headers=None,method='GET'):
+              hdr={'Accept-Encoding':'identity',**(headers or {})}
+              req=urllib.request.Request(root+path,headers=hdr,method=method)
+              with urllib.request.urlopen(req,timeout=40) as resp:
+                  return resp.status,{k.lower():v for k,v in resp.headers.items()},resp.read()
+          s,h,body=fetch('/mirror-status.json')
+          status=json.loads(body)
+          assert s==200 and status['phase']=='full' and status['ready_for_client'] is True
+          print('PUBLISHED_PHASE=full')
+          s,h,raw=fetch('/assets/packs/manifest.json')
+          assert s==200 and hashlib.sha256(raw).hexdigest()==status['manifest_sha256']
+          manifest=json.loads(raw)
+          packs=[(g['name'],p) for g in manifest['groups'] for p in g['packs']]
+          assert len(manifest['groups'])==17 and len(packs)==213 and len(manifest['assets'])==36843
+          assert sum(p['bytes'] for _,p in packs)==2043607811
+          print('MANIFEST_SHA256_OK=1 PACKS=213 ASSETS=36843')
+          def check_pack(entry):
+              group,p=entry
+              status,headers,_=fetch(p['path'],method='HEAD')
+              if status!=200: raise AssertionError(f'HEAD failed {p["path"]}: {status}')
+              length=headers.get('content-length')
+              if length is not None and int(length)!=p['bytes']:
+                  raise AssertionError(f'Wrong CDN Content-Length {p["path"]}: {length}')
+              return group
+          with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+              groups=list(pool.map(check_pack,packs))
+          print('CDN_PACK_HEAD_OK='+str(len(groups)))
+          chosen={}
+          for g,p in packs:
+              if g not in chosen or p['bytes']>chosen[g]['bytes']: chosen[g]=p
+          assert len(chosen)==17
+          for g,p in sorted(chosen.items()):
+              end=min(31,p['bytes']-1)
+              code,headers,data=fetch(p['path'],{'Range':f'bytes=0-{end}','Origin':origin})
+              assert code==206, (g,code)
+              assert headers.get('content-range')==f'bytes 0-{end}/{p["bytes"]}',(g,headers)
+              assert data[:8]==b'SROPACK2' and len(data)==end+1,g
+              assert headers.get('content-encoding') in (None,'identity'),g
+              # Preserve CORS status as a diagnostic; it is a separate Safari gate.
+              print('RANGE_OK',g,'bytes',p['bytes'],'cors',headers.get('access-control-allow-origin','MISSING'))
+          largest=max((p for _,p in packs),key=lambda p:p['bytes'])
+          start=max(0,largest['bytes']//2)
+          code,headers,block=fetch(largest['path'],{'Range':f'bytes={start}-{start+1023}'})
+          assert code==206 and len(block)==1024
+          assert headers.get('content-range')==f'bytes {start}-{start+1023}/{largest["bytes"]}'
+          print('MIDDLE_RANGE_206_OK=1')
+          print('FULL_CDN_PUBLISHED_OK=1')
+          PY

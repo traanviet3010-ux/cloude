@@ -1,0 +1,33 @@
+name: Check Mobile V2 backend upstream directly
+on:
+  push:
+    branches: [hieusro-mobile-memory-v2-test-20261020]
+    paths: ['.github/workflows/check-mobile-v2-backend-direct.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Compare direct Preview TEST and Mobile V2 title API (no credentials)
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,time
+          hosts={
+            'preview-direct':'https://hieusro-icons-preview-20261019.onrender.com',
+            'v2-proxy':'https://hieusro-mobile-lite-v2-memory-test.onrender.com',
+          }
+          for name,base in hosts.items():
+            for path in ['/readyz','/api/title/servers','/auto-policy.json']:
+              started=time.monotonic()
+              try:
+                req=urllib.request.Request(base+path,headers={'X-OpenSRO-Protocol':'6','Accept-Encoding':'identity'})
+                with urllib.request.urlopen(req,timeout=35) as resp:
+                  body=resp.read(512)
+                  print('BACKEND_CHECK',name,path,resp.status,'elapsed_sec',round(time.monotonic()-started,1),'body_prefix',body[:90].hex(),flush=True)
+              except urllib.error.HTTPError as exc:
+                print('BACKEND_CHECK',name,path,exc.code,'elapsed_sec',round(time.monotonic()-started,1),flush=True)
+              except Exception as exc:
+                print('BACKEND_CHECK',name,path,'FAILED',type(exc).__name__,'elapsed_sec',round(time.monotonic()-started,1),flush=True)
+          PY

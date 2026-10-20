@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#080c12">
+  <title>HieuSRO 1.150 · WebGL2 TEST</title>
+</head>
+<body>
+<div id="app" data-screen="login">
+  <canvas id="world" aria-label="HieuSRO Silkroad world Babylon WebGL2"></canvas>
+  <div id="title-curtain" aria-hidden="true"></div>
+  <header id="test-header"><b>HieuSRO <small>v1.150 · WebGL2 TEST</small></b><div id="gpu">Đang kiểm tra GPU</div></header>
+  <img id="native-title-border" class="native-title-border" alt="" hidden>
+  <section id="auth" aria-label="Silkroad đăng nhập và nhân vật">
+    <div id="login-view">
+      <div class="retail-brand">
+        <img id="native-logo" class="native-logo" alt="Silkroad Online" hidden>
+        <span class="brand-fallback">SILKROAD <small>HieuSRO · TEST</small></span>
+      </div>
+      <div class="retail-login-window">
+        <img id="native-login-window" class="native-login-window" alt="" hidden>
+        <div class="retail-fields">
+          <label for="account">ID <input id="account" autocomplete="username" maxlength="256" placeholder="Tài khoản TEST"></label>
+          <label for="password">PW <input id="password" type="password" autocomplete="current-password" placeholder="Mật khẩu"></label>
+          <label for="server">Máy chủ <select id="server"><option value="">Đang kiểm tra máy chủ TEST…</option></select></label>
+        </div>
+      </div>
+      <div class="retail-login-actions">
+        <button id="login" disabled type="button">Đăng nhập</button>
+        <button id="reconnect" type="button">Kiểm tra server</button>
+        <span id="server-picker-art" aria-hidden="true"></span>
+      </div>
+      <p id="auth-state" role="status" aria-live="polite">Đang kiểm tra backend TEST…</p>
+      <p class="test-disclaimer">TEST độc lập · Không dùng tài khoản LIVE</p>
+    </div>
+    <div id="character-panel" hidden>
+      <div class="dock-heading"><img id="native-start-art" alt="" hidden><h2>CHỌN NHÂN VẬT</h2></div>
+      <p id="roster-state" role="status">Đang lấy danh sách nhân vật…</p>
+      <ul id="roster-list" aria-label="Danh sách nhân vật"></ul>
+      <p id="world-admission-state" role="status">Chọn nhân vật để xác thực với GameWorld TEST; chế độ chiến đấu vẫn đang được chuyển sang WebGL2.</p>
+      <button id="refresh-roster" type="button">Làm mới danh sách nhân vật</button>
+      <details id="character-creator">
+        <summary>Tạo nhân vật trên GameWorld TEST</summary>
+        <label>Tên nhân vật <input id="character-name" autocomplete="off" maxlength="12" placeholder="2–12 ký tự Latin/số"></label>
+        <label>Chủng tộc <select id="character-race"><option value="CH">Trung Hoa</option><option value="EU">Châu Âu</option></select></label>
+        <label>Giới tính <select id="character-gender"><option value="MAN">Nam</option><option value="WOMAN">Nữ</option></select></label>
+        <p>Dữ liệu nhân vật tạo trên backend TEST, không thuộc LIVE.</p>
+        <button id="create-character" type="button">Xác nhận tạo nhân vật</button>
+        <p id="creation-state" role="status"></p>
+      </details>
+      <button id="preview-map" type="button">Xem địa hình TEST (chưa phải gameplay)</button>
+      <button id="back-to-title" type="button">Quay về màn hình đăng nhập</button>
+    </div>
+  </section>
+  <section id="world-menu" hidden>
+    <label>Vùng bản đồ Silkroad <select id="region"><option>Đang nạp danh mục vùng…</option></select></label>
+    <button id="load-region" type="button">Tải bản đồ thật</button>
+    <button id="world-back" type="button">Trở về chọn nhân vật</button>
+    <p id="asset-state" role="status">Chưa yêu cầu tải bản đồ</p>
+  </section>
+  <nav id="world-controls" hidden aria-label="Điều khiển camera bản đồ TEST">
+    <button id="left" type="button" aria-label="Xoay trái">◀</button>
+    <button id="forward" type="button" aria-label="Camera tiến">▲</button>
+    <button id="back" type="button" aria-label="Camera lùi">▼</button>
+    <button id="right" type="button" aria-label="Xoay phải">▶</button>
+  </nav>
+  <div id="status" role="status">HieuSRO v1.150 · Babylon WebGL2 · backend TEST độc lập.</div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body></html>

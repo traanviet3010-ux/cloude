@@ -1,0 +1,72 @@
+name: HieuSRO Babylon native login browser smoke
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/webgl2-native-login-browser.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-login:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Install Babylon browser and verify production build
+        working-directory: HieuSRO-WebGL2
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          npm run test
+          npm install --no-save playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Run local built client against READ-ONLY genuine TEST asset CDN
+        working-directory: HieuSRO-WebGL2
+        env:
+          PORT: '10000'
+        run: |
+          npm start > /tmp/webgl2-title.log 2>&1 &
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright';
+          const browser=await chromium.launch({headless:true,args:[
+            '--enable-webgl','--use-gl=angle','--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader','--disable-dev-shm-usage'
+          ]});
+          const page=await browser.newPage({
+            viewport:{width:844,height:390},deviceScaleFactor:3,isMobile:true,hasTouch:true,
+            userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+          });
+          const errors=[];page.on('pageerror',e=>errors.push(e.message));
+          try{
+            await page.goto('http://127.0.0.1:10000/',{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForFunction(()=>Number(document.documentElement.dataset.titleArt||0)>=4,{timeout:115000});
+            const state=await page.evaluate(()=>{
+              const logo=document.querySelector('#native-logo');
+              const login=document.querySelector('#native-login-window');
+              const map=document.querySelector('#world-menu');
+              const app=document.querySelector('#app');
+              const auth=document.querySelector('#auth').getBoundingClientRect();
+              return {
+                native:Number(document.documentElement.dataset.titleArt),
+                logo:logo?.getAttribute('src')?.startsWith('blob:'),
+                window:login?.getAttribute('src')?.startsWith('blob:'),
+                screen:app?.dataset.screen,
+                mapHidden:map?.hidden,
+                loginVisible:!document.querySelector('#login').hidden,
+                auth:{x:auth.x,y:auth.y,width:auth.width,height:auth.height}
+              };
+            });
+            if(!state.logo||!state.window||state.screen!=='login'||!state.mapHidden||
+              state.auth.width<250||state.auth.height<150)throw Error('Native title client layout or asset not ready: '+JSON.stringify(state));
+            await page.screenshot({path:'hieusro-native-title-landscape-iphone.png',fullPage:true});
+            console.log('GENUINE_CIF_TITLE_UI_BROWSER_OK=1',JSON.stringify(state));
+            if(errors.length)throw Error('Page errors: '+JSON.stringify(errors.slice(0,5)));
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: hieusro-native-title-iphone-browser
+          path: HieuSRO-WebGL2/hieusro-native-title-landscape-iphone.png
+          retention-days: 5

@@ -1,0 +1,103 @@
+name: Probe HieuSRO Babylon WebGL2 Render TEST
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/probe-hieusro-webgl2.yml']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Verify WebGL2 static shell, title API and genuine iSRO terrain bytes
+        run: |
+          python3 - <<'PY'
+          import json,gzip,hashlib,time,urllib.request,urllib.error
+          from html.parser import HTMLParser
+          origin='https://hieusro-babylon-webgl2-test.onrender.com'
+          def get(path,offset=None,length=None,timeout=45):
+            hdr={'Accept-Encoding':'identity'}
+            if offset is not None:hdr['Range']=f'bytes={offset}-{offset+length-1}'
+            request=urllib.request.Request(origin+path,headers=hdr)
+            with urllib.request.urlopen(request,timeout=timeout) as r:
+              body=r.read(28*1024*1024)
+              if offset is not None:
+                assert r.status==206,(path,r.status)
+                assert len(body)==length,(path,len(body),length)
+                assert r.headers.get('Content-Range','').startswith(f'bytes {offset}-{offset+length-1}/')
+              return r.status,dict(r.headers),body
+          for i in range(24):
+            try:
+              s,h,body=get('/__webgl2/health',timeout=10)
+              if s==200:break
+            except Exception as e:
+              print('WAIT_WEBGL2',i+1,type(e).__name__,flush=True)
+              time.sleep(5)
+          else:raise AssertionError('New Render WebGL2 service did not boot')
+          health=json.loads(body)
+          assert 'WebGL2' in health['renderer']
+          print('WEBGL2_SERVICE_READY=1')
+          s,h,html=get('/')
+          assert s==200 and b'<html' in html.lower()
+          print('WEBGL2_HTML_OK=1')
+          class Parser(HTMLParser):
+            def __init__(self):super().__init__();self.js=[]
+            def handle_starttag(self,tag,attrs):
+              if tag=='script':
+                self.js.extend(v for k,v in attrs if k=='src' and v.endswith('.js'))
+          p=Parser();p.feed(html.decode())
+          assert p.js
+          path=p.js[0].removeprefix('.')
+          s,h,js=get(path)
+          assert s==200 and len(js)>50000
+          assert b'WebGL2' in js or b'WebGL' in js
+          print('BABYLON_CLIENT_JS_OK=1',len(js))
+          s,h,raw=get('/assets/packs/manifest.json')
+          m=json.loads(raw)
+          allpacks=[p for g in m['groups'] for p in g['packs']]
+          assert len(m['groups'])==17 and len(allpacks)==213 and len(m['assets'])==36843
+          lookup={row['path'].lower():row for row in m['assets']}
+          def member(path):
+            entry=lookup.get(path.lower()) or lookup.get(path.lower()+'.gz')
+            assert entry,('Missing pack member',path)
+            p=entry['packPath']
+            s,h,head=get(p,0,12)
+            assert head[:8]==b'SROPACK2'
+            hlen=int.from_bytes(head[8:12],'little')
+            assert 0<hlen<=12*1024*1024
+            s,h,header=get(p,12,hlen)
+            meta=json.loads(header)
+            assert meta['format']=='sro-asset-pack' and meta['version']==2
+            start=12+hlen+entry['offset']
+            span=entry.get('stored',{}).get('length',entry['length'])
+            s,h,payload=get(p,start,span)
+            if entry.get('stored'):payload=gzip.decompress(payload)
+            assert len(payload)==entry['length']
+            assert hashlib.sha256(payload).hexdigest()==entry['sha256']
+            if entry['path'].lower().endswith('.gz'):payload=gzip.decompress(payload)
+            return json.loads(payload)
+          catalog=member('/assets/world/world-region-catalog.json')
+          rows=[(key,next((v for v in values if v.get('source')=='mission-outdoor-global' or v.get('area')=='outdoor'),None)) for key,values in catalog['regionsById'].items()]
+          choices=[(key,item) for key,item in rows if item]
+          assert choices,'No real mission outdoor regions'
+          key,row=choices[0]
+          bundle=member(row['bundlePublicPath'])
+          sectors=bundle['terrain'].get('sectors') or [{'blocks':bundle['terrain'].get('blocks',[])}]
+          valid=[b for s in sectors for b in s['blocks'] if len(b.get('heights',[]))==289]
+          assert valid,('Terrain has no real 17x17 SRO height cells',key)
+          print('VERIFIED_REAL_TERRAIN=1',key,'cell_count',len(valid))
+          tiles=bundle.get('terrainTextures',{}).get('tileCatalog',{}).get('referencedTiles',[])
+          placements=bundle.get('objects',{}).get('placements',[])
+          resources=bundle.get('objects',{}).get('resources',{})
+          print('REAL_REGION_RESOURCE_SHAPE', 'tile_count',len(tiles),'sample_tiles',[(t.get('textureId'),t.get('imagePublicPath','')[-70:]) for t in tiles[:4]],'placements',len(placements),'embedded_meshes',len(resources.get('meshes',[])),'bsr',len(resources.get('bsr',[])),'resources_index',bundle.get('objects',{}).get('resourceIndexPublicPath'),flush=True)
+
+          try:
+            s,h,api=get('/api/title/servers',timeout=18)
+            servers=json.loads(api)
+            assert s==200 and any(x.get('name')=='HieuSRO' for x in servers)
+            print('WEBGL2_BACKEND_TITLE_OK=1')
+          except Exception as e:
+            print('WEBGL2_BACKEND_NOT_READY',type(e).__name__,str(e)[:80])
+          print('WEBGL2_EXTERNAL_SMOKE_OK=1')
+          PY

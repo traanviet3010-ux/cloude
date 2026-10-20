@@ -1,0 +1,44 @@
+name: Diagnose Babylon GameWorld TEST bootstrap
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/diagnose-webgl2-backend-readiness.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Read-only TEST endpoint timing and status (never send credentials)
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,time,json,concurrent.futures
+          targets={
+            'webgl2':'https://hieusro-babylon-webgl2-test.onrender.com',
+            'isolated-backend':'https://hieusro-icons-srweb-stage-20261020.onrender.com',
+          }
+          paths={
+            'webgl2':['/__webgl2/health','/api/title/servers','/healthz'],
+            'isolated-backend':['/healthz','/readyz','/api/title/servers','/title/servers'],
+          }
+          def probe(pair):
+            name,path=pair; t=time.monotonic()
+            headers={'X-OpenSRO-Protocol':'6','Accept':'application/json','Accept-Encoding':'identity'}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(targets[name]+path,headers=headers),timeout=18) as res:
+                body=res.read(50000); status=res.status;ct=res.headers.get('Content-Type','')
+                snippet=''
+                if path.endswith('/servers') and body:
+                  try:
+                    o=json.loads(body);snippet='server-count='+str(len(o))+':'+str([i.get('name') for i in o if isinstance(i,dict)])[:80]
+                  except:snippet='non-json'
+                return (name,path,status,round(time.monotonic()-t,2),ct,snippet)
+            except urllib.error.HTTPError as e:return(name,path,e.code,round(time.monotonic()-t,2),e.headers.get('Content-Type',''),str(e.read(100)[:100]))
+            except Exception as e:return(name,path,type(e).__name__,round(time.monotonic()-t,2),str(e)[:100],'')
+          jobs=[(name,p) for name in paths for p in paths[name]]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=7) as pool:
+            for i in pool.map(probe,jobs):print('TEST_READ_ONLY_ROUTE',*i,sep=' | ',flush=True)
+          print('TEST_READINESS_DIAGNOSTIC_COMPLETE=1')
+          PY

@@ -1,0 +1,47 @@
+name: Verify Babylon GameWorld TEST Render deployment
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/verify-webgl2-gameworld-test-render.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Check public TEST health, roster UI, and deployed native admission bundle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request, time, re, json
+          origin='https://hieusro-babylon-webgl2-test.onrender.com'
+          def get(path):
+              req=urllib.request.Request(origin+path,headers={'Accept-Encoding':'identity'})
+              with urllib.request.urlopen(req,timeout=22) as res:
+                  return res.status,res.headers,res.read(8_000_000)
+          last=None
+          for attempt in range(24):
+              try:
+                  code,headers,health=get('/__webgl2/health')
+                  assert code==200 and json.loads(health)['renderer']=='Babylon.js WebGL2'
+                  code,headers,html=get('/')
+                  assert code==200 and b'id="world-admission-state"' in html
+                  src=re.search(rb'<script[^>]+src="([^"]+\.js)"',html)
+                  assert src, 'missing built Vite JS'
+                  path=src.group(1).decode()
+                  if not path.startswith('/'):path='/'+path
+                  code,headers,js=get(path)
+                  assert code==200
+                  assert b'GameWorld' in js and b'/api/auth/' in js and b'transport/ws' in js
+                  print('PUBLIC_RENDER_WEBGL2_GAMEWORLD_UI_DEPLOYED=1')
+                  print('PUBLIC_RENDER_WEBGL2_AUTH_PROTOCOL_BUNDLE_DEPLOYED=1')
+                  print('HEALTH_200=1 JS_BYTES=',len(js))
+                  break
+              except Exception as exc:
+                  last=repr(exc)
+                  if attempt%4==0:print('RENDER_TEST_WAIT',attempt+1,last[:150],flush=True)
+                  time.sleep(9)
+          else:raise AssertionError('Render TEST missing updated GameWorld admission UI or unavailable: '+str(last))
+          PY

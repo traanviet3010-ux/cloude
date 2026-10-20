@@ -1,0 +1,66 @@
+name: Verify authentic Silkroad title CIF images in TEST packs
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/verify-native-title-cif-test.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-assets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate SROPACK2 title layout and real PNG assets (read-only CDN TEST)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json,hashlib,gzip
+          base='https://hieusro-babylon-webgl2-test.onrender.com'
+          def get(path,start=None,n=None):
+            h={'Accept-Encoding':'identity'}
+            if start is not None:h['Range']=f'bytes={start}-{start+n-1}'
+            with urllib.request.urlopen(urllib.request.Request(base+path,headers=h),timeout=40) as r:
+              body=r.read(28*1024*1024)
+              if start is not None:
+                assert r.status==206,(path,r.status)
+                assert len(body)==n,(len(body),n)
+              return body
+          manifest=json.loads(get('/assets/packs/manifest.json'))
+          lookup={row['path'].lower():row for row in manifest['assets']}
+          headers={}
+          def asset(path):
+            row=lookup.get(path.lower()) or lookup.get(path.lower()+'.gz')
+            if row is None:raise AssertionError('MISSING_NATIVE_PACK_ASSET '+path)
+            pack=row['packPath']
+            if pack not in headers:
+              raw=get(pack,0,12)
+              assert raw[:8]==b'SROPACK2'
+              length=int.from_bytes(raw[8:12],'little')
+              assert 0<length<12*1024*1024
+              header=json.loads(get(pack,12,length))
+              assert header['version']==2
+              headers[pack]=12+length
+            start=headers[pack]+row['offset']
+            packed=get(pack,start,row.get('stored',{}).get('length',row['length']))
+            value=gzip.decompress(packed) if row.get('stored') else packed
+            assert len(value)==row['length']
+            assert hashlib.sha256(value).hexdigest()==row['sha256']
+            if row['path'].lower().endswith('.gz'):value=gzip.decompress(value)
+            return value
+          title=json.loads(asset('/assets/cif/layouts/pstitle.json'))['controlsByName']
+          dock=json.loads(asset('/assets/cif/layouts/pscharacterselect_europe.json'))['controlsByName']
+          mandatory=['GDR_STA_LOGO','GDR_STA_LOGINWINDOW','GDR_BTN_OK','GDR_BTN_SERVER']
+          found=0
+          for key in mandatory:
+            node=title.get(key)
+            assert node,('MISSING_CIF_NODE',key)
+            image=node.get('ddj',{}).get('publicPath')
+            assert image and image.startswith('/assets/images/') and image.endswith('.png'),(key,image)
+            data=asset(image)
+            assert data[:8]==b'\x89PNG\r\n\x1a\n',(key,image,data[:8])
+            found+=1
+            print('SRO_NATIVE_UI_IMAGE_OK',key,image,len(data),flush=True)
+          print('SRO_NATIVE_CIF_TITLE_RESOURCES_OK',found,flush=True)
+          print('DOCK_START_NODE',str(dock.get('GDR_BTN_START',{}).get('ddj',{}).get('publicPath'))[:150],flush=True)
+          PY

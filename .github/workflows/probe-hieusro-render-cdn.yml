@@ -26,7 +26,7 @@ jobs:
           def get(url, headers=None):
               req=urllib.request.Request(url, headers={**{'Accept-Encoding':'identity'}, **(headers or {})})
               with urllib.request.urlopen(req,timeout=30) as resp:
-                  return resp.status, dict(resp.headers), resp.read()
+                  return resp.status, {k.lower():v for k,v in resp.headers.items()}, resp.read()
           status,_,body=get(root+'/mirror-status.json')
           assert status==200, f'status JSON HTTP {status}'
           data=json.loads(body)
@@ -36,13 +36,13 @@ jobs:
           assert re.fullmatch(r'/assets/packs/[A-Za-z0-9_./-]+\.bin',p)
           s,h,b=get(root+p,{'Range':'bytes=0-15'})
           print('RANGE_STATUS='+str(s))
-          print('RANGE_CONTENT_RANGE='+str(h.get('Content-Range')))
-          print('RANGE_CONTENT_ENCODING='+str(h.get('Content-Encoding')))
+          print('RANGE_CONTENT_RANGE='+str(h.get('content-range')))
+          print('RANGE_CONTENT_ENCODING='+str(h.get('content-encoding')))
           print('RANGE_BODY_LENGTH='+str(len(b)))
           if s!=206: raise AssertionError('Render CDN does not support required 206 byte ranges')
-          assert h.get('Content-Range')==f"bytes 0-15/{data['sample_bytes']}"
+          assert h.get('content-range')==f"bytes 0-15/{data['sample_bytes']}"
           assert len(b)==16 and b[:8]==b'SROPACK2',repr(b)
-          assert h.get('Content-Encoding') in (None,'identity'), 'Unexpected encoding'
+          assert h.get('content-encoding') in (None,'identity'), 'Unexpected encoding'
           print('RANGE_206_OK=1')
           try:
               missing,_,_=get(root+'/assets/packs/manifest.json')

@@ -129,6 +129,7 @@ export class OriginalWorldWebgl2 {
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original World WebGL2 draw failed");
    return {triangleCount:triangles,geometryCount:sceneIds.length,residentMB:this.used/1048576};
  }
+ glContext():WebGL2RenderingContext {this.validate();return this.gl;}
  dispose(){
    if(this.disposed)return;
    this.disposed=true;this.canvas.removeEventListener("webglcontextlost",this.lostHandler);

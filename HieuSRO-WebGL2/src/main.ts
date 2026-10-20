@@ -1,6 +1,8 @@
 import "./style.css";
 import { createPackReader, type RegionCatalog } from "./pack";
 import { createWorld } from "./world";
+import { requestBackend, BackendError } from "./backend";
+import { fetchRoster, createNativeCharacter, type CreateOptions } from "./characters";
 
 const $=<T extends HTMLElement>(name:string)=>document.getElementById(name) as T;
 const canvas=$<HTMLCanvasElement>("world"),authState=$("auth-state"),assetState=$("asset-state"),status=$("status");
@@ -8,6 +10,8 @@ const reader=createPackReader();
 let world:ReturnType<typeof createWorld>|null=null;
 let controller:AbortController|null=null;
 let token:string|null=null;
+let activeDivision:string|null=null;
+let rosterBusy=false;
 function explain(error:unknown) {return error instanceof Error?error.message:String(error);}
 function text(el:HTMLElement,message:string) {el.textContent=message;}
 function abortScene(){controller?.abort();controller=new AbortController();}
@@ -21,16 +25,10 @@ try {
 }
 type ServerRow={id?:string;name?:string;operating?:boolean;status?:string};
 let regions=new Map<string,{area?:string;source?:string;bundlePublicPath:string}>();
-async function request<T>(path:string,body?:object):Promise<T> {
-  const response=await fetch(path,{
-    method:body?"POST":"GET",credentials:"include",redirect:"error",cache:"no-store",
-    headers:{"X-OpenSRO-Protocol":"6",...(body?{"Content-Type":"application/json"}:{})},
-    ...(body?{body:JSON.stringify(body)}:{})
-  });
-  const data=await response.json() as T;
-  if(!response.ok)throw Error("API "+response.status+" — "+path);
-  return data;
+async function request<T>(path:string,body?:object,signal?:AbortSignal):Promise<T> {
+  return requestBackend<T>(path,body,signal);
 }
+
 let serverLoop:AbortController|null=null;
 function delay(ms:number,signal:AbortSignal):Promise<void> {
   return new Promise((resolve,reject)=>{
@@ -46,10 +44,10 @@ async function servers() {
   const select=$<HTMLSelectElement>("server");
   const button=$<HTMLButtonElement>("login");button.disabled=true;
   select.replaceChildren(new Option("Đang chờ GameWorld khởi động…",""));
-  for(let n=0;n<20;n++){
+  for(let n=0;n<48;n++){
     try{
       if(signal.aborted)return;
-      const list=await request<ServerRow[]>("/api/title/servers");
+      const list=await request<ServerRow[]>("/api/title/servers",undefined,signal);
       if(!Array.isArray(list))throw Error("Danh sách server không hợp lệ");
       const ready=list.filter(s=>s.id&&s.name&&s.operating!==false);
       if(!ready.length)throw Error("GameWorld chưa sẵn sàng");
@@ -62,8 +60,12 @@ async function servers() {
       button.disabled=false;return;
     }catch(e){
       if(signal.aborted)return;
-      text(authState,`Backend TEST đang khởi động (${n+1}/20). ${explain(e)}; tự thử lại, không cần F5.`);
-      if(n<19)try{await delay(12000,signal);}catch{return;}
+      if(e instanceof BackendError && !e.retryable){
+        text(authState,"Không lấy được server: "+e.message);
+        return;
+      }
+      text(authState,`Máy chủ TEST đang khởi động (${n+1}/48). Tự kiểm tra mỗi 5 giây, không cần F5.`);
+      if(n<47)try{await delay(5000,signal);}catch{return;}
     }
   }
   text(authState,"Máy chủ chưa sẵn sàng sau 4 phút. Bấm 'Kết nối lại' khi muốn thử tiếp.");
@@ -76,7 +78,7 @@ async function login(){
       serverId=$<HTMLSelectElement>("server").value;
     if(!id || !password || !serverId)throw Error("Nhập ID, mật khẩu và chọn server");
     text(authState,"Đang xác thực với HieuSRO Agent thật…");
-    const result=await request<{ok:boolean;code?:string;message?:string;sessionToken?:string;nextScene?:string}>(
+    const result=await request<{ok:boolean;code?:string;message?:string;sessionToken?:string;nextScene?:string;divisionId?:string}>(
       "/api/title/login",{id,password,serverId}
     );
     if(result.ok!==true || !result.sessionToken){
@@ -84,25 +86,57 @@ async function login(){
     }
     token=result.sessionToken; // in memory only; never log, persist or share
     text(authState,"Đăng nhập HieuSRO thành công. Kiểm tra danh sách nhân vật…");
-    const response=await fetch("/api/character/list",{
-      headers:{Authorization:"Bearer "+token,"X-OpenSRO-Protocol":"6"},
-      credentials:"omit",cache:"no-store"
-    });
-    if(response.ok) {
-      const roster=await response.json();
-      const list=Array.isArray(roster)?roster:
-        (roster && typeof roster==="object" ? (roster.characters??roster.items??[]) : []);
-      const names=Array.isArray(list)?list.map((r:unknown)=>{
-        const p=r as {name?:string};return String(p?.name??"Nhân vật");
-      }).slice(0,8):[];
-      text(authState,`Đăng nhập thành công · ${names.length} nhân vật: ${names.join(", ")||"chưa có nhân vật"}.`);
-    } else {
-      text(authState,`Đăng nhập thành công. Danh sách nhân vật HTTP ${response.status} — chưa kết nối gameplay.`);
-    }
+    activeDivision=result.divisionId || serverId;
+    $<HTMLDivElement>("character-panel").hidden=false;
+    await refreshRoster();
     text(status,"Đã xác thực với Game Server. Bản WebGL2 hiện mới có chế độ xem địa hình; chưa điều khiển nhân vật MMO.");
   } catch(e){text(authState,"Đăng nhập thất bại: "+explain(e));}
   finally{button.disabled=false;$<HTMLInputElement>("password").value="";}
 }
+async function refreshRoster(){
+  if(!token)return;
+  const list=$<HTMLUListElement>("roster-list");
+  const state=$("roster-state");
+  text(state,"Đang lấy nhân vật từ GameWorld TEST…");
+  try{
+    const characters=await fetchRoster(token);
+    list.replaceChildren();
+    for(const c of characters){
+      const li=document.createElement("li");
+      li.textContent=`${c.name} · Lv.${typeof c.level==="number"?c.level:"?"}`;
+      list.appendChild(li);
+    }
+    text(state,characters.length
+      ? `Đăng nhập thành công · ${characters.length} nhân vật thật trên server TEST.`
+      : "Đăng nhập thành công · Chưa có nhân vật. Chọn 'Tạo nhân vật thật' bên dưới.");
+    if(!characters.length)$<HTMLDetailsElement>("character-creator").open=true;
+    text(authState,characters.length
+      ? `Đăng nhập thành công · ${characters.length} nhân vật: ${characters.map(c=>c.name).join(", ")}`
+      : "Đăng nhập thành công · 0 nhân vật: chưa có nhân vật.");
+  }catch(error){text(state,"Không đọc được danh sách nhân vật: "+explain(error));}
+}
+let creating=false;
+async function submitCharacter(){
+  if(creating||!token||!activeDivision){text($("creation-state"),"Hãy đăng nhập TEST trước.");return;}
+  const name=$<HTMLInputElement>("character-name").value.trim();
+  const race=$<HTMLSelectElement>("character-race").value;
+  const gender=$<HTMLSelectElement>("character-gender").value;
+  if(!["CH","EU"].includes(race)||!["MAN","WOMAN"].includes(gender))return;
+  if(!confirm(`Tạo nhân vật "${name}" trên GameWorld TEST thật? Dữ liệu TEST có thể mất khi Render Free khởi động lại.`))return;
+  const options:CreateOptions={name,race:race as CreateOptions["race"],gender:gender as CreateOptions["gender"]};
+  creating=true;$<HTMLButtonElement>("create-character").disabled=true;
+  text($("creation-state"),"Đang kiểm tra tên và tạo nhân vật trên GameWorld…");
+  try{
+    const c=await createNativeCharacter(token,activeDivision,options);
+    text($("creation-state"),`Đã tạo ${c.name} trên server TEST.`);
+    $<HTMLInputElement>("character-name").value="";
+    await refreshRoster();
+    $<HTMLDetailsElement>("character-creator").open=false;
+  }catch(error){text($("creation-state"),"Không tạo được nhân vật: "+explain(error));}
+  finally{creating=false;$<HTMLButtonElement>("create-character").disabled=false;}
+}
+$("create-character").addEventListener("click",()=>void submitCharacter());
+$("refresh-roster").addEventListener("click",()=>void refreshRoster());
 async function catalog(){
   try{
     const value=await reader.json<RegionCatalog>("/assets/world/world-region-catalog.json");
@@ -170,7 +204,7 @@ let closed=false;
 const cleanup=()=>{
  if(closed)return;closed=true;
  controller?.abort();serverLoop?.abort();document.removeEventListener("keydown",controls);
- world?.dispose();world=null;token=null;reader.reset();
+ world?.dispose();world=null;token=null;activeDivision=null;reader.reset();
 };
 window.addEventListener("pagehide",cleanup,{once:true});
 window.addEventListener("beforeunload",cleanup,{once:true});

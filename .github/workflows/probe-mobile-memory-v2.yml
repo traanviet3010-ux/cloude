@@ -2,6 +2,7 @@ name: Probe Render HieuSRO Mobile Lite V2 TEST
 on:
   push:
     branches: [hieusro-mobile-memory-v2-test-20261020]
+  workflow_dispatch:
     paths: ['.github/workflows/probe-mobile-memory-v2.yml']
 permissions:
   contents: read

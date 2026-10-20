@@ -1,0 +1,35 @@
+name: Read-only baseline of Icons Preview routes
+on:
+  push:
+    branches: [hieusro-icons-srweb-mobile-stage-20261020]
+    paths: ['.github/workflows/icons-preview-baseline.yml']
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Probe existing Icons Preview without changing server or accounts
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.error,hashlib,time
+          root='https://hieusro-icons-preview-20261019.onrender.com'
+          checks=['/','/healthz','/readyz','/auto-policy.json','/api/title/servers',
+                  '/assets/packs/manifest.json','/assets/images/Media_extracted/interface/outer/logo-big.png']
+          for path in checks:
+            try:
+              headers={'Accept-Encoding':'identity','X-OpenSRO-Protocol':'6'}
+              with urllib.request.urlopen(urllib.request.Request(root+path,headers=headers),timeout=55) as r:
+                data=r.read(5000000) if path.endswith('manifest.json') else r.read(300)
+                if path.endswith('manifest.json'):
+                  m=json.loads(data)
+                  print('CURRENT_PACK_MANIFEST',len(m.get('groups',[])),len(m.get('assets',[])),hashlib.sha256(data).hexdigest(),flush=True)
+                elif path.endswith('/servers'):
+                  try: print('CURRENT_SERVERS',[(x.get('id'),x.get('name')) for x in json.loads(data)],flush=True)
+                  except: print('CURRENT_SERVERS_NONJSON',flush=True)
+                print('CURRENT_ROUTE',path,'http',r.status,'type',r.headers.get('content-type',''),flush=True)
+            except urllib.error.HTTPError as e: print('CURRENT_ROUTE',path,'http',e.code,flush=True)
+            except Exception as e: print('CURRENT_ROUTE',path,'error',type(e).__name__,flush=True)
+          print('BASELINE_READ_ONLY_DONE=1',flush=True)
+          PY

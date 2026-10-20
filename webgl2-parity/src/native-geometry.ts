@@ -34,10 +34,11 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original geometry index outside admitted vertex buffer");
   if(source.joints||source.weights||source.bones||source.cloth)
     throw Error("SRO skeleton/cloth cannot be silently drawn as static geometry");
-  if(source.instances&&source.instances.length>16)
+  if(source.instances&&source.instances.length)
     throw Error("Original scenery instancing requires true WebGL2 instance backend");
+  if(source.dynamicVertices||source.vertices)throw Error("Original dynamic vertex mesh needs native update pipeline");
   const mat=source.material;
-  if(mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
+  if(mat?.texture||mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
      mat?.water||mat?.sky||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||mat?.blendPair||
      mat?.fog||mat?.groundDecal||mat?.objectFade||mat?.instanceFade)

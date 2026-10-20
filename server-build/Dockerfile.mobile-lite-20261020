@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+# HieuSRO Mobile Lite: independent browser client and TEST preview proxy.
+# No licensed 2.4-GB client data is downloaded in this build.
+FROM node:24-bookworm-slim AS browser-build
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt
+RUN git clone --filter=blob:none https://github.com/opensro-dev/opensro.git opensro \
+ && cd opensro \
+ && git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+WORKDIR /opt/opensro
+RUN corepack enable && corepack pnpm install --frozen-lockfile
+
+COPY hieusro-auto-train.ts /tmp/hieusro-auto-train.ts
+COPY hieusro-auto-skill-picker.ts /tmp/hieusro-auto-skill-picker.ts
+COPY hieusro-auto-train.test.mjs /tmp/hieusro-auto-train.test.mjs
+COPY patch-auto-train.py /tmp/patch-auto-train.py
+COPY hieusro-mobile-lite.ts /tmp/hieusro-mobile-lite.ts
+COPY hieusro-mobile-hud.ts /tmp/hieusro-mobile-hud.ts
+COPY hieusro-mobile-lite.test.mjs /tmp/hieusro-mobile-lite.test.mjs
+COPY patch-mobile-lite.py /tmp/patch-mobile-lite.py
+
+ENV HIEUSRO_OPENSRO_ROOT=/opt/opensro
+RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src/engine/runtime/mobile-lite \
+ && cp /tmp/hieusro-auto-train.ts apps/client-next/src/engine/runtime/auto-train/auto-train.ts \
+ && cp /tmp/hieusro-auto-skill-picker.ts apps/client-next/src/engine/runtime/auto-train/skill-picker.ts \
+ && cp /tmp/hieusro-auto-train.test.mjs apps/client-next/tests/runtime/hieusro-auto-train.test.mjs \
+ && python3 /tmp/patch-auto-train.py \
+ && cp /tmp/hieusro-mobile-lite.ts apps/client-next/src/engine/foundation/rendering/mobile-lite.ts \
+ && cp /tmp/hieusro-mobile-hud.ts apps/client-next/src/engine/runtime/mobile-lite/mobile-hud.ts \
+ && cp /tmp/hieusro-mobile-lite.test.mjs apps/client-next/tests/runtime/hieusro-mobile-lite.test.mjs \
+ && python3 /tmp/patch-mobile-lite.py \
+ && cd apps/client-next \
+ && node --test tests/runtime/hieusro-auto-train.test.mjs tests/runtime/hieusro-mobile-lite.test.mjs
+
+RUN corepack pnpm --filter @sro/client-next build \
+ && test -s apps/client-next/temp/artifacts/dist/index.html
+
+FROM nginx:stable-alpine
+COPY nginx.mobile-lite-20261020.conf /etc/nginx/nginx.conf
+COPY --from=browser-build /opt/opensro/apps/client-next/temp/artifacts/dist/ /usr/share/nginx/html/
+EXPOSE 10000
+CMD ["nginx", "-g", "daemon off;"]

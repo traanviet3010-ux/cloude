@@ -1,0 +1,42 @@
+name: Verify recovered HieuSRO Mobile Lite server list
+
+on:
+  push:
+    branches:
+      - hieusro-mobile-stability-v1-20261020
+    paths:
+      - '.github/workflows/verify-recovered-mobile-servers.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'traanviet3010-ux/cloude'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Verify TEST title API after Icons Preview startup
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.error
+          hosts={
+             'preview':'https://hieusro-icons-preview-20261019.onrender.com',
+             'mobile':'https://hieusro-mobile-lite-20261020.onrender.com'
+          }
+          for label,host in hosts.items():
+            for path in ['/readyz','/api/title/servers']:
+              req=urllib.request.Request(host+path,headers={'X-OpenSRO-Protocol':'6','Accept-Encoding':'identity'})
+              try:
+                with urllib.request.urlopen(req,timeout=15) as resp:
+                  raw=resp.read(16384)
+                  print(f'RECOVERED_HTTP {label} {path} {resp.status} content_type={resp.headers.get("Content-Type")}',flush=True)
+                  if path.endswith('/servers'):
+                    data=json.loads(raw)
+                    print('SERVER_CATALOG',label,[(str(x.get('id')),str(x.get('name')),bool(x.get('operating'))) for x in data],flush=True)
+                    assert any(x.get('name')=='HieuSRO' and x.get('operating') is True for x in data)
+              except Exception as e:
+                print(f'RECOVERED_FAILED {label} {path} {type(e).__name__} {str(e)[:100]}',flush=True)
+                raise
+          print('MOBILE_SERVER_LIST_RECOVERED=1',flush=True)
+          PY

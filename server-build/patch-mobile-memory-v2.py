@@ -60,10 +60,11 @@ patch("runtime/assets/worker/packs/packs.ts",[
     ('while ( loading.size >= 4 ) {',
      'while ( loading.size >= (typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? 2 : 4) ) {')
 ])
-patch("runtime/assets/worker/loader.ts",[
-    ('active.size >= 4 || !Number.isSafeInteger( request.limit )',
-     'active.size >= (typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? 2 : 4) || !Number.isSafeInteger( request.limit )')
-])
+# The worker's admitted foreground capacity MUST match runtime/assets/assets.ts
+# REQUEST_CAPACITY=4. Previously reducing the worker alone to 2 caused the
+# third concurrent request to fail with "Asset request exceeds budget" during
+# loading. Keep both at 4; reduce transport fetch concurrency independently
+# in packs/blocks.ts (capacity 2) without rejecting valid owned requests.
 
 # Per-scene meshes and GPU work are capped; rescue mode goes further.
 # Propagate the main thread's interrupted-load rescue mode into the asset

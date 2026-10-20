@@ -1,0 +1,56 @@
+name: HieuSRO Original GPU to WebGL2 parity gate
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/**"
+      - ".github/workflows/hieusro-original-webgl2-parity.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: webgl2-original-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  original-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout isolated original GPU parity branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Node.js for original OpenSRO
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Resolve pinned TypeScript dependencies for pure native UI parity tests
+        run: |
+          cd webgl2-parity
+          npm install --no-audit --no-fund --no-save typescript@5.9.3
+          node --test tests/*.test.mjs
+      - name: Checkout EXACT native HieuSRO GPU engine revision
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
+          cd /tmp/opensro-original
+          git checkout --quiet 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          test -f apps/client-next/src/engine/runtime/ui/ui.ts
+          test -f apps/client-next/src/engine/runtime/simulation/worker/session/world/world.ts
+          test -f apps/client-next/src/engine/runtime/renderer/renderer.ts
+          test -f apps/client-next/src/engine/contracts/ui.ts
+          test -f apps/client-next/src/engine/contracts/runtime.ts
+          echo 'PINNED_SRO_CLIENT=4f6919d6900d169b89e75647e56c99ca8ebd5cfb'
+      - name: Type-check new WebGL2 owner in real original UI and renderer contracts
+        run: |
+          corepack enable
+          cd /tmp/opensro-original
+          corepack pnpm install --frozen-lockfile
+          mkdir -p apps/client-next/src/engine/runtime/renderer/webgl2
+          cp "$GITHUB_WORKSPACE"/webgl2-parity/src/*.ts apps/client-next/src/engine/runtime/renderer/webgl2/
+          corepack pnpm --filter @sro/client-next typecheck
+          echo 'ORIGINAL_UI_WEBGL2_TYPECHECK=PASS'
+      - name: Verify original gameplay and HUD source were NOT modified
+        run: |
+          cd /tmp/opensro-original
+          git diff --exit-code --             apps/client-next/src/engine/runtime/simulation             apps/client-next/src/engine/runtime/ui             apps/client-next/src/engine/contracts             apps/client-next/src/engine/runtime/frontend             apps/client-next/src/engine/runtime/input
+          echo 'GAMEPLAY_AND_ORIGINAL_UI_UNMODIFIED=PASS'

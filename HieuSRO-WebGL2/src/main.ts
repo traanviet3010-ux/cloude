@@ -274,7 +274,7 @@ async function showTerrainPreview(){
   $("world-menu").hidden=false;
   $("world-controls").hidden=false;
   text(status,"Chế độ xem bản đồ TEST: camera di chuyển, chưa phải nhân vật GameWorld.");
-  if(!$<HTMLSelectElement>("region").options.length || !$<HTMLSelectElement>("region").value){
+  if(regions.size===0){
     await catalog();
   } else {
     await loadRegion();

@@ -3,6 +3,7 @@ import { createPackReader, type RegionCatalog } from "./pack";
 import { createWorld } from "./world";
 import { requestBackend, BackendError } from "./backend";
 import { fetchRoster, createNativeCharacter, type CreateOptions } from "./characters";
+import { probeGameWorld } from "./gameworld";
 
 const $=<T extends HTMLElement>(name:string)=>document.getElementById(name) as T;
 const canvas=$<HTMLCanvasElement>("world"),authState=$("auth-state"),assetState=$("asset-state"),status=$("status");
@@ -12,6 +13,9 @@ let controller:AbortController|null=null;
 let token:string|null=null;
 let activeDivision:string|null=null;
 let rosterBusy=false;
+let activeTransport:string|null=null;
+let probing=false;
+let worldProbeController:AbortController|null=null;
 function explain(error:unknown) {return error instanceof Error?error.message:String(error);}
 function text(el:HTMLElement,message:string) {el.textContent=message;}
 function abortScene(){controller?.abort();controller=new AbortController();}
@@ -23,7 +27,8 @@ try {
   text(assetState,"Không tạo được WebGL2: "+explain(e));
   $("load-region").setAttribute("disabled","true");
 }
-type ServerRow={id?:string;name?:string;operating?:boolean;status?:string};
+type ServerRow={id?:string;name?:string;operating?:boolean;status?:string;transportUrl?:string};
+const serverRows=new Map<string,ServerRow>();
 let regions=new Map<string,{area?:string;source?:string;bundlePublicPath:string}>();
 async function request<T>(path:string,body?:object,signal?:AbortSignal):Promise<T> {
   return requestBackend<T>(path,body,signal);
@@ -52,7 +57,9 @@ async function servers() {
       const ready=list.filter(s=>s.id&&s.name&&s.operating!==false);
       if(!ready.length)throw Error("GameWorld chưa sẵn sàng");
       select.replaceChildren();
+      serverRows.clear();
       for(const s of ready){
+        serverRows.set(s.id!,s);
         const o=document.createElement("option");o.value=s.id!;
         o.textContent=s.name!;select.appendChild(o);
       }
@@ -71,6 +78,7 @@ async function servers() {
   text(authState,"Máy chủ chưa sẵn sàng sau 4 phút. Bấm 'Kết nối lại' khi muốn thử tiếp.");
 }
 async function login(){
+  worldProbeController?.abort();activeTransport=null;
   const button=$<HTMLButtonElement>("login");button.disabled=true;
   try{
     const id=$<HTMLInputElement>("account").value.trim(),
@@ -87,6 +95,7 @@ async function login(){
     token=result.sessionToken; // in memory only; never log, persist or share
     text(authState,"Đăng nhập HieuSRO thành công. Kiểm tra danh sách nhân vật…");
     activeDivision=result.divisionId || serverId;
+    activeTransport=serverRows.get(serverId)?.transportUrl??null;
     $<HTMLDivElement>("character-panel").hidden=false;
     await refreshRoster();
     text(status,"Đã xác thực với Game Server. Bản WebGL2 hiện mới có chế độ xem địa hình; chưa điều khiển nhân vật MMO.");
@@ -103,7 +112,15 @@ async function refreshRoster(){
     list.replaceChildren();
     for(const c of characters){
       const li=document.createElement("li");
-      li.textContent=`${c.name} · Lv.${typeof c.level==="number"?c.level:"?"}`;
+      li.textContent=`${c.name} · Lv.${typeof c.level==="number"?c.level:"?"} `;
+      const button=document.createElement("button");
+      button.type="button";button.className="world-probe-button";
+      button.textContent="Kiểm tra GameWorld";
+      button.disabled=!activeTransport;
+      button.title=activeTransport?"Xác minh vào thế giới thật; chưa kích hoạt di chuyển/combat":
+        "Backend chưa cung cấp transportUrl cho shard";
+      button.addEventListener("click",()=>void testWorldAdmission(c.name));
+      li.appendChild(button);
       list.appendChild(li);
     }
     text(state,characters.length
@@ -114,6 +131,34 @@ async function refreshRoster(){
       ? `Đăng nhập thành công · ${characters.length} nhân vật: ${characters.map(c=>c.name).join(", ")}`
       : "Đăng nhập thành công · 0 nhân vật: chưa có nhân vật.");
   }catch(error){text(state,"Không đọc được danh sách nhân vật: "+explain(error));}
+}
+async function testWorldAdmission(character:string){
+  if(probing)return;
+  if(!token||!activeDivision||!activeTransport){
+    text($("world-admission-state"),"Chưa có GameWorld transport URL từ server TEST.");return;
+  }
+  worldProbeController?.abort();worldProbeController=new AbortController();
+  const signal=worldProbeController.signal;
+  probing=true;
+  const buttons=document.querySelectorAll<HTMLButtonElement>(".world-probe-button");
+  buttons.forEach(button=>button.disabled=true);
+  try{
+    const result=await probeGameWorld({
+      sessionToken:token,divisionId:activeDivision,character,
+      transportUrl:activeTransport,signal,
+      onPhase:message=>{if(!signal.aborted)text($("world-admission-state"),message);}
+    });
+    if(!signal.aborted)text($("world-admission-state"),
+      `GameWorld xác thực nhân vật ${character}: ENTER_WORLD thành công; bootstrap v${result.bootstrapVersion} thật`+
+      (result.referencesAdvertised?" (có world references).":"." )+
+      " Kết nối thử đã đóng an toàn; client chưa xử lý gameplay và chưa gửi WorldReady.");
+  }catch(error){
+    if(!signal.aborted)text($("world-admission-state"),"Không xác minh được GameWorld: "+explain(error));
+  }finally{
+    if(worldProbeController?.signal===signal)worldProbeController=null;
+    probing=false;
+    document.querySelectorAll<HTMLButtonElement>(".world-probe-button").forEach(button=>button.disabled=!activeTransport);
+  }
 }
 let creating=false;
 async function submitCharacter(){
@@ -203,7 +248,7 @@ document.addEventListener("keydown",controls);
 let closed=false;
 const cleanup=()=>{
  if(closed)return;closed=true;
- controller?.abort();serverLoop?.abort();document.removeEventListener("keydown",controls);
+ controller?.abort();serverLoop?.abort();worldProbeController?.abort();document.removeEventListener("keydown",controls);
  world?.dispose();world=null;token=null;activeDivision=null;reader.reset();
 };
 window.addEventListener("pagehide",cleanup,{once:true});

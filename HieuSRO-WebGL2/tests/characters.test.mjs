@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-const {makeNativeDraft,fetchRoster,createNativeCharacter}=await import("../src/characters.ts");
+import ts from "typescript";
+import {readFileSync} from "node:fs";
+const original=readFileSync(new URL("../src/characters.ts",import.meta.url),"utf8");
+const compiled=ts.transpileModule(original,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const {makeNativeDraft,fetchRoster,createNativeCharacter}=await import("data:text/javascript;base64,"+Buffer.from(compiled).toString("base64"));
 test("native CH and EU model and starter indices match OpenSRO v1.150",()=>{
  const ch=makeNativeDraft({name:"HieuTest",race:"CH",gender:"MAN"},"global-official");
  const eu=makeNativeDraft({name:"TestEuro",race:"EU",gender:"WOMAN"},"global-official");

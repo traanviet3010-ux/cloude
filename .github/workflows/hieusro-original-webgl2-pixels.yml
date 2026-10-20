@@ -1,0 +1,31 @@
+name: HieuSRO Original WebGL2 pixel shader smoke
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/src/**"
+      - "webgl2-parity/tests/native-ui-pixels.mjs"
+      - ".github/workflows/hieusro-original-webgl2-pixels.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: original-webgl2-pixels-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ui-actual-gl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '24'}
+      - name: Install browser and compile original UiScene GL shader
+        working-directory: webgl2-parity
+        run: |
+          npm install --no-audit --no-fund --no-save esbuild@0.28.2 playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Run actual pixel draw readback, alpha/scissor and GPU cleanup
+        working-directory: webgl2-parity
+        run: node tests/native-ui-pixels.mjs

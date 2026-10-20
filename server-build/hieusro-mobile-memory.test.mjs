@@ -111,3 +111,11 @@ test("worker and host must agree on 4 foreground slots; fetch reads remain at 2"
  assert.doesNotMatch(worker,/active\.size >= \(typeof navigator/);
  assert.match(blocks,/capacity = mobileLiteEnabled\(\) \? 2 : 4/);
 });
+
+test("Mobile Lite retries only transient title gateway errors for max four minutes",()=>{
+ const src=readFileSync(new URL("../../src/engine/runtime/simulation/worker/session/session.ts",import.meta.url),"utf8");
+ assert.match(src,/mobileLiteEnabled\(\) && result\.value/);
+ assert.match(src,/\[ 502, 503, 504 \]\.includes\( result\.value\.status \)/);
+ assert.match(src,/result\.kind === "servers" \|\| result\.kind === "login"/);
+ assert.match(src,/mobileLiteEnabled\(\) \? 240_000 : MAX_STARTING_WAIT_MS/);
+});

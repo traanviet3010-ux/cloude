@@ -139,6 +139,11 @@ RUN mkdir -p apps/client-next/src/engine/runtime/auto-train \
  && cd apps/client-next \
  && node --test tests/runtime/hieusro-auto-train.test.mjs
 
+# SRWeb-inspired TEST-only iOS streaming profile. Keep all server and gameplay
+# code pinned and unchanged; validate upstream source anchors before compiling.
+COPY patch-srweb-mobile-profile.py /tmp/patch-srweb-mobile-profile.py
+RUN python /tmp/patch-srweb-mobile-profile.py
+
 # Build the browser client from the SAME pinned OpenSRO source as this
 # image, rather than fetching stale output from another Render deployment.
 RUN corepack pnpm --filter @sro/client-next build \
@@ -154,6 +159,13 @@ RUN python /tmp/package-native-skill-icons.py \
   /src/opensro/.generated/intermediate/images/Media_extracted/icon/skill \
   /out/client/assets/images/Media_extracted/icon/skill \
  && test -s /out/client/assets/images/Media_extracted/icon/skill/china/sword_smash_a.png
+
+# Serve all UI media locally from already verified CDN packs; avoid 502s
+# from the old third-party asset fallback for title/login/loading screens.
+COPY extract-mobile-ui-from-packs.py /tmp/extract-mobile-ui-from-packs.py
+RUN HIEUSRO_UI_PUBLISH_ROOT=/out/client python /tmp/extract-mobile-ui-from-packs.py \
+ && test -s /out/client/assets/images/Media_extracted/interface/outer/logo-big.png \
+ && test -s /out/client/assets/images/Media_extracted/interface/loading/nowloading.png
 
 
 RUN set -eux; \

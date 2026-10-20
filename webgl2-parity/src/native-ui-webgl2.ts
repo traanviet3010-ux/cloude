@@ -4,8 +4,10 @@
  * It draws NO substitute panels, and never changes UI input or GameWorld state.
  */
 import type { UiScene } from "@/engine/contracts/ui";
+import type { NativeTexture } from "@/engine/contracts/texture";
+import {nativeLevelBytes,unpackNativeTexture} from "./native-texture";
 import { compileNativeUi } from "./native-ui-commands";
-type Image = ImageBitmap | ImageData;
+type Image = ImageBitmap | ImageData | NativeTexture;
 interface Resident { texture:WebGLTexture;width:number;height:number;bytes:number;lastFrame:number; }
 export type UiGpuStats={residentMB:number;textureCount:number;drawCalls:number;frame:number};
 const VERTEX = `#version 300 es
@@ -51,6 +53,7 @@ export class NativeUiWebgl2Renderer {
   private readonly placeholder:WebGLTexture;
   private readonly textures=new Map<string,Resident>();
   private used=0;
+  private pinned=new Set<string>();
   private frameNo=0;
   private calls=0;
   private closed=false;
@@ -106,9 +109,18 @@ export class NativeUiWebgl2Renderer {
     if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<=0||height<=0||
       width>gl.getParameter(gl.MAX_TEXTURE_SIZE)||height>gl.getParameter(gl.MAX_TEXTURE_SIZE))
       throw Error("Native UI texture dimensions unsupported");
-    const bytes=width*height*4;
+    const native="kind" in image&&image.kind==="native-texture";
+    const rawLevel=native?image.levels[0]:undefined;
+    const expected=native?nativeLevelBytes(image.format,width,height):0;
+    if(native&&(!rawLevel||rawLevel.byteLength!==expected))
+      throw Error("Original native UI mip is truncated");
+    const s3tc=native&&image.format!=="bgra8unorm"?
+      gl.getExtension("WEBGL_compressed_texture_s3tc"):null;
+    const compressed=!!s3tc;
+    const bytes=compressed?expected:width*height*4;
     if(bytes>this.budgetBytes)throw Error("Native UI single texture exceeds GPU budget");
-    this.evict(bytes,new Set());
+    const protectedIds=new Set(this.pinned);protectedIds.delete(id);
+    this.evict(bytes,protectedIds);
     const tex=gl.createTexture();
     if(!tex)throw Error("GPU has no memory for native UI texture");
     try{
@@ -116,7 +128,19 @@ export class NativeUiWebgl2Renderer {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,0);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+      if(native){
+        if(compressed&&s3tc){
+          const format=image.format==="bc1-rgba-unorm"?
+            s3tc.COMPRESSED_RGBA_S3TC_DXT1_EXT:
+            image.format==="bc2-rgba-unorm"?s3tc.COMPRESSED_RGBA_S3TC_DXT3_EXT:
+              s3tc.COMPRESSED_RGBA_S3TC_DXT5_EXT;
+          gl.compressedTexImage2D(gl.TEXTURE_2D,0,format,width,height,0,rawLevel!);
+        }else{
+          const rgba=unpackNativeTexture(image);
+          gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,width,height,0,
+            gl.RGBA,gl.UNSIGNED_BYTE,rgba.pixels);
+        }
+      }else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
@@ -142,7 +166,7 @@ export class NativeUiWebgl2Renderer {
     const commands=compileNativeUi(scene);
     const required=new Set(commands.map(c=>c.texture).filter(Boolean));
     for(const id of required)if(!this.textures.has(id))throw Error("Original Silkroad UI texture not resident: "+id);
-    this.frameNo++;this.calls=0;
+    this.frameNo++;this.calls=0;this.pinned=required;
     for(const id of required)this.textures.get(id)!.lastFrame=this.frameNo;
     const gl=this.gl;
     gl.viewport(0,0,this.canvas.width,this.canvas.height);
@@ -184,7 +208,7 @@ export class NativeUiWebgl2Renderer {
     this.closed=true;this.canvas.removeEventListener("webglcontextlost",this.onLost);
     const gl=this.gl;
     for(const entry of this.textures.values())gl.deleteTexture(entry.texture);
-    this.textures.clear();this.used=0;
+    this.textures.clear();this.pinned.clear();this.used=0;
     gl.deleteTexture(this.placeholder);gl.deleteBuffer(this.buffer);
     gl.deleteVertexArray(this.vao);gl.deleteProgram(this.program);
   }

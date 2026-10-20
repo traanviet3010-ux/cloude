@@ -42,8 +42,14 @@ export interface MobileMemoryStats {
 function ios(): boolean {
   return typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 }
+let workerRescueMode = false;
+// The asset worker has no sessionStorage; bootstrap sends this before any load.
+export function setWorkerRescueMode(value: boolean): void {
+  workerRescueMode = value === true;
+}
 export function rescueMode(): boolean {
   if (!ios()) return false;
+  if (workerRescueMode) return true;
   try { return sessionStorage.getItem(RESCUE_MARKER) === "1"; } catch { return false; }
 }
 export function maxMobilePixelRatio(): number {

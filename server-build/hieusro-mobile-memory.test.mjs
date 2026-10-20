@@ -101,3 +101,13 @@ test("patch preserves correct device-loss limit and page cleanup",()=>{
  const world=readFileSync(new URL("../../src/engine/runtime/assets/worker/world/resources/resources.ts",import.meta.url),"utf8");
  assert.match(world,/Math\.abs\(dx\) \+ Math\.abs\(dz\) > 1/);
 });
+
+test("worker and host must agree on 4 foreground slots; fetch reads remain at 2",()=>{
+ const host=readFileSync(new URL("../../src/engine/runtime/assets/assets.ts",import.meta.url),"utf8");
+ const worker=readFileSync(new URL("../../src/engine/runtime/assets/worker/loader.ts",import.meta.url),"utf8");
+ const blocks=readFileSync(new URL("../../src/engine/runtime/assets/worker/packs/blocks.ts",import.meta.url),"utf8");
+ assert.match(host,/const REQUEST_CAPACITY = 4;/);
+ assert.match(worker,/active\.size >= 4 \|\| !Number\.isSafeInteger\( request\.limit \)/);
+ assert.doesNotMatch(worker,/active\.size >= \(typeof navigator/);
+ assert.match(blocks,/capacity = mobileLiteEnabled\(\) \? 2 : 4/);
+});

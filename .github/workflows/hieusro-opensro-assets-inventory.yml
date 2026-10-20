@@ -30,33 +30,30 @@ jobs:
                       print('HTTP_STATUS',r.status,'BYTES_MANIFEST',len(raw),'CONTENT_TYPE',r.headers.get('content-type'),flush=True)
                   data=json.loads(raw)
                   print('MANIFEST_ROOT',type(data).__name__, list(data.keys())[:30] if isinstance(data,dict) else 'array',flush=True)
-                  p=data.get('packs',[]) if isinstance(data,dict) else data
-                  if isinstance(p,dict):p=list(p.values())
-                  if not isinstance(p,list):print('INVALID_PACK_LIST',str(type(p)));continue
-                  categories=collections.defaultdict(lambda: {'packs':0,'bytes':0,'members':0,'start':0,'lazy':0,'manual':0,'samples':[]})
-                  all_paths=[]
-                  for item in p:
-                      if not isinstance(item,dict):continue
-                      path=str(item.get('path',''))
-                      name=path.split('/')[-1]
-                      # Example game-models-010-SHA.bin -> game-models
-                      import re
-                      grp=re.sub(r'-[0-9]{3}-[a-f0-9]+\.bin$', '',name)
-                      if grp==name:grp=str(item.get('group') or name)
-                      b=int(item.get('bytes') or item.get('size') or 0)
-                      cat=categories[grp]
-                      cat['packs']+=1; cat['bytes']+=b; cat['members']+=len(item.get('entries') or [])
-                      typ=str(item.get('load',''))
-                      if typ in ('startup','lazy','manual'):cat[{'startup':'start','lazy':'lazy','manual':'manual'}[typ]]+=1
-                      if len(cat['samples'])<3:cat['samples'].append(name)
-                      all_paths.append(path)
-                  print('ASSET_TOTAL_PACKS',sum(v['packs'] for v in categories.values()))
-                  print('ASSET_TOTAL_BYTES',sum(v['bytes'] for v in categories.values()))
-                  print('ASSET_TOTAL_MEMBERS',sum(v['members'] for v in categories.values()))
-                  print('ASSET_GROUPS_COUNT',len(categories))
-                  for grp,v in sorted(categories.items(), key=lambda p:-p[1]['bytes']):
-                      print('GROUP',json.dumps({'name':grp,**v},ensure_ascii=False),flush=True)
-                  print('SAMPLE_PATHS',json.dumps(all_paths[:25],ensure_ascii=False),flush=True)
+                  import hashlib
+                  print('MANIFEST_SHA256',hashlib.sha256(raw).hexdigest(),flush=True)
+                  print('GENERATED_AT',data.get('generatedAt'),'ASSET_SCHEMA',data.get('assetSchema'),flush=True)
+                  groups=data.get('groups',[])
+                  if not isinstance(groups,list):
+                      print('INVALID_GROUPS',type(groups).__name__)
+                      continue
+                  packs=[(g,p) for g in groups for p in (g.get('packs') or [])]
+                  assets=data.get('assets',[])
+                  print('ASSET_TOTAL_GROUPS',len(groups))
+                  print('ASSET_TOTAL_PACKS',len(packs))
+                  print('ASSET_TOTAL_BYTES',sum(int(p.get('bytes') or 0) for _,p in packs))
+                  print('ASSET_TOTAL_MEMBERS',len(assets))
+                  for g in sorted(groups,key=lambda x:-sum(int(p.get('bytes') or 0) for p in (x.get('packs') or []))):
+                      pg=g.get('packs') or []
+                      info={
+                        'name':g.get('name'),'load':g.get('load'),
+                        'packCount':len(pg),'packBytes':sum(int(p.get('bytes') or 0) for p in pg),
+                        'members':g.get('assetCount'),
+                        'rawBytes':g.get('totalBytes'),
+                        'samples':[(p.get('path'),p.get('bytes')) for p in pg[:3]]
+                      }
+                      print('GROUP',json.dumps(info,ensure_ascii=False),flush=True)
+                  print('SAMPLE_ASSETS',json.dumps([a.get('path') for a in assets[:18]],ensure_ascii=False),flush=True)
               except Exception as exc:
                   print('FETCH_FAILED',type(exc).__name__,str(exc)[:500],flush=True)
               print('END_SITE',url,flush=True)

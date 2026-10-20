@@ -1,0 +1,57 @@
+name: HieuSRO WebGL2 browser smoke
+on:
+  push:
+    branches: [hieusro-babylon-webgl2-client-20261020]
+    paths: ['.github/workflows/webgl2-browser-smoke.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Install browser test tooling
+        working-directory: HieuSRO-WebGL2
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Verify Babylon WebGL2 actual DOM and terrain on Render TEST
+        working-directory: HieuSRO-WebGL2
+        run: |
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright';
+          const browser=await chromium.launch({headless:true,args:[
+            '--enable-webgl','--use-gl=angle','--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader','--disable-dev-shm-usage'
+          ]});
+          const page=await browser.newPage({viewport:{width:1170,height:640},deviceScaleFactor:2});
+          const errors=[];
+          page.on('pageerror',e=>errors.push(e.message));
+          page.on('console',m=>{if(m.type()==='error')errors.push(m.text().slice(0,200));});
+          try{
+            await page.goto('https://hieusro-babylon-webgl2-test.onrender.com/',{waitUntil:'domcontentloaded',timeout:90000});
+            await page.locator('#gpu').waitFor({state:'visible',timeout:20000});
+            const gpu=await page.locator('#gpu').innerText();
+            console.log('BROWSER_RENDERER='+gpu);
+            if(!gpu.includes('WebGL2 thật')) throw Error('Babylon did not acquire WebGL2');
+            await page.waitForFunction(()=>{
+              const s=document.getElementById('asset-state')?.textContent||'';
+              return s.includes('cell GPU') || s.includes('Lỗi tải bản đồ') || s.includes('Không tải được bản đồ');
+            },{timeout:120000});
+            const state=await page.locator('#asset-state').innerText();
+            console.log('BROWSER_TERRAIN_STATE='+state);
+            if(!state.includes('cell GPU'))throw Error('Real SRO world cells not rendered in Babylon');
+            await page.screenshot({path:'webgl2-safari-layout.png',fullPage:true});
+            if(errors.length)console.log('BROWSER_CONSOLE_ERRORS='+JSON.stringify(errors.slice(0,12)));
+            console.log('BABYLON_TERRAIN_BROWSER_RENDER_OK=1');
+          }finally{await browser.close();}
+          JS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: webgl2-browser-screenshot
+          path: HieuSRO-WebGL2/webgl2-safari-layout.png
+          retention-days: 3

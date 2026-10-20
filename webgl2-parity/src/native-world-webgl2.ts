@@ -8,7 +8,7 @@ import type { Geometry } from "@/engine/contracts/geometry";
 import {admitOriginalGeometry,type GlNativeGeometry} from "./native-geometry";
 import {originalCameraToWebgl2} from "./clip-space";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;
-  count:number;transform:Float32Array;color:readonly number[];alphaCutoff:number;bytes:number;last:number; }
+  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -99,7 +99,7 @@ export class OriginalWorldWebgl2 {
      gl.bindVertexArray(null);
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
      this.entries.set(id,{vao,vbo,ebo,count:row.indices.length,transform:row.transform,
-       color:geometry.material?.color??[1,1,1,1],alphaCutoff:geometry.material?.alphaCutoff??0,
+       color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,
        bytes:row.byteSize,last:this.frame});
      this.used+=row.byteSize;
    }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);throw e;}

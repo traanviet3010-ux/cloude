@@ -42,8 +42,9 @@ test("original animation, instances, lights and textures are never silently omit
 });
 test("WebGPU original native projection maps into WebGL2 depth range with x/y unchanged",()=>{
  const m=identity.slice();m[10]=0.8;m[14]=-.2;
+ const original=m.slice();
  const gl=originalCameraToWebgl2(m);
  assert.ok(Math.abs(gl[10]-1.6)<1e-6);assert.ok(Math.abs(gl[14]+1.4)<1e-6);
  assert.deepEqual([...gl.slice(0,8)],[...m.slice(0,8)]);
- assert.deepEqual([...m],[...identity.slice(0,10),.8,...identity.slice(11,14),-.2,1]);
+ assert.deepEqual([...m],[...original]);
 });

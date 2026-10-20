@@ -1,0 +1,48 @@
+name: Gate Render asset CDN CORS before Safari TEST switch
+
+on:
+  push:
+    branches:
+      - hieusro-render-asset-cdn-test-20261020
+    paths:
+      - '.github/workflows/gate-hieusro-render-cors.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cors-gate:
+    if: github.repository == 'traanviet3010-ux/cloude'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check CORS response headers for public CDN pack and manifest
+        env:
+          CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
+          ORIGIN: https://hieusro-mobile-lite-20261020.onrender.com
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          cdn=os.environ['CDN']; origin=os.environ['ORIGIN']
+          def get(path,range_value=None):
+              hdr={'Accept-Encoding':'identity','Origin':origin}
+              if range_value: hdr['Range']=range_value
+              req=urllib.request.Request(cdn+path,headers=hdr)
+              with urllib.request.urlopen(req,timeout=30) as resp:
+                  return resp.status,{k.lower():v for k,v in resp.headers.items()},resp.read()
+          status, headers, data=get('/assets/packs/manifest.json')
+          assert status==200
+          manifest=json.loads(data)
+          asset=next(p for g in manifest['groups'] for p in g['packs'] if p['bytes']>1024*1024)
+          code, pack_headers, prefix=get(asset['path'],'bytes=0-15')
+          print('PACK_RANGE_HTTP='+str(code))
+          print('PACK_CONTENT_RANGE='+str(pack_headers.get('content-range')))
+          for kind,h in [('manifest',headers),('pack',pack_headers)]:
+              allow=h.get('access-control-allow-origin')
+              print('CORS_'+kind.upper()+'='+str(allow))
+              if allow not in ('*',origin):
+                  raise AssertionError(f'Missing or incorrect Access-Control-Allow-Origin on {kind}')
+          assert code==206 and len(prefix)==16 and prefix[:8]==b'SROPACK2'
+          assert pack_headers.get('content-range')==f"bytes 0-15/{asset['bytes']}"
+          print('SAFARI_CDN_CORS_READY=1')
+          PY

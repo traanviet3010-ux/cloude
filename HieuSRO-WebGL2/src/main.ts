@@ -4,10 +4,13 @@ import { createWorld } from "./world";
 import { requestBackend, BackendError } from "./backend";
 import { fetchRoster, createNativeCharacter, type CreateOptions } from "./characters";
 import { probeGameWorld } from "./gameworld";
+import { createNativeTitle } from "./native-title";
 
 const $=<T extends HTMLElement>(name:string)=>document.getElementById(name) as T;
 const canvas=$<HTMLCanvasElement>("world"),authState=$("auth-state"),assetState=$("asset-state"),status=$("status");
 const reader=createPackReader();
+const titleArt=createNativeTitle(reader);
+const titleAbort=new AbortController();
 let world:ReturnType<typeof createWorld>|null=null;
 let controller:AbortController|null=null;
 let token:string|null=null;
@@ -45,6 +48,7 @@ function delay(ms:number,signal:AbortSignal):Promise<void> {
 }
 async function servers() {
   serverLoop?.abort(); serverLoop=new AbortController();
+  text(authState,"Đang kiểm tra tình trạng GameWorld TEST. Anh vẫn có thể nhập tài khoản…");
   const signal=serverLoop.signal;
   const select=$<HTMLSelectElement>("server");
   const button=$<HTMLButtonElement>("login");button.disabled=true;
@@ -71,7 +75,8 @@ async function servers() {
         text(authState,"Không lấy được server: "+e.message);
         return;
       }
-      text(authState,`Máy chủ TEST đang khởi động (${n+1}/48). Tự kiểm tra mỗi 5 giây, không cần F5.`);
+      text(authState,n<3?"GameWorld TEST đang thức dậy từ chế độ nghỉ. Màn hình đăng nhập vẫn sẵn sàng.":
+        `GameWorld TEST chưa trả server (lần ${n+1}/48). Đây là backend Render TEST, không phải lỗi WebGL2.`);
       if(n<47)try{await delay(5000,signal);}catch{return;}
     }
   }
@@ -97,6 +102,7 @@ async function login(){
     activeDivision=result.divisionId || serverId;
     activeTransport=serverRows.get(serverId)?.transportUrl??null;
     $<HTMLDivElement>("character-panel").hidden=false;
+    $("app").dataset.screen="characters";
     await refreshRoster();
     text(status,"Đã xác thực với Game Server. Bản WebGL2 hiện mới có chế độ xem địa hình; chưa điều khiển nhân vật MMO.");
   } catch(e){text(authState,"Đăng nhập thất bại: "+explain(e));}
@@ -201,6 +207,7 @@ async function catalog(){
       select.appendChild(o);
     }
     text(assetState,`Đã xác thực catalog: ${all.length} vùng ngoài trời. Hãy chọn và nạp vùng.`);
+    // The original client does not load world terrain while still on the title screen.
     if(all.length)await loadRegion();
   }catch(e){text(assetState,"Không tải được bản đồ HieuSRO: "+explain(e));}
 }
@@ -248,7 +255,8 @@ document.addEventListener("keydown",controls);
 let closed=false;
 const cleanup=()=>{
  if(closed)return;closed=true;
- controller?.abort();serverLoop?.abort();worldProbeController?.abort();document.removeEventListener("keydown",controls);
+ controller?.abort();serverLoop?.abort();worldProbeController?.abort();titleAbort.abort();titleArt.dispose();
+ document.removeEventListener("keydown",controls);
  world?.dispose();world=null;token=null;activeDivision=null;reader.reset();
 };
 window.addEventListener("pagehide",cleanup,{once:true});
@@ -261,4 +269,42 @@ const debugTimer=debug?setInterval(()=>{
   text(status,`Babylon WebGL2 | region ${g?.region||"chưa chọn"} | cell GPU ${g?.tiles||0}/${g?.totalBlocks||0} | texture Silkroad ${g?.nativeTextures||0} | asset ${(a.bytes/1048576).toFixed(1)} MiB / ${a.requests} Range`);
 },1800):null;
 window.addEventListener("pagehide",()=>{if(debugTimer!==null)clearInterval(debugTimer);},{once:true});
-void servers();void catalog();
+async function showTerrainPreview(){
+  $("app").dataset.screen="world";
+  $("world-menu").hidden=false;
+  $("world-controls").hidden=false;
+  text(status,"Chế độ xem bản đồ TEST: camera di chuyển, chưa phải nhân vật GameWorld.");
+  if(!$<HTMLSelectElement>("region").options.length || !$<HTMLSelectElement>("region").value){
+    await catalog();
+  } else {
+    await loadRegion();
+  }
+}
+$("preview-map").addEventListener("click",()=>void showTerrainPreview());
+$("world-back").addEventListener("click",()=>{
+  controller?.abort();
+  $("app").dataset.screen="characters";
+  $("world-menu").hidden=true;
+  $("world-controls").hidden=true;
+  text(status,"Đã quay lại nhân vật TEST; không tác động dữ liệu LIVE.");
+});
+$("back-to-title").addEventListener("click",()=>{
+  worldProbeController?.abort();
+  const previousToken=token;token=null;activeDivision=null;activeTransport=null;
+  $("character-panel").hidden=true;
+  $("app").dataset.screen="login";
+  $<HTMLInputElement>("password").value="";
+  if(previousToken)void request("/api/title/logout",{}).catch(()=>{});
+  text(authState,"Đã rời màn hình chọn nhân vật. Đăng nhập TEST để tiếp tục.");
+});
+void titleArt.load(titleAbort.signal).then(count=>{
+  if(!titleAbort.signal.aborted)text(status,`Giao diện Silkroad CIF: đã tải ${count} ảnh gốc · Babylon WebGL2 TEST.`);
+}).catch(error=>{
+  if(!titleAbort.signal.aborted)text(status,"Không tải được giao diện CIF, sử dụng giao diện dự phòng: "+explain(error));
+});
+void servers();
+if(new URLSearchParams(location.search).get("debug")==="1" || 
+   new URLSearchParams(location.search).get("map")==="1"){
+  // Opt-in diagnostic terrain render preserves the existing browser terrain smoke.
+  void showTerrainPreview();
+}

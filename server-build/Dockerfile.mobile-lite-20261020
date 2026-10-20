@@ -23,6 +23,7 @@ COPY hieusro-mobile-memory.ts /tmp/hieusro-mobile-memory.ts
 COPY patch-mobile-memory-v2.py /tmp/patch-mobile-memory-v2.py
 COPY hieusro-mobile-memory.test.mjs /tmp/hieusro-mobile-memory.test.mjs
 COPY extract-mobile-ui-from-packs.py /tmp/extract-mobile-ui-from-packs.py
+COPY patch-mobile-title-retry.py /tmp/patch-mobile-title-retry.py
 
 ENV HIEUSRO_OPENSRO_ROOT=/opt/opensro
 RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src/engine/runtime/mobile-lite \
@@ -37,6 +38,7 @@ RUN mkdir -p apps/client-next/src/engine/runtime/auto-train apps/client-next/src
  && cp /tmp/hieusro-mobile-memory.ts apps/client-next/src/engine/foundation/rendering/mobile-memory.ts \
  && cp /tmp/hieusro-mobile-memory.test.mjs apps/client-next/tests/runtime/hieusro-mobile-memory.test.mjs \
  && python3 /tmp/patch-mobile-memory-v2.py \
+ && python3 /tmp/patch-mobile-title-retry.py \
  && cd apps/client-next \
  && node --test tests/runtime/hieusro-auto-train.test.mjs tests/runtime/hieusro-mobile-lite.test.mjs tests/runtime/hieusro-mobile-memory.test.mjs
 

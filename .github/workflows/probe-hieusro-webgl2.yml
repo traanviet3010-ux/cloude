@@ -87,6 +87,11 @@ jobs:
           valid=[b for s in sectors for b in s['blocks'] if len(b.get('heights',[]))==289]
           assert valid,('Terrain has no real 17x17 SRO height cells',key)
           print('VERIFIED_REAL_TERRAIN=1',key,'cell_count',len(valid))
+          tiles=bundle.get('terrainTextures',{}).get('tileCatalog',{}).get('referencedTiles',[])
+          placements=bundle.get('objects',{}).get('placements',[])
+          resources=bundle.get('objects',{}).get('resources',{})
+          print('REAL_REGION_RESOURCE_SHAPE', 'tile_count',len(tiles),'sample_tiles',[(t.get('textureId'),t.get('imagePublicPath','')[-70:]) for t in tiles[:4]],'placements',len(placements),'embedded_meshes',len(resources.get('meshes',[])),'bsr',len(resources.get('bsr',[])),'resources_index',bundle.get('objects',{}).get('resourceIndexPublicPath'),flush=True)
+
           try:
             s,h,api=get('/api/title/servers',timeout=18)
             servers=json.loads(api)

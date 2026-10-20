@@ -59,3 +59,13 @@ A TEST player must explicitly click the admission action. Authentication secrets
 
 `npm run build`, `npm run test`, GitHub Actions `hieusro-webgl2-build.yml`.
 Existing public Render smoke workflow already verifies Babylon terrain and genuine textures; the admission probe needs a separate authenticated, **manual TEST** smoke with disposable credentials. Successful static CI or TCP WebSocket upgrade must never be labelled 'playable MMORPG' or 'server-authoritative gameplay working'.
+
+## 2026-10-20 Native title restoration and GameWorld readiness finding
+
+- Source of title UI is the **original iSRO CIF** title layout `/assets/cif/layouts/pstitle.json` and actual SROPACK2-backed PNGs. Verify workflow `verify-native-title-cif-test.yml` passed for logo, login-window, OK and server-list art.
+- `src/native-title.ts`, `index.html`, and `src/style.css` create a responsive authentic-art login screen. This is **not** yet pixel-identical to the old 3D title scene, which depends on additional animated models and camera stages. No fake assets are used.
+- By default the browser no longer downloads/renders terrain while waiting for GameWorld. `?debug=1` and explicit preview mode still test genuine Babylon terrain.
+- The old title → character dock → native token-protected GameWorld boundary remains. **A handshake probe is not live gameplay.** Do not rename its control to 'Enter Game' until native packets/actors/movement are implemented.
+- Read-only diagnostic GitHub run `39450354355`: WebGL2 HTTP health returned **200**, `/api/title/servers` through TEST returned **502**, isolated TEST backend `/healthz`, `/readyz`, `/api/title/servers` timed out after **18 seconds**. Therefore long server wait is upstream TEST service availability, not WebGL2 terrain. Do not silently route users to LIVE to bypass the error.
+- Title UI build/test passed in GitHub Actions; **deployment to Render TEST is not verified.** Previous Render smoke workflow failed to find newly built UI, suggesting the deployed version was older at that moment.
+- To make TEST backend reliably online and actually deploy latest Babylon client, inspect Render service/branch/deploy/logs in the correct user-confirmed workspace; keep LIVE, old Icons Preview and their databases unchanged.

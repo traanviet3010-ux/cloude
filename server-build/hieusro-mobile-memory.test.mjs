@@ -37,11 +37,12 @@ test("LRU evicts only assets explicitly offered by their owner, never during fra
  assert.equal(b.destroyed,0);
  assert.ok(ledger.stats().overBudgetMB>0);
  ledger.offerEviction(a,()=>a.destroy());
- ledger.registerBuffer(c,{size:600000,usage:1});
  ledger.beginFrame();
- assert.equal(a.destroyed,0); // old asset is already evicted at registration only if over budget and unpinned
+ ledger.registerBuffer(c,{size:600000,usage:1});
+ assert.equal(a.destroyed,0); // never evict while a frame is being recorded
  ledger.endFrame();
- // It is legal for the candidate to be reclaimed after the frame, never blindly kill b/c.
+ assert.equal(a.destroyed,1); // oldest opt-in candidate reclaimed after frame
+ // The still-owned allocations have no opt-in callback and must remain alive.
  assert.equal(b.destroyed,0);
  assert.equal(c.destroyed,0);
  ledger.dispose();

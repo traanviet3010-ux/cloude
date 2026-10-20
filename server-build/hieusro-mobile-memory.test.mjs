@@ -28,17 +28,17 @@ test("GPU byte registry tracks allocations and balances owner destruction",()=>{
  assert.equal(b.destroyed,1);
 });
 test("LRU evicts only assets explicitly offered by their owner, never during frame",()=>{
- const ledger=createGpuLedger(1);
+ const ledger=createGpuLedger(16);
  const a=fakeBuffer(),b=fakeBuffer(),c=fakeBuffer();
- ledger.registerBuffer(a,{size:600000,usage:1});
- ledger.registerBuffer(b,{size:600000,usage:1});
+ ledger.registerBuffer(a,{size:9000000,usage:1});
+ ledger.registerBuffer(b,{size:9000000,usage:1});
  // No unowned object can be destroyed simply because estimated use exceeds budget.
  assert.equal(a.destroyed,0);
  assert.equal(b.destroyed,0);
  assert.ok(ledger.stats().overBudgetMB>0);
  ledger.offerEviction(a,()=>a.destroy());
  ledger.beginFrame();
- ledger.registerBuffer(c,{size:600000,usage:1});
+ ledger.registerBuffer(c,{size:9000000,usage:1});
  assert.equal(a.destroyed,0); // never evict while a frame is being recorded
  ledger.endFrame();
  assert.equal(a.destroyed,1); // oldest opt-in candidate reclaimed after frame

@@ -36,7 +36,15 @@ jobs:
           assert 'tiles.delete(key)' in world and 'mesh.dispose(' in world
           assert 'SROPACK2' in assets and 'SHA-256' in assets and '206' in assets
           assert 'world-region-catalog.json' in app
-          assert '/api/title/login' in app and '/api/character/list' in app
+          native=(p/'src/characters.ts').read_text()
+          backend=(p/'src/backend.ts').read_text()
+          html=(p/'index.html').read_text()
+          assert '/api/title/login' in app
+          assert '/api/character/list' in native and '/api/character/create' in native
+          assert '/api/character/name-overlap' in native
+          assert 'nativeResult' in native and 'Bearer' in native
+          assert 'requestBackend' in app and 'BackendError' in app and 'retryable' in backend
+          assert 'character-panel' in html and 'create-character' in html
           assert 'proxy.ws(' in server and '/assets/packs/' in server
           assert 'play.143-198-217-75.sslip.io' not in server
           assert 'hieusro-icons-preview-20261019.onrender.com' not in server

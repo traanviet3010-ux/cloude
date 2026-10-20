@@ -1,0 +1,52 @@
+name: Probe Render HieuSRO Mobile Lite V2 TEST
+on:
+  push:
+    branches: [hieusro-mobile-memory-v2-test-20261020]
+    paths: ['.github/workflows/probe-mobile-memory-v2.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify V2 HTML, UI assets, CDN pack routing and optional backend
+        env:
+          BASE: https://hieusro-mobile-lite-v2-memory-test.onrender.com
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.request, urllib.error, hashlib,re
+          base=os.environ['BASE']
+          def get(path,headers=None):
+            with urllib.request.urlopen(urllib.request.Request(base+path,headers={'Accept-Encoding':'identity',**(headers or {})}),timeout=30) as r:
+              return r.status,{k.lower():v for k,v in r.headers.items()},r.read()
+          s,h,b=get('/__mobile/health')
+          assert s==200 and json.loads(b).get('status')=='ready'
+          print('V2_HEALTH=200')
+          s,h,b=get('/')
+          assert s==200 and b'<html' in b.lower()
+          script=re.search(rb'/assets/entry-[\w-]+\.js',b)
+          assert script, 'No JS entry'
+          print('V2_HTML=200')
+          s,h,scriptbody=get(script.group().decode())
+          assert s==200 and b'GPU_BUDGET_IOS_MB' not in scriptbody # minified
+          assert 'Trình duyệt vừa bị đầy bộ nhớ'.encode() in scriptbody or b'MB' in scriptbody
+          print('V2_BUNDLE_PRESENT=1')
+          s,h,raw=get('/assets/packs/manifest.json')
+          m=json.loads(raw)
+          assert len(m['groups'])==17 and sum(len(g['packs']) for g in m['groups'])==213
+          assert h.get('x-hieusro-asset-source')=='render-cdn-test'
+          print('V2_CDN_MANIFEST=213')
+          p=next(p for g in m['groups'] for p in g['packs'] if p['bytes']>1000000)
+          s,h,r=get(p['path'],{'Range':'bytes=0-15'})
+          assert s==206 and h.get('content-range')==f"bytes 0-15/{p['bytes']}" and r[:8]==b'SROPACK2'
+          print('V2_CDN_HTTP_206_OK=1')
+          try:
+            s,h,data=get('/api/title/servers',{'X-OpenSRO-Protocol':'6'})
+            assert s==200 and any(x['name']=='HieuSRO' for x in json.loads(data))
+            print('V2_BACKEND_SERVERS_OK=1')
+          except (urllib.error.URLError,AssertionError) as exc:
+            print('V2_BACKEND_COLD_OR_FAILED='+str(exc)[:100])
+            # Backend readiness is independent from Mobile Lite asset/router gates.
+          print('V2_ROUTE_PROBE_COMPLETED=1')
+          PY

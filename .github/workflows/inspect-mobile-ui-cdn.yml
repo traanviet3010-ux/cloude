@@ -1,0 +1,32 @@
+name: Inspect missing Mobile Lite UI members in verified CDN
+on:
+  push:
+    branches: [hieusro-mobile-memory-v2-test-20261020]
+    paths: ['.github/workflows/inspect-mobile-ui-cdn.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check licensed UI member paths in CDN manifest (read only)
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request
+          base='https://hieusro-assets-cdn-test-20261020.onrender.com'
+          with urllib.request.urlopen(base+'/assets/packs/manifest.json',timeout=50) as r: m=json.load(r)
+          assets={a['path'].lower():a for a in m['assets']}
+          targets=[
+            '/assets/images/Media_extracted/interface/outer/logo-big.png',
+            '/assets/images/Media_extracted/interface/loading/nowloading.png',
+            '/assets/images/Media_extracted/interface/loading/loading_form.png',
+            '/assets/images/Media_extracted/interface/loading/gauge_loading.png',
+            '/auto-policy.json'
+          ]
+          for path in targets:
+            a=assets.get(path.lower())
+            near=[k for k in assets if k.endswith(path.split('/')[-1].lower())][:5]
+            print('UI_MEMBER',path,'found',bool(a),'pack',a.get('packPath') if a else None,'length',a.get('length') if a else None,'similar',near,flush=True)
+          print('ASSET_MEMBER_CHECK_COMPLETED=1')
+          PY

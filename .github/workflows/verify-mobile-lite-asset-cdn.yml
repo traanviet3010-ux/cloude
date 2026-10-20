@@ -1,0 +1,36 @@
+name: Validate Mobile Lite Render CDN routing (TEST only)
+on:
+  push:
+    branches:
+      - hieusro-mobile-stability-v1-20261020
+    paths:
+      - '.github/workflows/verify-mobile-lite-asset-cdn.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nginx-and-routes:
+    if: github.repository == 'traanviet3010-ux/cloude'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Confirm same-origin route isolation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          c=Path('server-build/nginx.mobile-lite-20261020.conf').read_text()
+          assert 'location = /assets/packs/manifest.json {' in c
+          assert 'location ^~ /assets/packs/ {' in c
+          assert c.count('proxy_pass https://hieusro-assets-cdn-test-20261020.onrender.com;') == 2
+          assert 'proxy_set_header Range $http_range;' in c
+          assert 'proxy_set_header Accept-Encoding identity;' in c
+          assert 'proxy_pass https://hieusro-icons-preview-20261019.onrender.com;' in c
+          assert 'location ^~ /gm/ { return 404; }' in c
+          assert 'location / {' in c and 'location @preview_backend {' in c
+          print('ROUTE_ISOLATION_OK=1')
+          PY
+      - name: Validate Nginx config with same runtime image
+        run: docker run --rm -v "$PWD/server-build/nginx.mobile-lite-20261020.conf:/etc/nginx/nginx.conf:ro" nginx:stable-alpine nginx -t

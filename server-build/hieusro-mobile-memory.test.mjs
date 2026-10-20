@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 const {
   createGpuLedger, gpuMemoryStats, registerGpuDevice, unregisterGpuDevice,
-  maxMobilePixelRatio, mobileGpuBudgetMB, GPU_BUDGET_IOS_MB,
+  maxMobilePixelRatio, mobileGpuBudgetMB, setWorkerRescueMode, GPU_BUDGET_IOS_MB,
   GPU_BUDGET_IOS_RESCUE_MB, rescueMode, startMobileMemorySession
 } = await import("../../src/engine/foundation/rendering/mobile-memory.ts");
 function fakeBuffer() {
@@ -76,6 +76,9 @@ test("WebContent rescue policy is 250MB only for prior interrupted iPhone load",
    Object.defineProperty(globalThis,"devicePixelRatio",{configurable:true,value:3});
    assert.equal(mobileGpuBudgetMB(),GPU_BUDGET_IOS_MB);
    assert.equal(maxMobilePixelRatio(),1.5);
+   setWorkerRescueMode(true);
+   assert.equal(rescueMode(),true); // no sessionStorage needed in worker
+   setWorkerRescueMode(false);
    store.set("hieusro-mobile-v2-rescue","1");
    assert.equal(rescueMode(),true);
    assert.equal(mobileGpuBudgetMB(),GPU_BUDGET_IOS_RESCUE_MB);

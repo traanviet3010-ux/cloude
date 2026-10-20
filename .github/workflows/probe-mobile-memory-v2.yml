@@ -52,6 +52,15 @@ jobs:
           s,h,r=get(p['path'],{'Range':'bytes=0-15'})
           assert s==206 and h.get('content-range')==f"bytes 0-15/{p['bytes']}" and r[:8]==b'SROPACK2'
           print('V2_CDN_HTTP_206_OK=1')
+          for ui_path in (
+            '/assets/images/Media_extracted/interface/outer/logo-big.png',
+            '/assets/images/Media_extracted/interface/loading/nowloading.png',
+            '/assets/images/Media_extracted/interface/loading/loading_form.png',
+            '/assets/images/Media_extracted/interface/loading/gauge_loading.png',
+          ):
+            s,h,data=get(ui_path)
+            assert s==200 and data[:8]==b'\x89PNG\r\n\x1a\n', (ui_path,s,data[:16])
+            print('V2_LOCAL_UI_OK='+ui_path+' bytes='+str(len(data)))
           try:
             s,h,data=get('/api/title/servers',{'X-OpenSRO-Protocol':'6'})
             assert s==200 and any(x['name']=='HieuSRO' for x in json.loads(data))

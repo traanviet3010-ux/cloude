@@ -14,3 +14,15 @@ input{margin-top:3px}button{cursor:pointer;background:#285677}button:disabled{op
 nav{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 18px);right:12px;display:grid;grid-template-columns:42px 42px;gap:5px}nav button{width:42px;min-height:42px;touch-action:none}
 @media (max-width:700px){#auth{width:min(265px,calc(100vw - 16px));top:calc(env(safe-area-inset-top) + 54px)}#world-menu{width:min(245px,calc(100vw - 16px));bottom:calc(env(safe-area-inset-bottom) + 44px)}nav{bottom:calc(env(safe-area-inset-bottom) + 44px)}#status{font-size:10px}header{padding:6px}}
 @media (orientation:portrait) and (max-width:700px){#auth{transform:scale(.9);transform-origin:top left}#world-menu{transform:scale(.9);transform-origin:bottom left} }
+
+/* Character roster is hidden until a successful authenticated TEST login.
+   Keep forms usable when iPhone Safari is in portrait or landscape mode. */
+#auth{max-height:calc(100dvh - 132px);overflow-y:auto;overscroll-behavior:contain}
+#character-panel{grid-column:1/-1;display:grid;gap:7px;padding-top:9px;border-top:1px solid #536274}
+#character-panel[hidden]{display:none}
+#character-panel h3{font-size:14px;margin:0;color:#e6edf8}
+#roster-list{margin:0;padding:0 0 0 18px;font-size:12px;line-height:1.6}
+#character-creator{border:1px solid #4e647a;border-radius:7px;padding:8px}
+#character-creator summary{font-size:13px;cursor:pointer;line-height:1.7}
+#character-creator label{margin-top:7px}
+#character-creator label select{margin-top:3px}

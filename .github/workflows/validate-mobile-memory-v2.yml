@@ -1,0 +1,24 @@
+name: Validate HieuSRO Mobile Memory V2 TEST
+on:
+  push:
+    branches: [hieusro-mobile-memory-v2-test-20261020]
+    paths:
+      - 'server-build/hieusro-mobile-memory.ts'
+      - 'server-build/hieusro-mobile-memory.test.mjs'
+      - 'server-build/patch-mobile-memory-v2.py'
+      - 'server-build/Dockerfile.mobile-lite-20261020'
+      - '.github/workflows/validate-mobile-memory-v2.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    if: github.repository == 'traanviet3010-ux/cloude'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Check patch Python syntax
+        run: python3 -m py_compile server-build/patch-mobile-memory-v2.py
+      - name: Build tested Mobile Lite client and nginx (no deployment)
+        run: docker build --progress=plain --file server-build/Dockerfile.mobile-lite-20261020 --tag hieusro-mobile-memory-v2:ci server-build

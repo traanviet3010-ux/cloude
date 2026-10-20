@@ -64,7 +64,7 @@ def main():
     for entry in assets:
         if entry.get("group") in GROUPS:
             path=safe_path(entry["path"])
-            if not path.lower()==path: fail("Unexpected noncanonical member path")
+            # OpenSRO member paths preserve original mixed case; the manifest lookup is case-insensitive.
             if entry["length"]>MAX_MEMBER:fail("Oversized UI member")
             bypack.setdefault(entry["packPath"],[]).append(entry)
     output_count=0;output_bytes=0;download_bytes=0
@@ -119,6 +119,8 @@ def main():
     alias=folder/"Media_extracted"
     if target.is_dir() and not alias.exists():
         alias.symlink_to("media_extracted",target_is_directory=True)
+    elif alias.is_dir() and not target.exists():
+        target.symlink_to("Media_extracted",target_is_directory=True)
     print(f"LOCAL_UI_READY=1 FILES={output_count} BYTES={output_bytes} PACK_DOWNLOAD_BYTES={download_bytes}",flush=True)
 if __name__=="__main__":
     try:main()

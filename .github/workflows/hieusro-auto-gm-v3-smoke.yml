@@ -1,0 +1,55 @@
+name: HieuSRO GM Auto V3 External Smoke
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-auto-gm-v3-smoke.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check published gameplay policy and protected GM admin panel
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=https://hieusro-drive-test-20261019.onrender.com
+          for i in $(seq 1 18); do
+            status=$(curl -sSL --max-time 20 -o /tmp/page -w '%{http_code}' "$base/" || true)
+            ready=$(curl -sS --max-time 20 -o /tmp/ready -w '%{http_code}' "$base/readyz" || true)
+            if [[ "$status" == "200" && "$ready" == "200" ]]; then break; fi
+            echo "Wake server $i: page=$status ready=$ready"
+            sleep 10
+          done
+          [[ "$status" == "200" && "$ready" == "200" ]]
+          echo 'PASS: real browser and GameWorld ready'
+          curl -fsSL --max-time 20 "$base/auto-policy.json" > /tmp/policy.json
+          python3 - <<'PY'
+          import json
+          row=json.load(open('/tmp/policy.json'))
+          assert type(row['enabled']) is bool
+          assert type(row['maxRadius']) is int and 10 <= row['maxRadius'] <= 100
+          assert type(row['maxMinutes']) is int and 15 <= row['maxMinutes'] <= 1440
+          print('PASS: same-origin public GM policy is well-formed',row)
+          PY
+          curl -fsSL --max-time 20 "$base/gm/" > /tmp/gm.html
+          grep -q 'autoPolicyForm' /tmp/gm.html
+          grep -q 'autoPolicyEnabled' /tmp/gm.html
+          echo 'PASS: responsive GM Auto Train config form published'
+          curl -fsSL --max-time 20 "$base/gm/auto-policy.js" > /tmp/gm-auto.js
+          grep -q 'initAutoPolicy' /tmp/gm-auto.js
+          echo 'PASS: GM form JavaScript wired'
+          read=$(curl -sS --max-time 20 -o /tmp/deny-read -w '%{http_code}' "$base/gm/api/auto-policy")
+          write=$(curl -sS --max-time 20 -o /tmp/deny-write -w '%{http_code}' \
+            -X PUT -H 'Content-Type: application/json' \
+            -d '{"enabled":false,"maxRadius":10,"maxMinutes":15}' "$base/gm/api/auto-policy")
+          [[ "$read" == "401" && "$write" == "401" ]] || {
+            echo "AUTH FAILED: unauthenticated GM policy read=$read write=$write";exit 1;
+          }
+          echo 'PASS: GM Auto policy read and write both require authenticated session'
+          script=$(grep -oE 'src="/assets/[^"]+\.js"' /tmp/page | head -n 1 | cut -d '"' -f2)
+          curl -fsSL --max-time 40 "$base$script" > /tmp/client.js
+          grep -q 'auto-policy.json' /tmp/client.js
+          grep -q 'auto-extra-skills' /tmp/client.js
+          echo 'PASS: live game client polls GM policy and retains 12-slot skill UI'

@@ -1,0 +1,77 @@
+name: HieuSRO Mobile Lite public browser smoke
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-mobile-lite-public-smoke.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mobile-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: External backend and client integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=https://hieusro-mobile-lite-20261020.onrender.com
+          for i in $(seq 1 18); do
+            status=$(curl -sSL --max-time 25 -o /tmp/hieusro-index -w '%{http_code}' "$base/" || true)
+            ready=$(curl -sS --max-time 20 -o /tmp/hieusro-ready -w '%{http_code}' "$base/readyz" || true)
+            if [[ "$status" == "200" && "$ready" == "200" ]]; then break; fi
+            echo "Mobile Lite Render is starting: $i status=$status ready=$ready"
+            sleep 10
+          done
+          [[ "$status" == "200" && "$ready" == "200" ]]
+          echo "PASS: new independent Render Mobile Lite and GameWorld online"
+          bundle=$(grep -oE 'src="/assets/[^"]+\.js"' /tmp/hieusro-index | head -1 | cut -d'"' -f2)
+          test -n "$bundle"
+          curl -fsSL --max-time 50 "$base$bundle" -o /tmp/mobile-client.js
+          grep -q 'hieusro-mobile-lite' /tmp/mobile-client.js
+          grep -q 'auto-icon-picker' /tmp/mobile-client.js
+          grep -q 'No WebGPU adapter' /tmp/mobile-client.js
+          echo "PASS: production bundle includes Mobile Lite, original Auto and GPU warning"
+          curl -fsSL --max-time 35 "$base/assets/images/Media_extracted/icon/skill/china/sword_smash_a.png" -o /tmp/skill.png
+          python3 - <<'PY'
+          from pathlib import Path
+          content=Path("/tmp/skill.png").read_bytes()
+          assert content.startswith(b'\x89PNG\r\n\x1a\n') and len(content)>128
+          print("PASS: authentic PK2 Skill icons are still served locally", len(content))
+          PY
+      - name: Exercise mobile UI with real Chromium (not a physical Safari test)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix /tmp/hieusro-mobile-browser --no-save playwright-core@1.63.0
+          cat >/tmp/hieusro-mobile-browser/verify.mjs <<'JS'
+          import {chromium} from 'playwright-core';
+          const browser=await chromium.launch({headless:true,executablePath:'/usr/bin/google-chrome',
+            args:['--no-sandbox','--disable-dev-shm-usage','--disable-webgpu']});
+          const page=await browser.newPage({
+            viewport:{width:428,height:926},
+            deviceScaleFactor:3,
+            isMobile:true,
+            hasTouch:true,
+            userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 26_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1'
+          });
+          const errors=[];
+          page.on('pageerror',error=>errors.push(error.message));
+          await page.goto('https://hieusro-mobile-lite-20261020.onrender.com/',{waitUntil:'domcontentloaded',timeout:90000});
+          await page.locator('#hieusro-mobile-lite').waitFor({state:'attached',timeout:40000});
+          const summary=await page.locator('#hieusro-mobile-lite').evaluate(el=>{
+            const root=el.shadowRoot;
+            return {toggle:root.querySelector('button')?.textContent,
+              status:root.querySelector('.panel')?.innerText ?? '',
+              reloads:performance.getEntriesByType('navigation').length};
+          });
+          await page.locator('#hieusro-mobile-lite').evaluate(el=>el.shadowRoot.querySelector('button').click());
+          const isOpen=await page.locator('#hieusro-mobile-lite').evaluate(el=>!el.shadowRoot.querySelector('.panel').hidden);
+          if(!isOpen || !summary.toggle?.includes('Mobile Lite'))throw Error('Mobile Lite HUD cannot be opened: '+JSON.stringify(summary));
+          if(errors.length) throw Error('Browser startup exception: '+errors.slice(0,4).join('; '));
+          console.log('PASS: virtual iPhone viewport boots independently with Mobile Lite HUD and no JS crash',summary);
+          await browser.close();
+          JS
+          node /tmp/hieusro-mobile-browser/verify.mjs

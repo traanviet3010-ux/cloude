@@ -1,0 +1,48 @@
+name: HieuSRO Preview Public Icon Smoke
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-preview-icon-smoke.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check actual Render Preview game client and native media icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://hieusro-icons-preview-20261019.onrender.com"
+          for i in $(seq 1 12); do
+            status=$(curl -sSL --max-time 25 -o /tmp/index.html -w '%{http_code}' "$url/" || true)
+            ready=$(curl -sS --max-time 20 -o /tmp/readyz -w '%{http_code}' "$url/readyz" || true)
+            if [[ "$status" == "200" && "$ready" == "200" ]]; then break; fi
+            echo "Waiting for preview to wake: $i page=$status ready=$ready"
+            sleep 10
+          done
+          [[ "$status" == "200" && "$ready" == "200" ]] || exit 1
+          echo 'PASS: Render Preview returns HTML and GameWorld readyz'
+          source=$(grep -oE 'src="/assets/[^"]+\.js"' /tmp/index.html | head -n 1 | cut -d '"' -f2)
+          test -n "$source"
+          curl -fsSL --max-time 45 "$url$source" > /tmp/hieusro-client.js
+          grep -q 'auto-icon-picker' /tmp/hieusro-client.js
+          grep -q 'auto-skill-icon' /tmp/hieusro-client.js
+          grep -q 'auto-extra-skills' /tmp/hieusro-client.js
+          echo 'PASS: browser bundle has actual native skill picker, Buff picker and rotation'
+          icon="$url/assets/images/Media_extracted/icon/skill/china/sword_smash_a.png"
+          curl -fSL --max-time 35 "$icon" -o /tmp/skill-icon.png
+          python3 - <<'PY'
+          from pathlib import Path
+          image=Path('/tmp/skill-icon.png').read_bytes()
+          assert image.startswith(b'\x89PNG\r\n\x1a\n'),"Skill image is not published native PNG"
+          assert len(image)>=128,"Skill icon is too small"
+          print('PASS: Real native PK2 Silkroad skill PNG loads, bytes:',len(image))
+          PY
+          policy=$(curl -sS --max-time 20 -o /tmp/policy.json -w '%{http_code}' "$url/auto-policy.json")
+          test "$policy" = "200"
+          echo 'PASS: protected GM policy still available to online Auto runtime'

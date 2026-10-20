@@ -1,0 +1,60 @@
+name: HieuSRO OpenSRO Asset Inventory Read Only
+on:
+  pull_request:
+    paths:
+      - .github/workflows/hieusro-opensro-assets-inventory.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: List remote asset manifest without downloading packs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, urllib.request, collections
+          targets = [
+              'https://opensro.online/assets/packs/manifest.json',
+              'https://hieusro-icons-preview-20261019.onrender.com/assets/packs/manifest.json'
+          ]
+          for url in targets:
+              print('BEGIN_SITE',url,flush=True)
+              try:
+                  req=urllib.request.Request(url,headers={'User-Agent':'HieuSRO-Audit-ReadOnly/1.0','Cache-Control':'no-cache'})
+                  with urllib.request.urlopen(req,timeout=35) as r:
+                      raw=r.read(20_000_000)
+                      print('HTTP_STATUS',r.status,'BYTES_MANIFEST',len(raw),'CONTENT_TYPE',r.headers.get('content-type'),flush=True)
+                  data=json.loads(raw)
+                  print('MANIFEST_ROOT',type(data).__name__, list(data.keys())[:30] if isinstance(data,dict) else 'array',flush=True)
+                  import hashlib
+                  print('MANIFEST_SHA256',hashlib.sha256(raw).hexdigest(),flush=True)
+                  print('GENERATED_AT',data.get('generatedAt'),'ASSET_SCHEMA',data.get('assetSchema'),flush=True)
+                  groups=data.get('groups',[])
+                  if not isinstance(groups,list):
+                      print('INVALID_GROUPS',type(groups).__name__)
+                      continue
+                  packs=[(g,p) for g in groups for p in (g.get('packs') or [])]
+                  assets=data.get('assets',[])
+                  print('ASSET_TOTAL_GROUPS',len(groups))
+                  print('ASSET_TOTAL_PACKS',len(packs))
+                  print('ASSET_TOTAL_BYTES',sum(int(p.get('bytes') or 0) for _,p in packs))
+                  print('ASSET_TOTAL_MEMBERS',len(assets))
+                  for g in sorted(groups,key=lambda x:-sum(int(p.get('bytes') or 0) for p in (x.get('packs') or []))):
+                      pg=g.get('packs') or []
+                      info={
+                        'name':g.get('name'),'load':g.get('load'),
+                        'packCount':len(pg),'packBytes':sum(int(p.get('bytes') or 0) for p in pg),
+                        'members':g.get('assetCount'),
+                        'rawBytes':g.get('totalBytes'),
+                        'samples':[(p.get('path'),p.get('bytes')) for p in pg[:3]]
+                      }
+                      print('GROUP',json.dumps(info,ensure_ascii=False),flush=True)
+                  print('SAMPLE_ASSETS',json.dumps([a.get('path') for a in assets[:18]],ensure_ascii=False),flush=True)
+              except Exception as exc:
+                  print('FETCH_FAILED',type(exc).__name__,str(exc)[:500],flush=True)
+              print('END_SITE',url,flush=True)
+          PY

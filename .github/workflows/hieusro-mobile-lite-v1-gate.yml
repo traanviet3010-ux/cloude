@@ -1,0 +1,56 @@
+name: HieuSRO iPhone Mobile Lite V1 Gate
+on:
+  pull_request:
+    paths: [.github/workflows/hieusro-mobile-lite-v1-gate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mobile-lite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hieusro-mobile-stability-v1-20261020
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Pinned OpenSRO 1.150 source and packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile server-build/patch-mobile-lite.py
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-v150
+          cd /tmp/opensro-v150
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Integrate real skill Auto and Mobile Lite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HIEUSRO_OPENSRO_ROOT=/tmp/opensro-v150
+          mkdir -p /tmp/opensro-v150/apps/client-next/src/engine/runtime/{auto-train,mobile-lite}
+          cp server-build/hieusro-auto-train.ts /tmp/opensro-v150/apps/client-next/src/engine/runtime/auto-train/auto-train.ts
+          cp server-build/hieusro-auto-skill-picker.ts /tmp/opensro-v150/apps/client-next/src/engine/runtime/auto-train/skill-picker.ts
+          cp server-build/hieusro-auto-train.test.mjs /tmp/opensro-v150/apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
+          python3 server-build/patch-auto-train.py
+          cp server-build/hieusro-mobile-lite.ts /tmp/opensro-v150/apps/client-next/src/engine/foundation/rendering/mobile-lite.ts
+          cp server-build/hieusro-mobile-hud.ts /tmp/opensro-v150/apps/client-next/src/engine/runtime/mobile-lite/mobile-hud.ts
+          cp server-build/hieusro-mobile-lite.test.mjs /tmp/opensro-v150/apps/client-next/tests/runtime/hieusro-mobile-lite.test.mjs
+          python3 server-build/patch-mobile-lite.py
+      - name: Native regression tests — Auto and iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/opensro-v150/apps/client-next
+          node --test tests/runtime/hieusro-auto-train.test.mjs tests/runtime/hieusro-mobile-lite.test.mjs
+          echo 'PASS: native Auto regression + Mobile Lite iPhone policy and WebGPU safety'
+      - name: Full browser production client build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/opensro-v150
+          corepack pnpm --filter @sro/client-next build
+          echo 'PASS: complete client browser build'

@@ -1,0 +1,48 @@
+name: HieuSRO Auto V2 Source Gate
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/hieusro-auto-v2-source-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v2-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Read isolated feature branch without changing deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: hieusro-auto-train-complete-20261019
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pristine fixed OpenSRO source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-v150
+          cd /tmp/opensro-v150
+          git checkout 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Integrate V2 through TEST patch only, run real unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HIEUSRO_OPENSRO_ROOT=/tmp/opensro-v150
+          mkdir -p /tmp/opensro-v150/apps/client-next/src/engine/runtime/auto-train
+          cp server-build/hieusro-auto-train.ts /tmp/opensro-v150/apps/client-next/src/engine/runtime/auto-train/auto-train.ts
+          cp server-build/hieusro-auto-train.test.mjs /tmp/opensro-v150/apps/client-next/tests/runtime/hieusro-auto-train.test.mjs
+          python3 server-build/patch-auto-train.py
+          cd /tmp/opensro-v150/apps/client-next
+          node --test tests/runtime/hieusro-auto-train.test.mjs
+      - name: Build exact patched browser client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/opensro-v150
+          corepack pnpm --filter @sro/client-next build
+
+# Stage-2 source gate retries after feature-side patch fixes.

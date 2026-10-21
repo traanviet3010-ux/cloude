@@ -66,3 +66,19 @@ Before deployment, `node webgl2-parity/scripts/release-gate.mjs` must pass. It c
 ### Still blocking actual retail character-screen parity
 
 Original animated/complex meshes can contain lit/shadow/multistage materials, cloth, instanced attachments, riding mounts and FX. Those currently fail closed rather than rendering approximate replacements; the original character dock's runtime adapter is not yet a full `Renderer` implementation. The backend login/character/transport GameWorld protocol remains in the untouched native engine but is **not yet playable with this new renderer**. iPhone Safari device-memory/context-loss testing is also outstanding. Do not change Render TEST/LIVE services based solely on these contract tests.
+
+
+## 2026-10-21 — source-parity lighting and live TEST asset inventory
+
+The initial static unlit material-only renderer was extended to consume the pinned original OpenSRO native material policy for plain Lambert/ambient:
+- `src/original-lighting.ts` extracts the original `worldEnvironment()` float block (diffuse=8, ambient=12, sun direction=84), defaults to the actual retail diagonal direction, and rejects corrupt values.
+- `src/native-world-webgl2.ts` uses the native material's diffuse, ambient, `objectLight` and `unlit` distinctions in GLSL ES 3.00, with separate object-vertex and per-pixel paths. Uninitialized lighting is an explicit error for lit meshes.
+- `src/original-frontend-stage.ts` retains the `WorldScene.environment` and admits supported lit scenes with actual normals and authored material colors.
+- `src/original-webgl2-compositor.ts` computes the packed environment via the **original** `worldEnvironment()` on every frontend frame, not a fake flat-light profile.
+- Plain lit skeletal characters use the same original CPU skinning and material route. Texture stage combiners, shaders with masks/reflection, terrain/lightmaps, waves, particle effects, advanced scene animation and mounted parts are not silently approximated.
+- Pixel tests `native-lighting-pixels.mjs` verify original diagonal Lambert + ambient, facing/back-facing normals, a refused missing environment, and NOLIGHT preservation on actual WebGL2 pixels. `native-compose-pixels.mjs` verifies the lit stage and lit skinned character compose on one GL context.
+- CI source-contract and browser pixel runs at commit `bed67b2c42c02129a1ec5a867ae730196c551b0e` both passed; later revisions require fresh CI evidence.
+
+Read-only audit `hieusro-original-test-stage-audit.yml` checks actual Constantinople, character-select, and both race creation manifests from **isolated** Render TEST. These results are manifest availability only; they do NOT prove that native 3D bundle geometry or rendering, browser login, or gameplay works. Audit failures are surfaced and never patched with synthetic assets.
+
+**Current release status: BLOCKED.** The new WebGL2 modules are not yet an implementation of every method in the pinned `Renderer` interface, are not wired into the original `startRuntime` game loop, and have not entered an authoritative GameWorld session. Never deploy or share a play URL until the original full frontend, runtime rendering, GameWorld interaction, and iPhone Safari acceptance tests pass.

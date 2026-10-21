@@ -38,11 +38,13 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original scenery instancing requires true WebGL2 instance backend");
   if(source.dynamicVertices||source.vertices)throw Error("Original dynamic vertex mesh needs native update pipeline");
   const mat=source.material;
-  if(mat?.texture||mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
+  if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
      mat?.water||mat?.sky||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||mat?.blendPair||
      mat?.fog||mat?.groundDecal||mat?.objectFade||mat?.instanceFade)
     throw Error("Original material requires native staged WebGL2 shader parity");
+  if(mat?.texture && (!uvs||uvs.length!==n*2))
+    throw Error("Original textured Silkroad mesh has no native UV coordinates");
   // Only the minimal unlit vertex format is admitted for the first real draw.
   // Authored geometry values are preserved without scaling or triangulation.
   const data=new Float32Array(n*12);

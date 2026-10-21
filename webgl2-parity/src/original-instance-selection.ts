@@ -54,8 +54,8 @@ export function createOriginalInstanceSelection(groups:readonly WorldGroup[]){
            const dx=Math.fround(camera.eye[0]-src[at+12]!);
            const dy=Math.fround(camera.eye[1]-src[at+13]!);
            const dz=Math.fround(camera.eye[2]-src[at+14]!);
-           const distance=Math.fround(Math.sqrt(
-             Math.fround(Math.fround(dy*dy)+Math.fround(dx*dx)+Math.fround(dz*dz))));
+           const distance=Math.fround(Math.sqrt(Math.fround(
+             dy*dy+dx*dx+dz*dz)));
            const range=descriptor.sceneryRange?sceneryRange:descriptor.range;
            fades.advance(row,distance,descriptor.radius,range,dt,frame);
          }

@@ -144,8 +144,8 @@ try{
    const nativePlacementPixel=(x,y)=>{const p=new Uint8Array(4);
      placedGl.readPixels(x,y,1,1,placedGl.RGBA,placedGl.UNSIGNED_BYTE,p);
      return [...p];};
-   complete.placedFirst=nativePlacementPixel(14,32);
-   complete.placedSecond=nativePlacementPixel(50,32);
+   complete.placedFirst=nativePlacementPixel(1,32);
+   complete.placedSecond=nativePlacementPixel(62,32);
    complete.placedRow=Array.from({length:64},(_,x)=>nativePlacementPixel(x,32)[0]>220?x:-1).filter(x=>x>=0);
    complete.placedStats=placedFrame;
    placementGame.dispose();

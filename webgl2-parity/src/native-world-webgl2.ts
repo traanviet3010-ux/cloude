@@ -93,6 +93,7 @@ export class OriginalWorldWebgl2 {
  private used=0;
  private frame=0;
  private visible=new Set<string>();
+ private pendingTextures=new Set<string>();
  private disposed=false;
  private lost=false;
  private readonly lostHandler=(event:Event)=>{event.preventDefault();this.lost=true;};
@@ -130,7 +131,14 @@ export class OriginalWorldWebgl2 {
      const texture=this.entries.get(id)?.texture;
      if(texture)used.add(texture);
    }
+   for(const key of this.pendingTextures)used.add(key);
    this.worldTextures.put(path,image,used);
+ }
+ /** Pin ALL native assets of an admitting title/character stage, or fail
+     explicitly instead of evicting the first texture while loading the last. */
+ protectPendingTextures(paths:readonly string[]){
+   this.validate();
+   this.pendingTextures=new Set(paths);
  }
  hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
  /** The ORIGINAL worldEnvironment() packed Float32Array; never sample fabricated palette. */

@@ -7,8 +7,10 @@
 import type { Geometry } from "@/engine/contracts/geometry";
 import {admitOriginalGeometry,type GlNativeGeometry} from "./native-geometry";
 import {originalCameraToWebgl2} from "./clip-space";
+import {OriginalWorldTextures} from "./original-world-textures";
+import type {WorldTexture} from "@/engine/contracts/texture";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;
-  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number; }
+  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -18,14 +20,20 @@ layout(location=3) in vec4 aColor;
 uniform mat4 uViewProjection;
 uniform mat4 uModel;
 out vec4 vColor;
-void main(){gl_Position=uViewProjection*uModel*vec4(aPos,1.0);vColor=aColor;}`;
+out vec2 vUv;
+void main(){gl_Position=uViewProjection*uModel*vec4(aPos,1.0);vColor=aColor;vUv=aUv;}`;
 const FS=`#version 300 es
 precision mediump float;
 in vec4 vColor;
+in vec2 vUv;
 uniform vec4 uMaterialColor;
+uniform sampler2D uTexture;
+uniform int uUseTexture;
 uniform float uCutoff;
 out vec4 fragColor;
-void main(){vec4 c=vColor*uMaterialColor;if(c.a<=uCutoff)discard;fragColor=c;}`;
+void main(){vec4 c=vColor*uMaterialColor;
+ if(uUseTexture==1)c*=texture(uTexture,vUv);
+ if(c.a<=uCutoff)discard;fragColor=c;}`;
 function shader(gl:WebGL2RenderingContext,kind:number,source:string){
  const sh=gl.createShader(kind);if(!sh)throw Error("Cannot allocate native GL shader");
  gl.shaderSource(sh,source);gl.compileShader(sh);
@@ -38,6 +46,8 @@ export class OriginalWorldWebgl2 {
  private readonly gl:WebGL2RenderingContext;
  private readonly program:WebGLProgram;
  private readonly entries=new Map<string,Slot>();
+ private readonly worldTextures:OriginalWorldTextures;
+ private readonly white:WebGLTexture;
  private readonly budget:number;
  private used=0;
  private frame=0;
@@ -57,12 +67,31 @@ export class OriginalWorldWebgl2 {
      const e=gl.getProgramInfoLog(p);gl.deleteProgram(p);throw Error("Native scene pipeline: "+e);
    }
    this.program=p;
+   this.worldTextures=new OriginalWorldTextures(gl,/iPhone|iPad/.test(navigator.userAgent)?96:256);
+   const white=gl.createTexture();
+   if(!white)throw Error("Cannot allocate original untextured white fallback");
+   this.white=white;
+   gl.bindTexture(gl.TEXTURE_2D,white);
+   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,
+     new Uint8Array([255,255,255,255]));
+   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
    canvas.addEventListener("webglcontextlost",this.lostHandler,false);
    canvas.addEventListener("webglcontextrestored",()=>{this.lost=true;},{once:true});
  }
  private validate(){
    if(this.disposed||this.lost)throw Error("Original SRO WebGL2 scene no longer available");
  }
+ setTexture(path:string,image:WorldTexture|null){
+   this.validate();
+   const used=new Set<string>();
+   for(const id of this.visible){
+     const texture=this.entries.get(id)?.texture;
+     if(texture)used.add(texture);
+   }
+   this.worldTextures.put(path,image,used);
+ }
+ hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
  private retire(id:string){
    const s=this.entries.get(id);if(!s)return;
    this.gl.deleteBuffer(s.vbo);this.gl.deleteBuffer(s.ebo);
@@ -100,20 +129,31 @@ export class OriginalWorldWebgl2 {
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
      this.entries.set(id,{vao,vbo,ebo,count:row.indices.length,transform:row.transform,
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,
-       bytes:row.byteSize,last:this.frame});
+       bytes:row.byteSize,last:this.frame,
+       texture:geometry.material?.texture??"",
+       blend:geometry.material?.blend??false,
+       doubleSided:geometry.material?.doubleSided??false,
+       depthWrite:geometry.material?.depthWrite??!geometry.material?.blend});
      this.used+=row.byteSize;
    }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);throw e;}
  }
  render(cameraMatrix:Float32Array,sceneIds:readonly string[]){
    this.validate();
    // Prevalidate entire frame; never silently draw a partial world.
-   for(const id of sceneIds)if(!this.entries.has(id))throw Error("Original world group not resident: "+id);
+   for(const id of sceneIds){
+     const s=this.entries.get(id);
+     if(!s)throw Error("Original world group not resident: "+id);
+     if(s.texture&&!this.worldTextures.has(s.texture))
+       throw Error("Original world material texture not resident: "+s.texture);
+   }
    const camera=originalCameraToWebgl2(cameraMatrix);
-   this.frame++;this.visible=new Set(sceneIds);
+   this.frame++;this.visible=new Set(sceneIds);this.worldTextures.frame();
    const gl=this.gl;gl.viewport(0,0,this.canvas.width,this.canvas.height);
    gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
    gl.clearColor(0,0,0,1);gl.clearDepth(1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
    gl.useProgram(this.program);
+   gl.uniform1i(gl.getUniformLocation(this.program,"uTexture"),0);
+   gl.activeTexture(gl.TEXTURE0);
    gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uViewProjection"),false,camera);
    let triangles=0;
    for(const id of sceneIds){
@@ -121,11 +161,17 @@ export class OriginalWorldWebgl2 {
      gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uModel"),false,s.transform);
      gl.uniform4fv(gl.getUniformLocation(this.program,"uMaterialColor"),s.color);
      gl.uniform1f(gl.getUniformLocation(this.program,"uCutoff"),s.alphaCutoff);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),s.texture?1:0);
+     gl.bindTexture(gl.TEXTURE_2D,s.texture?this.worldTextures.get(s.texture):this.white);
+     if(s.doubleSided)gl.disable(gl.CULL_FACE);else{gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);}
+     if(s.blend){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);}
+     else gl.disable(gl.BLEND);
+     gl.depthMask(s.depthWrite);
      gl.bindVertexArray(s.vao);
      gl.drawElements(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,0);
      triangles+=s.count/3;
    }
-   gl.bindVertexArray(null);
+   gl.bindVertexArray(null);gl.depthMask(true);gl.disable(gl.BLEND);
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original World WebGL2 draw failed");
    return {triangleCount:triangles,geometryCount:sceneIds.length,residentMB:this.used/1048576};
  }
@@ -134,6 +180,7 @@ export class OriginalWorldWebgl2 {
    if(this.disposed)return;
    this.disposed=true;this.canvas.removeEventListener("webglcontextlost",this.lostHandler);
    for(const id of [...this.entries.keys()])this.retire(id);
+   this.worldTextures.dispose();this.gl.deleteTexture(this.white);
    this.gl.deleteProgram(this.program);
  }
 }

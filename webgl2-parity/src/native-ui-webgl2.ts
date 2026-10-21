@@ -9,7 +9,7 @@ import {nativeLevelBytes,unpackNativeTexture} from "./native-texture";
 import { compileNativeUi } from "./native-ui-commands";
 type Image = ImageBitmap | ImageData | NativeTexture;
 interface Resident { texture:WebGLTexture;width:number;height:number;bytes:number;lastFrame:number; }
-export type UiGpuStats={residentMB:number;textureCount:number;drawCalls:number;frame:number};
+export type UiGpuStats={residentMB:number;textureCount:number;drawCalls:number;frame:number;missingQuads:number};
 const VERTEX = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aPosition;
@@ -61,6 +61,7 @@ export class NativeUiWebgl2Renderer {
   private pinned=new Set<string>();
   private frameNo=0;
   private calls=0;
+  private missingQuads=0;
   private closed=false;
   private readonly budgetBytes:number;
   private readonly onLost=(event:Event)=>{event.preventDefault();this.lost=true;};
@@ -171,9 +172,15 @@ export class NativeUiWebgl2Renderer {
     if(this.closed||this.lost)throw Error("Native UI renderer unavailable; must be rebuilt after context loss");
     // Validate whole frame *before* changing GPU state: no partial/misleading UI frame.
     const commands=compileNativeUi(scene);
-    const required=new Set(commands.flatMap(c=>
+    // The pinned GPU renderer's device/ui.ts skips only quads whose
+    // original texture/mask hasn't arrived yet. It NEVER paints substitute
+    // white art and NEVER blanks the whole title screen during asset loading.
+    const resident=commands.filter(c=>
+      (!c.texture||this.textures.has(c.texture))&&
+      (!c.maskTexture||this.textures.has(c.maskTexture)));
+    const required=new Set(resident.flatMap(c=>
       [c.texture,...(c.maskTexture?[c.maskTexture]:[])].filter(Boolean)));
-    for(const id of required)if(!this.textures.has(id))throw Error("Original Silkroad UI texture not resident: "+id);
+    this.missingQuads=commands.length-resident.length;
     this.frameNo++;this.calls=0;this.pinned=required;
     for(const id of required)this.textures.get(id)!.lastFrame=this.frameNo;
     const gl=this.gl;
@@ -192,7 +199,7 @@ export class NativeUiWebgl2Renderer {
       gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
     }
     const sx=this.canvas.width/scene.width,sy=this.canvas.height/scene.height;
-    for(const cmd of commands){
+    for(const cmd of resident){
       const [x,y,w,h]=cmd.clip;
       const left=Math.max(0,Math.floor(x*sx)),bottom=Math.max(0,Math.floor(this.canvas.height-(y+h)*sy));
       const right=Math.min(this.canvas.width,Math.ceil((x+w)*sx)),
@@ -220,7 +227,7 @@ export class NativeUiWebgl2Renderer {
     if(gl.getError()!==gl.NO_ERROR)throw Error("OpenSRO WebGL2 native UI frame failed");
   }
   stats():UiGpuStats{return {residentMB:this.used/1048576,textureCount:this.textures.size,
-    drawCalls:this.calls,frame:this.frameNo};}
+    drawCalls:this.calls,frame:this.frameNo,missingQuads:this.missingQuads};}
   dispose(){
     if(this.closed)return;
     this.closed=true;this.canvas.removeEventListener("webglcontextlost",this.onLost);

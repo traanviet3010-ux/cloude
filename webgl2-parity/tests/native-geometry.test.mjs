@@ -34,9 +34,9 @@ test("wrong 3D indices, UVs and arrays are blocked before any GL allocation",()=
   {...triangle(),positions:new Float32Array([1,NaN,0,0,1,0,0,0,1])},
  ])assert.throws(()=>admitOriginalGeometry(g),/geometry|vertex/i);
 });
-test("original animation, instances, lights and textures are never silently omitted",()=>{
+test("original animation and corrupt resource types are never silently omitted",()=>{
  for(const property of [
- {joints:new Uint32Array(12)},{instances:new Float32Array(16)},
+ {joints:new Uint32Array(12)},{instances:new Float32Array(15)},
  {dynamicVertices:true},
  ])assert.throws(()=>admitOriginalGeometry({...triangle(),...property}),/skeleton|instance|dynamic|staged/i);
 });
@@ -54,4 +54,20 @@ test("original unlit SRO UV material keeps native texture reference for real ren
  assert.equal(m.vertexCount,3);
  assert.equal(m.vertices[6],0);
  assert.throws(()=>admitOriginalGeometry({...triangle(),uvs:undefined,material:{...triangle().material,texture:"/assets/original.png"}}),/UV/);
+});
+
+test("original Constantinople GPU instance matrices are retained without expanding meshes on CPU",()=>{
+ const a=identity.slice();a[12]=-.55;
+ const b=identity.slice();b[12]=.55;
+ const resident=admitOriginalGeometry({...triangle(),
+   instances:new Float32Array([...a,...b])});
+ assert.equal(resident.instanceCount,2);
+ assert.equal(resident.triangles,2);
+ assert.equal(resident.vertexCount,3);
+ assert.deepEqual([...resident.instances],[...a,...b]);
+ assert.equal(resident.byteSize,
+   resident.vertices.byteLength+resident.indices.byteLength+
+   resident.transform.byteLength+resident.instances.byteLength);
+ const wrong=identity.slice();wrong[3]=1;
+ assert.throws(()=>admitOriginalGeometry({...triangle(),instances:wrong}),/affine/);
 });

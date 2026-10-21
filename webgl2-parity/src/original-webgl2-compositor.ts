@@ -13,6 +13,7 @@ import { createOriginalStageBridge } from "./original-frontend-stage";
 import { createOriginalUiBridge } from "./original-ui-runtime-bridge";
 import {createOriginalWebgl2Characters} from "./original-characters-webgl2";
 import {viewProjection} from "@/engine/foundation/rendering/world-math";
+import {worldEnvironment} from "@/engine/foundation/rendering/world-environment";
 import type {WorldCamera} from "@/engine/contracts/scene";
 export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   const world=new OriginalWorldWebgl2(canvas,/iPhone|iPad/.test(navigator.userAgent)?160:512);
@@ -41,11 +42,18 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     setCharacterActors(actors:readonly CharacterActor[]){assert();characters.setActors(actors);},
     setWorldCamera(camera:WorldCamera){assert();titleCamera=camera;},
     /** Processes a single authentic world lease, never fakes GameWorld success. */
-    originalFrontendFrame(maxUploads=2){
+    originalFrontendFrame(maxUploads=2,originalSeconds=0){
       assert();
       if(!titleCamera)throw Error("Original Silkroad frontend camera not available");
       stage.step(maxUploads);
-      const matrix=viewProjection(titleCamera,canvas.width/Math.max(1,canvas.height));
+      const aspect=canvas.width/Math.max(1,canvas.height);
+      // The packed world lighting is produced by the EXACT OpenSRO owner,
+      // using the title/dock's actual WorldScene.environment track.
+      // Never substitute a custom ambient/sun/clock for the original.
+      const nativeEnvironment=worldEnvironment(
+        stage.activeEnvironment(),titleCamera,aspect,originalSeconds);
+      world.setOriginalLighting(nativeEnvironment);
+      const matrix=viewProjection(titleCamera,aspect);
       const origin=stage.originRegion();
       const actorIds=origin===null?[]:characters.update(origin);
       const scene=world.render(matrix,[...stage.drawIds(),...actorIds]);

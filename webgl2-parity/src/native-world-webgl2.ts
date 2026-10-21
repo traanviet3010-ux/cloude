@@ -11,7 +11,7 @@ import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -66,6 +66,7 @@ uniform int uAlphaCompare;
 uniform int uObjectFade;
 uniform int uFadeAlphaOnly;
 uniform int uSurfaceAlpha;
+uniform float uStageFactor;
 out vec4 fragColor;
 bool originalAlphaAccept(float pixelAlpha,float reference){
  // Exact pinned GPU shader D3D9 HAL quantization: truncate alpha to
@@ -106,7 +107,7 @@ void main(){
  if(!originalAlphaAccept(fading?fadeAlpha:c.a,alphaRef))discard;
  float outAlpha=uObjectFade==1?
    (fading?fadeAlpha:(uSurfaceAlpha==1?c.a:1.0)):c.a;
- fragColor=vec4(c.rgb,outAlpha);
+ fragColor=vec4(clamp(c.rgb*uStageFactor,vec3(0.0),vec3(1.0)),outAlpha);
 }`;
 function shader(gl:WebGL2RenderingContext,kind:number,source:string){
  const sh=gl.createShader(kind);if(!sh)throw Error("Cannot allocate native GL shader");
@@ -316,6 +317,7 @@ export class OriginalWorldWebgl2 {
        blend:(geometry.material?.blend??false)||(material?.objectFade??false),
        doubleSided:geometry.material?.doubleSided??false,
        depthWrite:geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade),
+       stageFactor:material?.stageFactor??1,
        objectFade:!!material?.objectFade,fadeAlphaOnly:!!material?.fadeAlphaOnly,
        surfaceAlpha:!!material?.surfaceAlpha,
        lit,ambient:new Float32Array(material?.ambient??[1,1,1]),
@@ -362,6 +364,7 @@ export class OriginalWorldWebgl2 {
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectFade"),s.objectFade?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uFadeAlphaOnly"),s.fadeAlphaOnly?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uSurfaceAlpha"),s.surfaceAlpha?1:0);
+     gl.uniform1f(gl.getUniformLocation(this.program,"uStageFactor"),s.stageFactor);
      gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
        s.objectVertexLighting?1:0);

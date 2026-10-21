@@ -21,6 +21,12 @@ const outfile=join(scratch,"decoder.mjs");
 await build({entryPoints:[entry],bundle:true,platform:"node",format:"esm",
  target:"es2022",outfile,alias:{"@":src}});
 const {createWorldDecoder}=await import(pathToFileURL(outfile).href);
+const geometryOut=join(scratch,"original-webgl2-admission.mjs");
+await build({entryPoints:[resolve("src/native-geometry.ts")],bundle:true,
+  format:"esm",platform:"node",target:"es2022",outfile:geometryOut,
+  alias:{"@":src}});
+const {admitOriginalGeometry}=await import(pathToFileURL(geometryOut).href);
+
 if(typeof createWorldDecoder!=="function")throw Error("Pinned real OpenSRO world decoder unavailable");
 const reader=createOriginalPackReader({
  cdnBase:process.env.HIEUSRO_TEST_PACK_CDN,cacheBudgetBytes:96*1024*1024});
@@ -47,6 +53,8 @@ for(const path of scenePaths){
  };
  let totalVertices=0,totalIndices=0;
  const texturePaths=new Set();
+ const admissionReasons=new Map();let nativeGroupsAdmitted=0;
+
  for(const group of scene.groups){
    const m=group.material,g=group.geometry;
    if(m.terrain)counts.terrain++;
@@ -61,11 +69,28 @@ for(const path of scenePaths){
    if(m.texture)texturePaths.add(m.texture);
    if(!g.positions?.length||!g.indices?.length)throw Error("Real region scene has empty geometry: "+group.id);
    totalVertices+=g.positions.length/3;totalIndices+=g.indices.length;
+   try{
+     // Same material/stage safety gate as original-frontend-stage.ts;
+     // no approximation or hidden disabled classes in this audit.
+     if(group.animation||group.visibility||group.ranges||m.terrain||
+        m.water||m.sky||m.lightmap)
+       throw Error("original advanced scene-stage/terrain/sky/water/visibility path");
+     const admitted=admitOriginalGeometry({...g,material:m});
+     if(!admitted.instanceCount)throw Error("no native instance transform");
+     nativeGroupsAdmitted++;
+   }catch(error){
+     const reason=String(error instanceof Error?error.message:error);
+     admissionReasons.set(reason,(admissionReasons.get(reason)??0)+1);
+   }
  }
  const out={
    path,sceneId:scene.id,originRegion:scene.originRegion,
    totalVertices,totalTriangles:totalIndices/3,
    texturePaths:texturePaths.size,counts,
+   webgl2CurrentSupport:{
+     admittedGroups:nativeGroupsAdmitted,blockedGroups:scene.groups.length-nativeGroupsAdmitted,
+     blockerReasons:[...admissionReasons].map(([reason,count])=>({reason,count})).sort((a,b)=>b.count-a.count).slice(0,14)
+   },
    nativeEnvironment:!!scene.environment,navmeshInput:!!bundle.navmesh,
    sceneWarnings:scene.warnings.slice(0,12),
    transport:reader.stats()

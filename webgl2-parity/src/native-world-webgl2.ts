@@ -11,7 +11,7 @@ import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;instances:number;
-  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -59,7 +59,23 @@ uniform int uObjectVertexLighting;
 uniform sampler2D uTexture;
 uniform int uUseTexture;
 uniform float uCutoff;
+uniform int uAlphaCompare;
 out vec4 fragColor;
+bool originalAlphaAccept(float pixelAlpha){
+ // Native D3D alpha-test compares 8-bit alpha/reference values.
+ // 1 NEVER, 2 LESS, 3 EQUAL, 4 LESSEQUAL, 5 GREATER,
+ // 6 NOTEQUAL, 7 GREATEREQUAL (retail default), 8 ALWAYS.
+ int a=int(floor(clamp(pixelAlpha,0.0,1.0)*255.0+0.5));
+ int b=int(floor(clamp(uCutoff,0.0,1.0)*255.0+0.5));
+ if(uAlphaCompare==1)return false;
+ if(uAlphaCompare==2)return a<b;
+ if(uAlphaCompare==3)return a==b;
+ if(uAlphaCompare==4)return a<=b;
+ if(uAlphaCompare==5)return a>b;
+ if(uAlphaCompare==6)return a!=b;
+ if(uAlphaCompare==7)return a>=b;
+ return true;
+}
 void main(){
  vec4 texel=uUseTexture==1?texture(uTexture,vUv):vec4(1.0);
  vec4 c;
@@ -73,7 +89,7 @@ void main(){
    c=vec4(texel.rgb*vColor.rgb*lit,
      texel.a*vColor.a*uMaterialColor.a);
  }else c=texel*vColor*uMaterialColor;
- if(c.a<=uCutoff)discard;
+ if(!originalAlphaAccept(c.a))discard;
  fragColor=c;
 }`;
 function shader(gl:WebGL2RenderingContext,kind:number,source:string){
@@ -243,7 +259,7 @@ export class OriginalWorldWebgl2 {
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
      this.entries.set(id,{vao,vbo,ebo,instanceVbo,instances:row.instanceCount,
        count:row.indices.length,transform:row.transform,
-       color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,
+       color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
        bytes:row.byteSize,last:this.frame,
        texture:geometry.material?.texture??"",
        blend:geometry.material?.blend??false,
@@ -289,6 +305,7 @@ export class OriginalWorldWebgl2 {
      gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uModel"),false,s.transform);
      gl.uniform4fv(gl.getUniformLocation(this.program,"uMaterialColor"),s.color);
      gl.uniform1f(gl.getUniformLocation(this.program,"uCutoff"),s.alphaCutoff);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uAlphaCompare"),s.alphaCompare);
      gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
        s.objectVertexLighting?1:0);

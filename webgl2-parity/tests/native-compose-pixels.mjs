@@ -74,7 +74,41 @@ try{
    const stageGl=nativeCanvas.getContext("webgl2");
    const nativePixel=new Uint8Array(4);
    stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,nativePixel);
-   const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel]};
+   // Original CharacterModel/CharacterActor + native BAN-channel schema:
+   // shader-contract fixture only, NOT a downloaded retail character model.
+   const skeletalPrimitive={
+     name:"pinned-character-contract",node:0,joints:[0],inverseBind:I,image:0,
+     geometry:{
+       positions:new Float32Array([-.7,-.7,.5,.7,-.7,.5,0,.7,.5]),
+       normals:new Float32Array([0,1,0,0,1,0,0,1,0]),
+       uvs:new Float32Array([0,0,1,0,0,1]),
+       indices:new Uint32Array([0,1,2]),
+       joints:new Uint32Array(12),
+       weights:new Float32Array([1,0,0,0,1,0,0,0,1,0,0,0]),
+       transform:I,
+       material:{unlit:true,doubleSided:true,color:[1,1,1,1]}
+     }
+   };
+   game.setCharacterModel("native-avatar-contract",{
+     nodes:[{name:"Bip01",parent:-1,translation:[0,0,0],rotation:[0,0,0,1],scale:[1,1,1]}],
+     primitives:[skeletalPrimitive],
+     images:[{width:1,height:1}],
+     clips:[{name:"native-idle",duration:1,channels:[{
+       node:0,path:"translation",interpolation:"LINEAR",
+       times:new Float32Array([0,1]),values:new Float32Array([0,0,0,0,0,0])
+     }]}]
+   },[{kind:"native-texture",width:1,height:1,format:"bgra8unorm",
+       levels:[new Uint8Array([0,255,0,255])]}]);
+   game.setCharacterActors([{
+     gid:4,model:"native-avatar-contract",
+     pose:{regionId:0,x:0,y:0,z:0,yaw:0},
+     clip:"native-idle",time:0,loop:true,scale:1
+   }]);
+   const characterFrame=game.originalFrontendFrame(2);
+   const characterPixel=new Uint8Array(4);
+   stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,characterPixel);
+   const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel],
+     characterFrame,characterPixel:[...characterPixel]};
    game.dispose();
    return complete;
  });
@@ -86,5 +120,9 @@ try{
    "Original WorldTexture BGRA upload must texture genuine OpenSRO Geometry through native camera");
  assert.equal(data.originalStage.stage.sceneId,"constantinople-genuine-contract");
  assert.equal(data.originalStage.stage.pendingTextures,0);
+ assert.ok(data.characterPixel[1]>220 && data.characterPixel[0]<40 && data.characterPixel[2]<40,
+   "Native character CPU skinned mesh must render on top of original scene in one GL context");
+ assert.equal(data.characterFrame.characters.actors,1);
+ assert.equal(data.characterFrame.triangleCount,2);
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

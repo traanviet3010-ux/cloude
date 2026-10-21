@@ -26,7 +26,7 @@ if [[ -e "$output_root" ]]; then
     { echo "REFUSE: will not overwrite existing native/production assets" >&2; exit 15; }
 fi
 mkdir -p "$output_root"
-for exe in python3 ffmpeg node corepack; do
+for exe in python ffmpeg node corepack; do
   command -v "$exe" >/dev/null || { echo "Missing required builder: $exe" >&2; exit 16; }
 done
 echo "HIEUSRO_ORIGINAL_ASSET_BUILD=ISOLATED_TEST"
@@ -37,6 +37,7 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm assets prepare
 corepack pnpm assets doctor
 corepack pnpm assets build full
-node "${HIEUSRO_PORT_SCRIPTS_ROOT:-$source_root}/webgl2-parity/scripts/verify-native-stage-output.mjs" "$output_root/client-public"
+port_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+node "$port_root/webgl2-parity/scripts/verify-native-stage-output.mjs" "$output_root/client-public"
 echo "REAL_V150_STAGE_ASSETS_BUILT_AND_VERIFIED=1"
 echo "NOTE: This is only an offline asset build. No game deployment or login verification was performed."

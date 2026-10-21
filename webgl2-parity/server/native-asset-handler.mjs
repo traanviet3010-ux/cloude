@@ -63,9 +63,7 @@ export function createNativeAssetHttpHandler(reader){
        status=206;
      }
      const length=size?end-start+1:0;
-     const h={"...":undefined};
-     delete h["..."];
-     Object.assign(h,common,{"Content-Length":length});
+     const h={...common,"Content-Length":length};
      if(status===206)h["Content-Range"]=`bytes ${start}-${end}/${size}`;
      res.writeHead(status,h);
      if(req.method==="HEAD")res.end();

@@ -46,6 +46,12 @@ jobs:
         working-directory: webgl2-parity
         run: |
           node --test tests/original-frontend-flow.integration.mjs
+      - name: Verify actual pinned OpenSRO CPU skeletal pose and materialized mesh
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        working-directory: webgl2-parity
+        run: |
+          node --test tests/original-character-cpu-skin.integration.mjs
       - name: Type-check new WebGL2 owner in real original UI and renderer contracts
         run: |
           corepack enable

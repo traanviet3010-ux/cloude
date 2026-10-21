@@ -56,6 +56,10 @@ try{
      unlit:true,doubleSided:true,alphaCutoff:0,blend:false}));
    owner.render(identity,["lit"]);
    const unlit=sample();
+   owner.set("lit",geometry([0,1,0],{color:[.25,0,0,1],unlit:true,
+     stageFactor:2,doubleSided:true,alphaCutoff:0,blend:false}));
+   owner.render(identity,["lit"]);
+   const stageFactorPixel=sample();
    const a=identity.slice();a[12]=-.55;
    const b=identity.slice();b[12]=.55;
    owner.set("original-instance-group",{
@@ -82,7 +86,7 @@ try{
      new Float32Array([...a,...b]),new Float32Array([1,NaN]));}
    catch(e){rejected=String(e).includes("invalid");}
    owner.dispose();
-   return {refused,front,back,unlit,firstInstance,secondInstance,midpoint,
+   return {refused,front,back,unlit,stageFactorPixel,firstInstance,secondInstance,midpoint,
      instanceStats,partialStats,fadedNear,retainedFar,emptyStats,absent,rejected};
  });
  assert.ok(results.refused,"Uninitialized native environment must fail, not pretend world ready");
@@ -94,6 +98,8 @@ try{
    "Original object-light normal direction must change pixel luminance");
  assert.ok(results.unlit[2]>230&&results.unlit[0]<10&&results.unlit[1]<10,
    "Retail native NOLIGHT must remain color-faithful independently of lighting");
+ assert.ok(results.stageFactorPixel[0]>=119&&results.stageFactorPixel[0]<=136,
+   "Native BSR stageFactor MODULATE2X must multiply .25 material red into .5 pixel intensity");
  assert.ok(results.firstInstance[0]>225&&results.firstInstance[1]<20,
    "First native Silkroad placement must be drawn at the original matrix translation");
  assert.ok(results.secondInstance[0]>225&&results.secondInstance[1]<20,

@@ -5,11 +5,13 @@
  */
 import type { Geometry } from "@/engine/contracts/geometry";
 import type { UiScene } from "@/engine/contracts/ui";
-import type { NativeTexture } from "@/engine/contracts/texture";
+import type { NativeTexture,WorldTexture } from "@/engine/contracts/texture";
+import type { CharacterModel,CharacterActor } from "@/engine/contracts/character";
 import { OriginalWorldWebgl2 } from "./native-world-webgl2";
 import { NativeUiWebgl2Renderer } from "./native-ui-webgl2";
 import { createOriginalStageBridge } from "./original-frontend-stage";
 import { createOriginalUiBridge } from "./original-ui-runtime-bridge";
+import {createOriginalWebgl2Characters} from "./original-characters-webgl2";
 import {viewProjection} from "@/engine/foundation/rendering/world-math";
 import type {WorldCamera} from "@/engine/contracts/scene";
 export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
@@ -19,6 +21,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   catch(error){world.dispose();throw error;}
   const stage=createOriginalStageBridge(world);
   const bridge=createOriginalUiBridge(ui);
+  const characters=createOriginalWebgl2Characters(world);
   let titleCamera:WorldCamera|null=null;
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
@@ -32,6 +35,10 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     setWorldTexture:stage.setWorldTexture,
     setUi:bridge.setUi,
     setUiTexture:bridge.setUiTexture,
+    setCharacterModel(id:string,model:CharacterModel,images:WorldTexture[]){
+      assert();characters.retainModel(id,model,images);
+    },
+    setCharacterActors(actors:readonly CharacterActor[]){assert();characters.setActors(actors);},
     setWorldCamera(camera:WorldCamera){assert();titleCamera=camera;},
     /** Processes a single authentic world lease, never fakes GameWorld success. */
     originalFrontendFrame(maxUploads=2){
@@ -39,9 +46,11 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       if(!titleCamera)throw Error("Original Silkroad frontend camera not available");
       stage.step(maxUploads);
       const matrix=viewProjection(titleCamera,canvas.width/Math.max(1,canvas.height));
-      const scene=world.render(matrix,stage.drawIds());
+      const origin=stage.originRegion();
+      const actorIds=origin===null?[]:characters.update(origin);
+      const scene=world.render(matrix,[...stage.drawIds(),...actorIds]);
       const visible=bridge.draw();
-      return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats()};
+      return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),characters:characters.stats()};
     },
     setOriginalUiTexture(id:string,image:ImageBitmap|ImageData|NativeTexture|null){assert();ui.setTexture(id,image);},
     frame(originalCamera:Float32Array,originalWorldGroups:readonly string[],originalUi:UiScene){
@@ -54,7 +63,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     },
     dispose(){
       if(disposed)return;disposed=true;
-      bridge.dispose();stage.dispose();ui.dispose();world.dispose();
+      bridge.dispose();characters.dispose();stage.dispose();ui.dispose();world.dispose();
     }
   };
 }

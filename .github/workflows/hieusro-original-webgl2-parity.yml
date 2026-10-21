@@ -40,6 +40,12 @@ jobs:
           test -f apps/client-next/src/engine/contracts/ui.ts
           test -f apps/client-next/src/engine/contracts/runtime.ts
           echo 'PINNED_SRO_CLIENT=4f6919d6900d169b89e75647e56c99ca8ebd5cfb'
+      - name: Replay original native intro, login, dock and character creation state machine
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        working-directory: webgl2-parity
+        run: |
+          node --test tests/original-frontend-flow.integration.mjs
       - name: Type-check new WebGL2 owner in real original UI and renderer contracts
         run: |
           corepack enable

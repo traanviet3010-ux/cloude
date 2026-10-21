@@ -37,7 +37,7 @@ test("wrong 3D indices, UVs and arrays are blocked before any GL allocation",()=
 test("original animation, instances, lights and textures are never silently omitted",()=>{
  for(const property of [
  {joints:new Uint32Array(12)},{instances:new Float32Array(16)},
- {dynamicVertices:true},{material:{...triangle().material,texture:"/assets/original.png"}},
+ {dynamicVertices:true},
  ])assert.throws(()=>admitOriginalGeometry({...triangle(),...property}),/skeleton|instance|dynamic|staged/i);
 });
 test("WebGPU original native projection maps into WebGL2 depth range with x/y unchanged",()=>{
@@ -47,4 +47,11 @@ test("WebGPU original native projection maps into WebGL2 depth range with x/y un
  assert.ok(Math.abs(gl[10]-1.6)<1e-6);assert.ok(Math.abs(gl[14]+1.4)<1e-6);
  assert.deepEqual([...gl.slice(0,8)],[...m.slice(0,8)]);
  assert.deepEqual([...m],[...original]);
+});
+
+test("original unlit SRO UV material keeps native texture reference for real renderer",()=>{
+ const m=admitOriginalGeometry({...triangle(),material:{...triangle().material,texture:"/assets/original.png"}});
+ assert.equal(m.vertexCount,3);
+ assert.equal(m.vertices[6],0);
+ assert.throws(()=>admitOriginalGeometry({...triangle(),uvs:undefined,material:{...triangle().material,texture:"/assets/original.png"}}),/UV/);
 });

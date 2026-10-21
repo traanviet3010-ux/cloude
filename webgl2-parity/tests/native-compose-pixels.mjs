@@ -111,6 +111,43 @@ try{
    const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel],
      characterFrame,characterPixel:[...characterPixel]};
    game.dispose();
+
+   // End-to-end native WorldScene.visibility -> pinned OpenSRO
+   // residentSlots/ObjectFades -> WebGL2 instance VBO -> GPU pixel readback.
+   const placementCanvas=document.createElement("canvas");
+   placementCanvas.width=64;placementCanvas.height=64;document.body.appendChild(placementCanvas);
+   const placementGame=createOriginalSilkroadWebgl2(placementCanvas);
+   const p0=I.slice(),p1=I.slice();p0[12]=-.55;p1[12]=.55;
+   const placementGroup={
+     id:"original-native-outdoor-building",
+     center:[0,0,.5],radius:2,instanceRadius:1,
+     material:{color:[1,0,1,1],unlit:true,objectFade:true,
+       doubleSided:true,alphaCutoff:0,blend:false},
+     geometry:{positions:new Float32Array([-.22,-.35,.5,.22,-.35,.5,0,.35,.5]),
+       indices:new Uint32Array([0,1,2]),instances:new Float32Array([...p0,...p1]),
+       transform:I},
+     visibility:[
+       {id:"original-placement-a",radius:1,range:200,cells:[[0,0]],cellRadius:0},
+       {id:"original-placement-b",radius:1,range:200,cells:[[1,0]],cellRadius:0}
+     ]
+   };
+   placementGame.adoptWorld({
+     sceneId:"authored-original-scenery-instances",
+     takeWorld:()=>({scene:{id:"authored-original-scenery-instances",originRegion:0,
+       warnings:[],groups:[placementGroup]},bytes:2048,starBytes:0})
+   },"full");
+   placementGame.setWorldCamera({eye:[0,0,0],target:[0,0,1],fov:Math.PI/2,
+     near:.1,far:10});
+   placementGame.setUi({revision:1,width:64,height:64,quads:[]});
+   const placedFrame=placementGame.originalFrontendFrame(2,0);
+   const placedGl=placementCanvas.getContext("webgl2");
+   const nativePlacementPixel=(x,y)=>{const p=new Uint8Array(4);
+     placedGl.readPixels(x,y,1,1,placedGl.RGBA,placedGl.UNSIGNED_BYTE,p);
+     return [...p];};
+   complete.placedFirst=nativePlacementPixel(14,32);
+   complete.placedSecond=nativePlacementPixel(50,32);
+   complete.placedStats=placedFrame;
+   placementGame.dispose();
    return complete;
  });
  assert.ok(data.ui[0]>220&&data.ui[2]<40,"Authored UiScene must overlay the world on same WebGL2 context");
@@ -125,5 +162,11 @@ try{
    "Native character CPU skinned mesh must render on top of original scene in one GL context");
  assert.equal(data.characterFrame.characters.actors,1);
  assert.equal(data.characterFrame.triangleCount,2);
+ assert.ok(data.placedFirst[0]>225&&data.placedFirst[2]>225,
+   "Original SRO WorldScene placement in resident target cell must be visible");
+ assert.ok(data.placedSecond[0]<10&&data.placedSecond[2]<10,
+   "Nonresident original placement must NOT be painted as invented scenery");
+ assert.equal(data.placedStats.triangleCount,1,
+   "Original GPU residentSlots must select only one original building instance");
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

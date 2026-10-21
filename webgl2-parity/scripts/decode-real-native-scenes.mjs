@@ -54,6 +54,8 @@ for(const path of scenePaths){
  let totalVertices=0,totalIndices=0;
  const texturePaths=new Set();
  const admissionReasons=new Map();let nativeGroupsAdmitted=0;
+ const featureFlags={visibility:0,ranges:0,advancedMaterial:0,plainGeometry:0,
+   eligibilityWithoutSceneCulling:0};
 
  for(const group of scene.groups){
    const m=group.material,g=group.geometry;
@@ -69,6 +71,16 @@ for(const path of scenePaths){
    if(m.texture)texturePaths.add(m.texture);
    if(!g.positions?.length||!g.indices?.length)throw Error("Real region scene has empty geometry: "+group.id);
    totalVertices+=g.positions.length/3;totalIndices+=g.indices.length;
+   if(group.visibility?.length)featureFlags.visibility++;
+   if(group.ranges?.length)featureFlags.ranges++;
+   if(m.terrain||m.water||m.sky||m.lightmap||m.textureStage)
+     featureFlags.advancedMaterial++;
+   try{
+     admitOriginalGeometry({...g,material:m});
+     featureFlags.plainGeometry++;
+     if(!(group.animation||group.ranges||m.terrain||m.water||m.sky||m.lightmap))
+       featureFlags.eligibilityWithoutSceneCulling++;
+   }catch{}
    try{
      // Same material/stage safety gate as original-frontend-stage.ts;
      // no approximation or hidden disabled classes in this audit.
@@ -88,6 +100,7 @@ for(const path of scenePaths){
    totalVertices,totalTriangles:totalIndices/3,
    texturePaths:texturePaths.size,counts,
    webgl2CurrentSupport:{
+     featureFlags,
      admittedGroups:nativeGroupsAdmitted,blockedGroups:scene.groups.length-nativeGroupsAdmitted,
      blockerReasons:[...admissionReasons].map(([reason,count])=>({reason,count})).sort((a,b)=>b.count-a.count).slice(0,14)
    },

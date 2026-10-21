@@ -37,6 +37,18 @@ try{
     const gl=canvas.getContext("webgl2");
     const read=(x,y)=>{const b=new Uint8Array(4);gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,b);return [...b];};
     const state={inside:read(8,50),clipped:read(24,50),outside:read(50,50),stats:owner.stats()};
+    const mask=new ImageData(new Uint8ClampedArray([
+      255,255,255,255, 255,255,255,0
+    ]),2,1);
+    owner.setTexture("original-CIF-alpha-mask",mask);
+    owner.draw({revision:2,width:64,height:64,quads:[{
+      rect:[0,0,32,32],clip:[0,0,64,64],uv:[0,0,1,1],
+      color:[1,1,1,1],sampling:"nearest",texture:"original-raster",
+      mask:{texture:"original-CIF-alpha-mask",rect:[0,0,32,32]}
+    }]});
+    state.maskInside=read(4,48);
+    state.maskOutside=read(28,48);
+    state.maskTextureCount=owner.stats().textureCount;
     owner.dispose();
     return state;
   });
@@ -46,5 +58,11 @@ try{
   assert.equal(state.outside[3],0,"Transparent canvas must stay transparent away from original UI");
   assert.equal(state.stats.drawCalls,1);
   assert.equal(state.stats.textureCount,1);
+  assert.ok(state.maskInside[0]>220&&state.maskInside[3]>220,
+    "Original CIF mask must preserve full opacity in its first half");
+  assert.equal(state.maskOutside[3],0,
+    "Original CIF mask must remove alpha from its second half");
+  assert.equal(state.maskTextureCount,2);
+
   console.log("OPEN_SRO_UI_WEBGL2_GL_PIXEL_TEST_PASS",JSON.stringify(state));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

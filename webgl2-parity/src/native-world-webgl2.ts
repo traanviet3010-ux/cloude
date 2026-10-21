@@ -92,6 +92,26 @@ export class OriginalWorldWebgl2 {
    this.worldTextures.put(path,image,used);
  }
  hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
+ /**
+  * Update native CPU-skinned vertices in the existing VBO. No reallocation
+  * of VAO or GPU buffers on each original animation frame.
+  */
+ updateAnimatedGeometry(id:string,geometry:Geometry){
+   this.validate();
+   const slot=this.entries.get(id);
+   if(!slot)throw Error("Native animated geometry not admitted: "+id);
+   const source=admitOriginalGeometry(geometry);
+   if(source.indices.length!==slot.count||source.byteSize!==slot.bytes)
+     throw Error("Original animated mesh topology changed");
+   if((geometry.material?.texture??"")!==slot.texture)
+     throw Error("Original character material texture changed during animation");
+   const gl=this.gl;
+   gl.bindBuffer(gl.ARRAY_BUFFER,slot.vbo);
+   gl.bufferSubData(gl.ARRAY_BUFFER,0,source.vertices);
+   if(gl.getError()!==gl.NO_ERROR)throw Error("Original animated Silkroad vertex update failed");
+   slot.transform.set(source.transform);
+   slot.last=this.frame;
+ }
  private retire(id:string){
    const s=this.entries.get(id);if(!s)return;
    this.gl.deleteBuffer(s.vbo);this.gl.deleteBuffer(s.ebo);

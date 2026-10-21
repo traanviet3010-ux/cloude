@@ -25,8 +25,9 @@ function group(id,overrides={}){
  return {id,geometry:mesh(),material:material(),center:[0,0,0],radius:1,...overrides};
 }
 function renderer(){
- const present=new Map(),updates=[];
- return {set(id,geom){updates.push([id,geom]);if(geom)present.set(id,geom);else present.delete(id);},present,updates};
+ const present=new Map(),updates=[],textures=new Map();
+ return {set(id,geom){updates.push([id,geom]);if(geom)present.set(id,geom);else present.delete(id);},
+   setTexture(path,image){textures.set(path,image);},hasTexture:path=>textures.has(path),present,updates,textures};
 }
 test("genuine OpenSRO one-use scene lease, bounded frame uploads and honest renderer readiness",()=>{
  const w=renderer(),bridge=createOriginalStageBridge(w);
@@ -52,7 +53,6 @@ test("unsupported native Silkroad lighting/animation/texture never silently draw
  const w=renderer(),bridge=createOriginalStageBridge(w);
  for(const data of [
    group("stage-lit",{material:{...material(),unlit:false}}),
-   group("stage-textured",{material:{...material(),texture:"/assets/texture.dds"}}),
    group("stage-skin",{geometry:{...mesh(),bones:new Float32Array(16)}}),
    group("stage-terrain",{material:{...material(),terrain:true}}),
    group("stage-animated",{animation:{model:"silkroad-native",primitive:0,clip:"idle"}}),
@@ -95,5 +95,27 @@ test("stage lease input bounds and double admissions fail without overwriting th
  bridge.adoptWorld(lease("valid",[group("one")]));
  assert.throws(()=>bridge.adoptWorld(lease("second",[group("two")])),/pending/);
  assert.equal(bridge.worldStats().pendingGroups,1);
+ bridge.dispose();
+});
+
+test("native Constantinople scene waits for actual original WorldTexture before revealing GL geometry",()=>{
+ const w=renderer(),bridge=createOriginalStageBridge(w);
+ const path="/assets/title/constantinople/stone.dds";
+ const g=group("real-constantinople-textured",{geometry:{...mesh(),uvs:new Float32Array([0,0,1,0,0,1])},
+   material:{...material(),texture:path}});
+ bridge.adoptWorld(lease("title-constantinople",[g]));
+ assert.deepEqual(bridge.neededWorldTextures(),[path]);
+ assert.equal(bridge.worldStats().pendingTextures,1);
+ assert.equal(bridge.step(),0);
+ assert.deepEqual(bridge.drawIds(),[]);
+ assert.throws(()=>bridge.setWorldTexture("/assets/other",{}),/Unrequested/);
+ const image={kind:"native-texture",format:"bgra8unorm",width:1,height:1,levels:[new Uint8Array([3,2,1,255])]};
+ bridge.setWorldTexture(path,image);
+ assert.equal(w.textures.get(path),image);
+ assert.deepEqual(bridge.neededWorldTextures(),[]);
+ assert.equal(bridge.worldStats().pendingTextures,0);
+ bridge.step();
+ assert.equal(bridge.worldStats().sceneId,"title-constantinople");
+ assert.deepEqual(bridge.drawIds(),[g.id]);
  bridge.dispose();
 });

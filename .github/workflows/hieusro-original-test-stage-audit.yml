@@ -20,7 +20,7 @@ jobs:
       - name: Read authentic public scene manifests from isolated TEST only
         working-directory: webgl2-parity
         env:
-          HIEUSRO_TEST_ASSET_ORIGIN: https://hieusro-icons-srweb-stage-20261020.onrender.com
+          HIEUSRO_TEST_ASSET_ORIGIN: https://hieusro-icons-preview-20261019.onrender.com
         run: node scripts/audit-original-test-stage.mjs
       - name: Keep grounded manifest audit output, including failure report
         if: always()

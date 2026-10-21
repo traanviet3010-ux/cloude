@@ -8,7 +8,9 @@ import {createHash} from "node:crypto";
 import {gunzipSync} from "node:zlib";
 
 const MAX_MANIFEST=28*1024*1024;
-const MAX_ASSET=36*1024*1024;
+// Original OpenSRO frontend/stage/stage.ts admits native world bundles up to 128 MiB.
+// This is a TEST server decoding limit, NOT a Safari resident allocation budget.
+const MAX_ASSET=128*1024*1024;
 const MAX_HEADER=12*1024*1024;
 const defaultCacheBytes=96*1024*1024;
 // Match the pinned HieuSRO SROPACK2 reader's path admission, including

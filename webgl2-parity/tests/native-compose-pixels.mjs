@@ -43,11 +43,48 @@ try{
    const pixels=(x,y)=>{const p=new Uint8Array(4);gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return [...p];};
    const state={ui:pixels(8,50),mesh:pixels(32,16),stats};
    own.dispose();
-   return state;
+   // Separate ownership pass: original (not synthetic HTML) WorldSceneLease
+   // with a BGRA texture in native Silkroad renderer input contract.
+   const nativeCanvas=document.createElement("canvas");
+   nativeCanvas.width=64;nativeCanvas.height=64;document.body.appendChild(nativeCanvas);
+   const game=createOriginalSilkroadWebgl2(nativeCanvas);
+   const texturePath="/assets/title/constantinople/native-stone.dds";
+   const realGroup={
+      id:"native-constantinople-triangle",
+      center:[0,0,1],radius:1,
+      material:{color:[1,1,1,1],texture:texturePath,unlit:true,
+        doubleSided:true,alphaCutoff:0,blend:false},
+      geometry:{
+         positions:new Float32Array([-.7,-.7,1,.7,-.7,1,0,.7,1]),
+         uvs:new Float32Array([0,0,1,0,.5,1]),
+         indices:new Uint32Array([0,1,2]),
+         transform:I
+      }
+   };
+   const lease={sceneId:"constantinople-genuine-contract",takeWorld:()=>({
+      scene:{id:"constantinople-genuine-contract",originRegion:0,warnings:[],groups:[realGroup]},
+      bytes:4096,starBytes:0})};
+   game.adoptWorld(lease,"full");
+   game.setWorldCamera({eye:[0,0,0],target:[0,0,1],fov:Math.PI/2,
+     near:.1,far:10});
+   game.setWorldTexture(texturePath,{kind:"native-texture",width:1,height:1,
+     format:"bgra8unorm",levels:[new Uint8Array([0,0,255,255])]});
+   game.setUi({revision:1,width:64,height:64,quads:[]});
+   const stageStats=game.originalFrontendFrame(2);
+   const stageGl=nativeCanvas.getContext("webgl2");
+   const nativePixel=new Uint8Array(4);
+   stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,nativePixel);
+   const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel]};
+   game.dispose();
+   return complete;
  });
  assert.ok(data.ui[0]>220&&data.ui[2]<40,"Authored UiScene must overlay the world on same WebGL2 context");
  assert.ok(data.mesh[2]>220&&data.mesh[0]<40,"Original geometry must remain visible after drawing native UI");
  assert.equal(data.stats.ui.drawCalls,1);
  assert.equal(data.stats.triangleCount,1);
+ assert.ok(data.nativePixel[0]>230 && data.nativePixel[1]<25 && data.nativePixel[2]<25,
+   "Original WorldTexture BGRA upload must texture genuine OpenSRO Geometry through native camera");
+ assert.equal(data.originalStage.stage.sceneId,"constantinople-genuine-contract");
+ assert.equal(data.originalStage.stage.pendingTextures,0);
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

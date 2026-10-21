@@ -90,3 +90,21 @@ Read-only audit `hieusro-original-test-stage-audit.yml` checks actual Constantin
 - Chromium pixel smoke tests confirm a missing retail CIF art source and a missing alpha mask hide ONLY their own quads while another loaded retail UI image keeps rendering. This prevents avoidable blank title frames while original asset loads complete.
 - `original-frontend-stage.ts` and `native-world-webgl2.ts` now pin pending scene textures until atomic admission, preventing LRU from evicting earlier title/character images while the next ones load. Cancellation, errors and completed admission release the pin.
 - Original GPU TypeScript contract CI and WebGL2 browser pixel runs validated the changes at commits `5dc70f8309d1d970cffd78ab8a24380de51c6d79` and `517e7c9054175a91c6ee9157e6361e5b31791bc5` respectively. This evidence verifies **local render subsystem correctness, not the game**.
+
+
+## 2026-10-21 — authentic v1.150 asset recovery and original URL bridge
+
+**Source discovery (read-only; no old server mutations):**
+- The existing baseline Icons Preview TEST returned timeouts for Constantinople/character dock manifest, and HTTP 404 for EU/CH creation manifests via its upstream `opensro.online` proxy. This is a serving problem, not proof that licensed Silkroad source media is absent.
+- The user's configured ISRO v1.150 Drive folder contains authentic `Media.pk2`, `Data.pk2`, `Map.pk2`, `Particles.pk2`, `Music.pk2`. Do not publish or expose these licensed binaries in GitHub.
+- **Existing isolated static TEST SROPACK2 CDN** is preferable to rebuilding: v2 catalog holds 17 groups, 213 packs and 36,843 assets. The REAL original four `StageManifest` JSON documents were range-read, gzip-decoded and SHA-256 verified against its immutable catalog:
+  - Constantinople: 14 native camera keys; `/assets/world/constantinople/region-694e.json` exists
+  - Character dock: 2 native camera keys; `/assets/world/constantinople/region-6951.json` exists
+  - EU creation: 1 native camera key; `/assets/world/constantinople/region-694f.json` exists
+  - CH creation: 1 native camera key; `/assets/world/china/region-62a8.json` exists.
+- `server/native-pack-reader.mjs` reads the verified original member bytes via CDN HTTP/206 Range, checks file lengths and SHA256, handles compression and bounded LRU. No game art is generated.
+- `server/native-asset-handler.mjs` serves the original retail `/assets/*` URLs, retaining ETag, HTTP Range, HEAD and MIME semantics while refusing to proxy `/api` or `/shards` requests.
+- The read-only GitHub-hosted integration smoke for all FOUR real scene GET routes, real bundle references, response bytes, HTTP Range/ETag and fail-closed missing assets passed. This is an asset HTTP pipeline test and **NOT a playable WebGL2 game, complete world asset admission or GameWorld authorization test**.
+- `scripts/rebuild-original-v150-assets-test.sh` is an **optional, not-yet-run** fallback that uses the upstream pinned OpenSRO `pnpm assets prepare; pnpm assets doctor; pnpm assets build full` from a disposable licensed PK2 copy and verifies all four stage outputs. Existing TEST CDN already contains the four stage resources, so rebuilding would be unnecessary unless real-world bundle validation later exposes a missing source.
+
+**Remaining before user-facing game URL:** Mount asset bridge on a separately verified TEST client runtime; implement remaining original `Renderer` interface (including terrain/multistage shaders/sky/particles/portrait, full native character assembly, picking), use untouched `startRuntime` and original WSS GameWorld state machine, then perform real TEST login/character-create/world-entry and iPhone hardware acceptance. `acceptance.json.releaseEligible` remains false. Never switch the old Icons Preview/LIVE routes to this branch.

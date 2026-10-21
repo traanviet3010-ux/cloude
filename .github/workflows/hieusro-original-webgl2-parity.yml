@@ -29,6 +29,11 @@ jobs:
           cd webgl2-parity
           npm install --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.28.2
           node --test tests/*.test.mjs
+      - name: Lint read-only original asset recovery contract (never fetch or build proprietary files in CI)
+        run: |
+          bash -n webgl2-parity/scripts/rebuild-original-v150-assets-test.sh
+          node --check webgl2-parity/scripts/verify-native-stage-output.mjs
+          node --check webgl2-parity/scripts/audit-original-test-stage.mjs
       - name: Checkout EXACT native HieuSRO GPU engine revision
         run: |
           git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original

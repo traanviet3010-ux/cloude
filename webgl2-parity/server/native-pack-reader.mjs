@@ -60,13 +60,17 @@ export function createOriginalPackReader({cdnBase,cacheBudgetBytes=defaultCacheB
           parsed.groups.length!==17)
          throw Error("Invalid real HieuSRO SROPACK2 v1.150 index");
        members.clear();
-       for(const row of parsed.assets){
-         if(!safePath(row.path)||!safePath(row.packPath)||
-            !row.packPath.startsWith("/assets/packs/")||
-            !Number.isSafeInteger(row.offset)||row.offset<0||
-            !Number.isSafeInteger(row.length)||row.length<0||
-            !/^[a-f0-9]{64}$/i.test(row.sha256)||members.has(row.path.toLowerCase()))
-            throw Error("Corrupt native pack catalog entry");
+       for(const [index,row] of parsed.assets.entries()){
+         const reason=!safePath(row.path)?"invalid asset path":
+           !safePath(row.packPath)?"invalid pack path":
+           !row.packPath.startsWith("/assets/packs/")?"pack escaped asset CDN":
+           !Number.isSafeInteger(row.offset)||row.offset<0?"invalid offset":
+           !Number.isSafeInteger(row.length)||row.length<0?"invalid size":
+           !/^[a-f0-9]{64}$/i.test(row.sha256)?"invalid SHA256":
+           members.has(row.path.toLowerCase())?"duplicate member":null;
+         if(reason)throw Error("Corrupt native pack catalog entry #"+index+": "+reason+
+           " asset="+String(row.path).slice(0,150)+
+           " pack="+String(row.packPath).slice(0,150));
          members.set(row.path.toLowerCase(),row);
        }
        return {assets:members.size,packs:parsed.groups.reduce((n,g)=>n+(g.packs?.length??0),0)};

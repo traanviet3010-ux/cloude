@@ -41,7 +41,7 @@ void main(){
    uAmbient*uAmbientFactor*uAmbientScale,0.0,1.0);
 }`;
 const FS=`#version 300 es
-precision mediump float;
+precision highp float;
 in vec4 vColor;
 in vec2 vUv;
 in vec3 vNormal;

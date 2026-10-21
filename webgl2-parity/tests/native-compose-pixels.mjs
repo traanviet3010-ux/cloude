@@ -87,7 +87,7 @@ try{
        joints:new Uint32Array(12),
        weights:new Float32Array([1,0,0,0,1,0,0,0,1,0,0,0]),
        transform:I,
-       material:{unlit:true,doubleSided:true,color:[1,1,1,1]}
+       material:{unlit:false,doubleSided:true,color:[1,1,1,1]}
      }
    };
    game.setCharacterModel("native-avatar-contract",{

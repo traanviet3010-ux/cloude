@@ -27,6 +27,13 @@ await build({
  alias:{"@":source},
 });
 const {createWorldDecoder}=await import(pathToFileURL(compiled).href);
+const terrainModule=join(dir,"original-native-terrain-real-bundle.mjs");
+await build({
+ entryPoints:[join(dir,"../src/original-terrain-selection.ts")],
+ bundle:true,platform:"node",format:"esm",target:"es2022",outfile:terrainModule,
+ alias:{"@":source}
+});
+const {selectOriginalTerrain}=await import(pathToFileURL(terrainModule).href);
 assert.equal(typeof createWorldDecoder,"function");
 const reader=createOriginalPackReader({cdnBase,cacheBudgetBytes:0});
 const stage=process.env.HIEUSRO_NATIVE_SCENE ||
@@ -53,6 +60,24 @@ const scene=decoder.decode(resolved,true);
 assert.equal(typeof scene.id,"string");
 assert.ok(Array.isArray(scene.groups)&&scene.groups.length>0,
  "Authentic original WorldScene must have decoded mesh groups");
+const terrainGroup=scene.groups.find(g=>g.material?.terrain&&g.ranges?.some(r=>r.lod===0&&r.indexCount>0));
+if(!terrainGroup)
+ throw Error("Real HieuSRO title scene has no authored full-detail terrain range");
+const sourcePositions=terrainGroup.geometry.positions.slice();
+const sourceIndices=terrainGroup.geometry.indices.slice();
+const terrainFull=selectOriginalTerrain(terrainGroup,{eye:[0,0,0]},"full");
+assert.ok(terrainFull.triangles>0&&terrainFull.rangeCount>0,
+ "Original title LOD0 must select real terrain cell triangles");
+assert.ok(terrainFull.geometry.indices.length<terrainGroup.geometry.indices.length,
+ "Original title terrain must not submit the unselected LOD1-LOD3 triangles");
+assert.deepEqual(terrainGroup.geometry.positions,sourcePositions,
+ "WebGL2 original terrain admission never mutates the pinned decoder source");
+assert.deepEqual(terrainGroup.geometry.indices,sourceIndices,
+ "WebGL2 terrain indices must not overwrite other client-native LOD buffers");
+console.log("REAL_ORIGINAL_SILKROAD_TERRAIN_LOD0_VERIFIED",JSON.stringify({
+ scene:scene.id,group:terrainGroup.id,selectedCells:terrainFull.rangeCount,
+ triangles:terrainFull.triangles,changedVertices:terrainFull.changedVertices
+}));
 const textures=new Set(),materials={lit:0,unlit:0,terrain:0,animated:0,mask:0,advanced:0};
 const blocked={};
 let meshVertices=0,meshTriangles=0,instances=0;

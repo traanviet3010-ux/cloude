@@ -71,3 +71,19 @@ test("original Constantinople GPU instance matrices are retained without expandi
  const wrong=identity.slice();wrong[3]=1;
  assert.throws(()=>admitOriginalGeometry({...triangle(),instances:wrong}),/affine/);
 });
+
+test("Original 2007 Silkroad D3DCMPFUNC comparison 1..8 preserved, invalid enum rejected",()=>{
+ const base=triangle();
+ for(let compare=1;compare<=8;compare++){
+   const geometry={...base,material:{...base.material,alphaCompare:compare,alphaCutoff:0.5}};
+   assert.equal(admitOriginalGeometry(geometry).triangles,1,"Native material enum "+compare);
+ }
+ for(const v of [0,9,NaN,1.5]){
+   assert.throws(()=>admitOriginalGeometry({...base,material:{
+     ...base.material,alphaCompare:v}}),/alpha comparison invalid/);
+ }
+ for(const cutoff of [-1,2,NaN]){
+   assert.throws(()=>admitOriginalGeometry({...base,material:{
+     ...base.material,alphaCutoff:cutoff}}),/alpha cutoff/);
+ }
+});

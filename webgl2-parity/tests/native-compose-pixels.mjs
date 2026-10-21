@@ -146,6 +146,7 @@ try{
      return [...p];};
    complete.placedFirst=nativePlacementPixel(14,32);
    complete.placedSecond=nativePlacementPixel(50,32);
+   complete.placedRow=Array.from({length:64},(_,x)=>nativePlacementPixel(x,32)[0]>220?x:-1).filter(x=>x>=0);
    complete.placedStats=placedFrame;
    placementGame.dispose();
    return complete;
@@ -162,6 +163,7 @@ try{
    "Native character CPU skinned mesh must render on top of original scene in one GL context");
  assert.equal(data.characterFrame.characters.actors,1);
  assert.equal(data.characterFrame.triangleCount,2);
+ console.log("NATIVE_SRO_RESIDENT_PLACEMENT_DIAGNOSTIC",JSON.stringify({row:data.placedRow,first:data.placedFirst,second:data.placedSecond,stats:data.placedStats}));
  assert.ok(data.placedFirst[0]>225&&data.placedFirst[2]>225,
    "Original SRO WorldScene placement in resident target cell must be visible");
  assert.ok(data.placedSecond[0]<10&&data.placedSecond[2]<10,

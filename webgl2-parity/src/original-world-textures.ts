@@ -45,7 +45,7 @@ export class OriginalWorldTextures {
    const keep=new Set(protectedPaths);keep.add(path);
    const candidates=[...this.data].sort((a,b)=>a[1].last-b[1].last);
    for(const [key,slot] of candidates){
-     if(this.used+(old?0:bytes)>this.limit && !keep.has(key)){
+     if(this.used-(old?.bytes??0)+bytes>this.limit && !keep.has(key)){
        gl.deleteTexture(slot.handle);this.data.delete(key);this.used-=slot.bytes;
      }
    }
@@ -68,7 +68,9 @@ export class OriginalWorldTextures {
          gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,width,height,0,
            gl.RGBA,gl.UNSIGNED_BYTE,rgba.pixels);
        }
-     }else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+     }else if(image instanceof ImageBitmap){
+       gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+     }else throw Error("Unsupported native Silkroad world texture input");
      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
@@ -77,7 +79,7 @@ export class OriginalWorldTextures {
      if(old){gl.deleteTexture(old.handle);this.used-=old.bytes;}
      this.data.set(path,{handle:tex,bytes,width,height,last:this.current});
      this.used+=bytes;
-     if(!native)image.close();
+     if(image instanceof ImageBitmap)image.close();
    }catch(e){gl.deleteTexture(tex);throw e;}
  }
  stats(){return {residentMB:this.used/1048576,textureCount:this.data.size};}

@@ -128,3 +128,24 @@ test("native Constantinople scene waits for actual original WorldTexture before 
  assert.deepEqual(bridge.drawIds(),[g.id]);
  bridge.dispose();
 });
+
+test("original frontend world-entry setWorld(null) releases all completed and pending old GPU title groups",()=>{
+ const w=renderer(),stage=createOriginalStageBridge(w);
+ stage.adoptWorld(lease("authentic-title",[group("sro-old-1"),group("sro-old-2")]));
+ stage.step(2);
+ assert.equal(stage.worldStats().sceneId,"authentic-title");
+ stage.adoptWorld(lease("authentic-dock",[group("sro-dock-1"),group("sro-dock-2")]));
+ stage.step(1);
+ assert.equal(w.present.size,3);
+ stage.clearWorld();
+ assert.equal(w.present.size,0);
+ assert.equal(stage.worldStats().pendingGroups,0);
+ assert.equal(stage.worldStats().sceneId,null);
+ assert.deepEqual(stage.drawIds(),[]);
+ assert.deepEqual(stage.activeGroups(),[]);
+ assert.deepEqual(w.getPinned(),[]);
+ stage.adoptWorld(lease("next-actual-stage",[group("sro-next")]));
+ stage.step();
+ assert.equal(stage.worldStats().sceneId,"next-actual-stage");
+ stage.dispose();
+});

@@ -62,11 +62,14 @@ uniform float uCutoff;
 uniform int uAlphaCompare;
 out vec4 fragColor;
 bool originalAlphaAccept(float pixelAlpha){
- // Native D3D alpha-test compares 8-bit alpha/reference values.
+ // Exact pinned GPU shader D3D9 HAL quantization: truncate alpha to
+ // 12 fractional bits and nearest UNORM8 with half-way ties DOWN.
+ // Material reference is D3DRS_ALPHAREF rounded to an 8-bit integer.
  // 1 NEVER, 2 LESS, 3 EQUAL, 4 LESSEQUAL, 5 GREATER,
  // 6 NOTEQUAL, 7 GREATEREQUAL (retail default), 8 ALWAYS.
- int a=int(floor(clamp(pixelAlpha,0.0,1.0)*255.0+0.5));
- int b=int(floor(clamp(uCutoff,0.0,1.0)*255.0+0.5));
+ int a=int(ceil(floor(clamp(pixelAlpha,0.0,1.0)*4096.0)*
+   (255.0/4096.0)-0.5));
+ int b=int(round(clamp(uCutoff,0.0,1.0)*255.0));
  if(uAlphaCompare==1)return false;
  if(uAlphaCompare==2)return a<b;
  if(uAlphaCompare==3)return a==b;

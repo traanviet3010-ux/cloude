@@ -29,6 +29,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     cancelWorldUpdate:stage.cancelWorldUpdate,
     worldStats:stage.worldStats,
     neededWorldTextures:stage.neededWorldTextures,
+    setWorldTexture:stage.setWorldTexture,
     setUi:bridge.setUi,
     setUiTexture:bridge.setUiTexture,
     setWorldCamera(camera:WorldCamera){assert();titleCamera=camera;},

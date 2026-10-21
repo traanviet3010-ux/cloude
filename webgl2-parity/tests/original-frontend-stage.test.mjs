@@ -26,8 +26,14 @@ function group(id,overrides={}){
 }
 function renderer(){
  const present=new Map(),updates=[],textures=new Map();
- return {set(id,geom){updates.push([id,geom]);if(geom)present.set(id,geom);else present.delete(id);},
-   setTexture(path,image){textures.set(path,image);},hasTexture:path=>textures.has(path),present,updates,textures};
+ let pinned=[];
+ return {
+   set(id,geom){updates.push([id,geom]);if(geom)present.set(id,geom);else present.delete(id);},
+   setTexture(path,image){if(image)textures.set(path,image);else textures.delete(path);},
+   hasTexture:path=>textures.has(path),
+   protectPendingTextures(paths){pinned=[...paths];},
+   getPinned:()=>[...pinned],present,updates,textures
+ };
 }
 test("genuine OpenSRO one-use scene lease, bounded frame uploads and honest renderer readiness",()=>{
  const w=renderer(),bridge=createOriginalStageBridge(w);
@@ -83,6 +89,7 @@ test("cancellation removes unfinished uploads but preserves original active stag
  bridge.step();
  bridge.adoptWorld(lease("pending-next",[group("new-a"),group("new-b")]));
  bridge.step(1);bridge.cancelWorldUpdate();
+ assert.deepEqual(w.getPinned(),[],"A cancelled scene must release its pending image leases");
  assert.equal(bridge.worldStats().sceneId,"original-intro");
  assert.ok(!w.present.has("new-a"));
  assert.deepEqual(bridge.drawIds(),["old"]);
@@ -105,6 +112,7 @@ test("native Constantinople scene waits for actual original WorldTexture before 
    material:{...material(),texture:path}});
  bridge.adoptWorld(lease("title-constantinople",[g]));
  assert.deepEqual(bridge.neededWorldTextures(),[path]);
+ assert.deepEqual(w.getPinned(),[path],"Pin real pending texture to avoid evict/reload loops");
  assert.equal(bridge.worldStats().pendingTextures,1);
  assert.equal(bridge.step(),0);
  assert.deepEqual(bridge.drawIds(),[]);
@@ -116,6 +124,7 @@ test("native Constantinople scene waits for actual original WorldTexture before 
  assert.equal(bridge.worldStats().pendingTextures,0);
  bridge.step();
  assert.equal(bridge.worldStats().sceneId,"title-constantinople");
+ assert.deepEqual(w.getPinned(),[],"Release pending texture protection after full scene admission");
  assert.deepEqual(bridge.drawIds(),[g.id]);
  bridge.dispose();
 });

@@ -13,7 +13,9 @@ import {multiply} from "@/engine/foundation/math/pose-math";
 import {createOriginalCpuCharacterSkin} from "./original-character-cpu-skin";
 import {OriginalWorldWebgl2} from "./native-world-webgl2";
 
-const ACTOR_LIMIT=32,PRIMITIVE_LIMIT=32;
+const MOBILE=typeof navigator!=="undefined" && /iPhone|iPad/.test(navigator.userAgent);
+const ACTOR_LIMIT=MOBILE?8:32, PRIMITIVE_LIMIT=32;
+const VERTICES_PER_FRAME=MOBILE?180_000:600_000;
 type ModelRecord={source:CharacterModel;imagePaths:string[]};
 type ActorRecord={model:string;ids:string[];skin:ReturnType<typeof createOriginalCpuCharacterSkin>};
 export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
@@ -49,6 +51,7 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
    check();
    if(value.length>ACTOR_LIMIT)throw Error("Native character visible actor count exceeds WebGL2 CPU budget");
    const seen=new Set<number>();
+   let totalVertices=0;
    for(const actor of value){
      if(!Number.isSafeInteger(actor.gid)||seen.has(actor.gid)||!models.has(actor.model))
        throw Error("Original world character model/GID not resident");
@@ -59,6 +62,10 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
      if(actor.attachment||actor.mountedOn!==undefined||actor.effectBasis||
         actor.effectEntity||actor.modelAnimation||actor.bloodEffects||actor.deferredParticle)
        throw Error("Original mounted/attached/effect actor needs dedicated WebGL2 pass");
+     const m=models.get(actor.model)!;
+     totalVertices+=m.source.primitives.reduce((n,p)=>n+p.geometry.positions.length/3,0);
+     if(totalVertices>VERTICES_PER_FRAME)
+       throw Error("Original animated actor group exceeds Safari CPU-skinning frame budget");
      seen.add(actor.gid);
    }
    actors=value;

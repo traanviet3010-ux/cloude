@@ -44,18 +44,19 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     let bytes=0;
     for(const g of prepared.scene.groups){
       if(!g.id||seen.has(g.id))throw Error("Original scene has duplicate/empty group ID");
+      if(readyIds.includes(g.id))throw Error("Original stage shares resident group id; safe atomic replacement not yet supported: "+g.id);
       seen.add(g.id);
       if(g.animation||g.visibility||g.ranges||g.material.terrain||
          g.material.water||g.material.sky||g.material.lightmap){
         throw Error("Original stage needs native animated/terrain/sky/lightmap GL pass: "+g.id);
       }
-      const native=admitOriginalGeometry(g.geometry);
-      if(g.material!==g.geometry.material)
-        throw Error("Stage and geometry material diverge: "+g.id);
+      // WorldGroup owns its material, not necessarily Geometry.material.
+      const mesh={...g.geometry,material:g.material};
+      const native=admitOriginalGeometry(mesh);
       if(!g.material.unlit)throw Error("Native lighting pass not yet available for "+g.id);
       bytes+=native.byteSize;
       if(bytes>MAX_PENDING_BYTES)throw Error("Original stage exceeds GPU budget");
-      entries.push({id:g.id,geometry:g.geometry});
+      entries.push({id:g.id,geometry:mesh});
     }
     pending={sceneId:prepared.scene.id,entries,cursor:0};
     error=null;

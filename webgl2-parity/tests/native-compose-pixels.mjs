@@ -148,6 +148,9 @@ try{
    complete.placedSecond=nativePlacementPixel(62,32);
    complete.placedRow=Array.from({length:64},(_,x)=>nativePlacementPixel(x,32)[0]>220?x:-1).filter(x=>x>=0);
    complete.placedStats=placedFrame;
+   placementGame.setWorld(null);
+   complete.clearedStage=placementGame.originalFrontendFrame(2,.016);
+   complete.clearedPixel=nativePlacementPixel(1,32);
    placementGame.dispose();
    return complete;
  });
@@ -170,5 +173,11 @@ try{
    "Nonresident original placement must NOT be painted as invented scenery");
  assert.equal(data.placedStats.triangleCount,1,
    "Original GPU residentSlots must select only one original building instance");
+ assert.equal(data.clearedStage.triangleCount,0,
+   "Authentic frontend setWorld(null) must stop all title/dock geometry draw calls");
+ assert.equal(data.clearedStage.stage.sceneId,null,
+   "World-entry stage must not expose the last title scene as a fake playable world");
+ assert.equal(data.clearedPixel[0],0,
+   "Original title GPU pixels must disappear when original frontend clears world");
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

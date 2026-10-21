@@ -51,3 +51,18 @@ All of the following MUST be fully ported and parity-tested with the old GPU bra
 `HieuSRO Original GPU to WebGL2 parity gate` compiles source using pinned original TypeScript and verifies original session/HUD were not modified. `HieuSRO Original WebGL2 pixel shader smoke` runs real Chromium GL pixel readbacks of original `UiScene` and a 3D mesh composite, not screenshot mockups.
 
 Before deployment, `node webgl2-parity/scripts/release-gate.mjs` must pass. It currently **fails intentionally** because the port is unfinished. Do not switch Render/VPS branches to this code until all blockers are verified. No autonomous or background work is implied by this file.
+
+
+## 2026-10-21 — native character pipeline progress (not yet playable)
+
+- `src/original-character-cpu-skin.ts`: **reuses** OpenSRO's pinned `createCharacterPose` evaluator, original `CharacterPrimitive.inverseBind` and exactly four native weights/vertex; interpolates unaltered native clips/BAN-mapped channels on CPU for Safari WebGL2. No new game state or fabricated clip assets.
+- `src/original-characters-webgl2.ts`: consumes original `CharacterModel` + actual `WorldTexture[]` + `CharacterActor` snapshots (pose, yaw, region, scale, clip). Renders only supported primitive/mode combinations; throws on cloth/attached/mounted/lit/advanced effect models until their original shaders have WebGL2 counterparts.
+- `src/native-world-webgl2.ts`: in-place animated vertex updates via `gl.bufferSubData`, reducing GPU VAO/VBO recreation.
+- `src/original-webgl2-compositor.ts`: now exports original renderer-shape `setCharacterModel` / `setCharacterActors` callbacks and includes the actor group stream in the same scene framebuffer and native CIF UI canvas.
+- Node integration tests invoke the **real pinned OpenSRO pose** and assert native timeline positions, authored actor region placement, texture identity, cleanup and no repeated buffer creation.
+- Chromium actual WebGL2 software rendering checks that a CPU-skinned model contract can draw on top of a real `WorldSceneLease` contract without losing original native UI. This test uses an authored minimal schema fixture, **not a real Silkroad client .bms/.bsk mesh**.
+- Verified GitHub CI: <https://github.com/traanviet3010-ux/cloude/actions/runs/39545047173> (GL pixel smoke) and <https://github.com/traanviet3010-ux/cloude/actions/runs/39545047121> (pinned original-contract and CPU animation tests).
+
+### Still blocking actual retail character-screen parity
+
+Original animated/complex meshes can contain lit/shadow/multistage materials, cloth, instanced attachments, riding mounts and FX. Those currently fail closed rather than rendering approximate replacements; the original character dock's runtime adapter is not yet a full `Renderer` implementation. The backend login/character/transport GameWorld protocol remains in the untouched native engine but is **not yet playable with this new renderer**. iPhone Safari device-memory/context-loss testing is also outstanding. Do not change Render TEST/LIVE services based solely on these contract tests.

@@ -1,0 +1,34 @@
+name: Decode REAL v1.150 intro and character scenes with original OpenSRO
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/scripts/decode-real-native-scenes.mjs"
+      - ".github/workflows/hieusro-original-real-scene-decode.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-v150-scene-decode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '24'}
+      - name: Install limited original scene test bundler
+        working-directory: webgl2-parity
+        run: npm install --no-audit --no-fund --no-save esbuild@0.28.2
+      - name: Checkout immutable original OpenSRO source
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
+          git -C /tmp/opensro-original checkout --quiet 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          test "$(git -C /tmp/opensro-original rev-parse HEAD)" = 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+      - name: Resolve and decode actual licensed v1.150 stage bundles using pinned OpenSRO CPU decoder
+        working-directory: webgl2-parity
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+          HIEUSRO_TEST_PACK_CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
+        run: node scripts/decode-real-native-scenes.mjs

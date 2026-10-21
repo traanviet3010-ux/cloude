@@ -27,8 +27,15 @@ jobs:
         run: |
           npm install --no-audit --no-fund --no-save esbuild@0.28.2 playwright@1.58.2
           npx playwright install --with-deps chromium
+      - name: Checkout exact original SRO camera source for shader readback
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
+          cd /tmp/opensro-original
+          git checkout --quiet 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
       - name: Run actual pixel draw readback, alpha/scissor and GPU cleanup
         working-directory: webgl2-parity
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
         run: |
           node tests/native-ui-pixels.mjs
           node tests/native-compose-pixels.mjs

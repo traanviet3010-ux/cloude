@@ -15,6 +15,14 @@ concurrency:
 jobs:
   genuine-world:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        scene:
+          - /assets/world/constantinople/region-694e.json
+          - /assets/world/constantinople/region-6951.json
+          - /assets/world/constantinople/region-694f.json
+          - /assets/world/china/region-62a8.json
     timeout-minutes: 14
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -37,5 +45,5 @@ jobs:
         env:
           SRO_SOURCE_ROOT: /tmp/opensro-original
           HIEUSRO_TEST_PACK_CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
-          HIEUSRO_NATIVE_SCENE: /assets/world/constantinople/region-6951.json
+          HIEUSRO_NATIVE_SCENE: ${{ matrix.scene }}
         run: node --max-old-space-size=4096 tests/real-original-world-decode.integration.mjs

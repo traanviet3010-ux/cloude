@@ -79,7 +79,8 @@ export class OriginalWorldTextures {
      if(old){gl.deleteTexture(old.handle);this.used-=old.bytes;}
      this.data.set(path,{handle:tex,bytes,width,height,last:this.current});
      this.used+=bytes;
-     if(image instanceof ImageBitmap)image.close();
+     // Original AssetOwner still owns ImageBitmap lifetime: a character may
+     // legitimately share this image across multiple primitives. Never close it here.
    }catch(e){gl.deleteTexture(tex);throw e;}
  }
  stats(){return {residentMB:this.used/1048576,textureCount:this.data.size};}

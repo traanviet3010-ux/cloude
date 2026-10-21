@@ -10,8 +10,8 @@ import {originalCameraToWebgl2} from "./clip-space";
 import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
-interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;instances:number;
-  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
+  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -19,12 +19,14 @@ layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
 layout(location=3) in vec4 aColor;
 layout(location=4) in mat4 aInstanceModel;
+layout(location=8) in float aInstanceOpacity;
 uniform mat4 uViewProjection;
 uniform mat4 uModel;
 out vec4 vColor;
 out vec2 vUv;
 out vec3 vNormal;
 out vec3 vVertexLighting;
+flat out float vInstanceOpacity;
 uniform vec3 uDiffuse;
 uniform vec3 uAmbient;
 uniform vec3 uAmbientFactor;
@@ -34,7 +36,7 @@ uniform float uAmbientScale;
 void main(){
  mat4 instance=uModel*aInstanceModel;
  gl_Position=uViewProjection*instance*vec4(aPos,1.0);
- vColor=aColor;vUv=aUv;
+ vColor=aColor;vUv=aUv;vInstanceOpacity=aInstanceOpacity;
  // Matches OpenSRO's inverse-transpose world normal and retained vertex
  // object-light calculation, not a new lighting preset.
  vNormal=transpose(inverse(mat3(instance)))*aNormal;
@@ -48,6 +50,7 @@ in vec4 vColor;
 in vec2 vUv;
 in vec3 vNormal;
 in vec3 vVertexLighting;
+flat in float vInstanceOpacity;
 uniform vec4 uMaterialColor;
 uniform vec3 uDiffuse;
 uniform vec3 uAmbient;
@@ -60,8 +63,11 @@ uniform sampler2D uTexture;
 uniform int uUseTexture;
 uniform float uCutoff;
 uniform int uAlphaCompare;
+uniform int uObjectFade;
+uniform int uFadeAlphaOnly;
+uniform int uSurfaceAlpha;
 out vec4 fragColor;
-bool originalAlphaAccept(float pixelAlpha){
+bool originalAlphaAccept(float pixelAlpha,float reference){
  // Exact pinned GPU shader D3D9 HAL quantization: truncate alpha to
  // 12 fractional bits and nearest UNORM8 with half-way ties DOWN.
  // Material reference is D3DRS_ALPHAREF rounded to an 8-bit integer.
@@ -69,7 +75,7 @@ bool originalAlphaAccept(float pixelAlpha){
  // 6 NOTEQUAL, 7 GREATEREQUAL (retail default), 8 ALWAYS.
  int a=int(ceil(floor(clamp(pixelAlpha,0.0,1.0)*4096.0)*
    (255.0/4096.0)-0.5));
- int b=int(round(clamp(uCutoff,0.0,1.0)*255.0));
+ int b=int(round(clamp(reference,0.0,1.0)*255.0));
  if(uAlphaCompare==1)return false;
  if(uAlphaCompare==2)return a<b;
  if(uAlphaCompare==3)return a==b;
@@ -92,8 +98,15 @@ void main(){
    c=vec4(texel.rgb*vColor.rgb*lit,
      texel.a*vColor.a*uMaterialColor.a);
  }else c=texel*vColor*uMaterialColor;
- if(!originalAlphaAccept(c.a))discard;
- fragColor=c;
+ bool fading=(uObjectFade==1 && vInstanceOpacity<1.0);
+ // The original 2007 retail fade is a per-placement opacity, not a
+ // replacement texture. Use pinned GPU pipeline's cutoff contraction.
+ float fadeAlpha=(uFadeAlphaOnly==1?1.0:texel.a)*vInstanceOpacity;
+ float alphaRef=fading?floor(uCutoff*255.0*round(vInstanceOpacity*255.0)/256.0)/255.0:uCutoff;
+ if(!originalAlphaAccept(fading?fadeAlpha:c.a,alphaRef))discard;
+ float outAlpha=uObjectFade==1?
+   (fading?fadeAlpha:(uSurfaceAlpha==1?c.a:1.0)):c.a;
+ fragColor=vec4(c.rgb,outAlpha);
 }`;
 function shader(gl:WebGL2RenderingContext,kind:number,source:string){
  const sh=gl.createShader(kind);if(!sh)throw Error("Cannot allocate native GL shader");
@@ -176,8 +189,8 @@ export class OriginalWorldWebgl2 {
    const slot=this.entries.get(id);
    if(!slot)throw Error("Native animated geometry not admitted: "+id);
    const source=admitOriginalGeometry(geometry);
-   if(source.indices.length!==slot.count||source.instanceCount!==slot.instances||
-     source.byteSize!==slot.bytes)
+   if(source.indices.length!==slot.count||source.instanceCount!==slot.capacity||
+     source.byteSize!==slot.sourceByteSize)
      throw Error("Original animated mesh topology changed");
    if((geometry.material?.texture??"")!==slot.texture)
      throw Error("Original character material texture changed during animation");
@@ -186,14 +199,41 @@ export class OriginalWorldWebgl2 {
    gl.bufferSubData(gl.ARRAY_BUFFER,0,source.vertices);
    gl.bindBuffer(gl.ARRAY_BUFFER,slot.instanceVbo);
    gl.bufferSubData(gl.ARRAY_BUFFER,0,source.instances);
+   gl.bindBuffer(gl.ARRAY_BUFFER,slot.opacityVbo);
+   gl.bufferSubData(gl.ARRAY_BUFFER,0,new Float32Array(slot.capacity).fill(1));
+   slot.instances=slot.capacity;
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original animated Silkroad vertex update failed");
    slot.transform.set(source.transform);
+   slot.last=this.frame;
+ }
+ /**
+  * Update the original GPU renderer's resident placement matrices/opacity
+  * without replacing any authored mesh, texture, or GL allocation.
+  * The data comes directly from native residentSlots/ObjectFades.
+  */
+ updateOriginalInstances(id:string,matrices:Float32Array,opacity:Float32Array){
+   this.validate();
+   const slot=this.entries.get(id);
+   if(!slot)throw Error("Unknown original native instance group: "+id);
+   const count=matrices.length/16;
+   if(!Number.isInteger(count)||count>slot.capacity||
+     opacity.length!==count||!matrices.every(Number.isFinite)||
+     !opacity.every(v=>Number.isFinite(v)&&v>=0&&v<=1))
+     throw Error("Original SRO selected instances/opacity invalid");
+   const gl=this.gl;
+   gl.bindBuffer(gl.ARRAY_BUFFER,slot.instanceVbo);
+   if(matrices.length)gl.bufferSubData(gl.ARRAY_BUFFER,0,matrices);
+   gl.bindBuffer(gl.ARRAY_BUFFER,slot.opacityVbo);
+   if(opacity.length)gl.bufferSubData(gl.ARRAY_BUFFER,0,opacity);
+   if(gl.getError()!==gl.NO_ERROR)
+     throw Error("Original selected instance upload failed");
+   slot.instances=count;
    slot.last=this.frame;
  }
  private retire(id:string){
    const s=this.entries.get(id);if(!s)return;
    this.gl.deleteBuffer(s.vbo);this.gl.deleteBuffer(s.ebo);
-   this.gl.deleteBuffer(s.instanceVbo);
+   this.gl.deleteBuffer(s.instanceVbo);this.gl.deleteBuffer(s.opacityVbo);
    this.gl.deleteVertexArray(s.vao);this.used-=s.bytes;this.entries.delete(id);
  }
  set(id:string,geometry:Geometry|null){
@@ -221,20 +261,22 @@ export class OriginalWorldWebgl2 {
        (material.ambient.length!==3||material.ambient.some(v=>!Number.isFinite(v)||v<0||v>1)))
      throw Error("Invalid native ambient material color");
    const row:GlNativeGeometry=admitOriginalGeometry(geometry);
-   if(row.byteSize>this.budget)throw Error("One original mesh exceeds GPU residency limit");
+   const accounted=row.byteSize+row.instanceCount*4;
+   if(accounted>this.budget)throw Error("One original mesh exceeds GPU residency limit");
    for(const [key] of [...this.entries].sort((a,b)=>a[1].last-b[1].last)){
-     if(this.used+row.byteSize<=this.budget)break;
+     if(this.used+accounted<=this.budget)break;
      if(!this.visible.has(key))this.retire(key);
    }
-   if(this.used+row.byteSize>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
+   if(this.used+accounted>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
    const gl=this.gl;
    const vao=gl.createVertexArray(),vbo=gl.createBuffer(),ebo=gl.createBuffer(),
-     instanceVbo=gl.createBuffer();
-   if(!vao||!vbo||!ebo||!instanceVbo){
+     instanceVbo=gl.createBuffer(),opacityVbo=gl.createBuffer();
+   if(!vao||!vbo||!ebo||!instanceVbo||!opacityVbo){
      if(vao)gl.deleteVertexArray(vao);
      if(vbo)gl.deleteBuffer(vbo);
      if(ebo)gl.deleteBuffer(ebo);
      if(instanceVbo)gl.deleteBuffer(instanceVbo);
+     if(opacityVbo)gl.deleteBuffer(opacityVbo);
      throw Error("Original WebGL2 mesh buffer allocation failed");
    }
    try{
@@ -258,22 +300,30 @@ export class OriginalWorldWebgl2 {
        gl.vertexAttribPointer(loc,4,gl.FLOAT,false,64,column*16);
        gl.vertexAttribDivisor(loc,1);
      }
+     gl.bindBuffer(gl.ARRAY_BUFFER,opacityVbo);
+     gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(row.instanceCount).fill(1),gl.DYNAMIC_DRAW);
+     gl.enableVertexAttribArray(8);
+     gl.vertexAttribPointer(8,1,gl.FLOAT,false,4,0);
+     gl.vertexAttribDivisor(8,1);
      gl.bindVertexArray(null);
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
-     this.entries.set(id,{vao,vbo,ebo,instanceVbo,instances:row.instanceCount,
+     this.entries.set(id,{vao,vbo,ebo,instanceVbo,opacityVbo,instances:row.instanceCount,
+       capacity:row.instanceCount,sourceByteSize:row.byteSize,
        count:row.indices.length,transform:row.transform,
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
-       bytes:row.byteSize,last:this.frame,
+       bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",
-       blend:geometry.material?.blend??false,
+       blend:(geometry.material?.blend??false)||(material?.objectFade??false),
        doubleSided:geometry.material?.doubleSided??false,
-       depthWrite:geometry.material?.depthWrite??!geometry.material?.blend,
+       depthWrite:geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade),
+       objectFade:!!material?.objectFade,fadeAlphaOnly:!!material?.fadeAlphaOnly,
+       surfaceAlpha:!!material?.surfaceAlpha,
        lit,ambient:new Float32Array(material?.ambient??[1,1,1]),
        ambientScale:material?.objectLight??1,
        objectVertexLighting:material?.objectLight!==undefined});
-     this.used+=row.byteSize;
+     this.used+=accounted;
    }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);
-     gl.deleteBuffer(instanceVbo);throw e;}
+     gl.deleteBuffer(instanceVbo);gl.deleteBuffer(opacityVbo);throw e;}
  }
  render(cameraMatrix:Float32Array,sceneIds:readonly string[]){
    this.validate();
@@ -309,6 +359,9 @@ export class OriginalWorldWebgl2 {
      gl.uniform4fv(gl.getUniformLocation(this.program,"uMaterialColor"),s.color);
      gl.uniform1f(gl.getUniformLocation(this.program,"uCutoff"),s.alphaCutoff);
      gl.uniform1i(gl.getUniformLocation(this.program,"uAlphaCompare"),s.alphaCompare);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uObjectFade"),s.objectFade?1:0);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uFadeAlphaOnly"),s.fadeAlphaOnly?1:0);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uSurfaceAlpha"),s.surfaceAlpha?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
        s.objectVertexLighting?1:0);

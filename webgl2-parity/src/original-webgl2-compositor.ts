@@ -27,6 +27,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   let titleCamera:WorldCamera|null=null;
   let visibleGroupSet:ReturnType<typeof createOriginalInstanceSelection>|null=null;
   let selectedSceneGroups:ReturnType<typeof stage.activeGroups>|null=null;
+  let stageGroupById=new Map<string,ReturnType<typeof stage.activeGroups>[number]>();
   let nativeFrameIndex=0,nativeLastSeconds:number|null=null;
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
@@ -64,6 +65,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
         visibleGroupSet?.dispose();
         visibleGroupSet=createOriginalInstanceSelection(groups);
         selectedSceneGroups=groups;
+        stageGroupById=new Map(groups.map(g=>[g.id,g]));
       }
       const dx=titleCamera.originRegion && origin!==null ?
         ((titleCamera.originRegion&255)-(origin&255))*1920:0;
@@ -79,7 +81,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       const selection=visibleGroupSet!.select(localCamera,dt,++nativeFrameIndex);
       const nativeSelected=new Map(selection.map(row=>[row.id,row]));
       const stageIds=stage.drawIds().filter(id=>{
-        const original=groups.find(g=>g.id===id);
+        const original=stageGroupById.get(id);
         if(!original || original.instanceRadius===undefined ||
            !!original.ranges || !!original.material.sky)return true;
         const row=nativeSelected.get(id);

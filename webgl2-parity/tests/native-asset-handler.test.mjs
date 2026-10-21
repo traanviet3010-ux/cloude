@@ -5,8 +5,8 @@ import {createNativeAssetHttpHandler} from "../server/native-asset-handler.mjs";
 import {MissingOriginalAsset} from "../server/native-pack-reader.mjs";
 const sample=new TextEncoder().encode('{"source":"verified-pack-member"}');
 const reader={
- has:async path=>path==="/assets/title/constantinople/manifest.json",
- read:async path=>{if(path!=="/assets/title/constantinople/manifest.json")
+ has:async path=>path==="/assets/title/constantinople/manifest.json" || path==="/assets/title/retail name.json",
+ read:async path=>{if(path!=="/assets/title/constantinople/manifest.json" && path!=="/assets/title/retail name.json")
    throw new MissingOriginalAsset(path);
    return sample;}
 };
@@ -43,6 +43,10 @@ test("original game assets preserve range, head, no fallback /api or fake charac
  assert.equal(await ranged.text(),new TextDecoder().decode(sample.subarray(0,10)));
  assert.equal((await fetch(base+path,{headers:{Range:"bytes=99999-"}})).status,416);
  assert.equal((await fetch(base+"/assets/unknown-genuine-resource.bin")).status,404);
+ const encoded=await fetch(base+"/assets/title/retail%20name.json");
+ assert.equal(encoded.status,200,"Original CIF filenames containing spaces must survive exact one-time URI decode");
+ assert.equal(await encoded.text(),new TextDecoder().decode(sample));
+
  assert.equal((await fetch(base+"/api/title/login")).status,404);
  assert.equal((await fetch(base+"/shards/global-official/transport/ws")).status,404);
 });

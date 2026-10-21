@@ -82,3 +82,11 @@ The initial static unlit material-only renderer was extended to consume the pinn
 Read-only audit `hieusro-original-test-stage-audit.yml` checks actual Constantinople, character-select, and both race creation manifests from **isolated** Render TEST. These results are manifest availability only; they do NOT prove that native 3D bundle geometry or rendering, browser login, or gameplay works. Audit failures are surfaced and never patched with synthetic assets.
 
 **Current release status: BLOCKED.** The new WebGL2 modules are not yet an implementation of every method in the pinned `Renderer` interface, are not wired into the original `startRuntime` game loop, and have not entered an authoritative GameWorld session. Never deploy or share a play URL until the original full frontend, runtime rendering, GameWorld interaction, and iPhone Safari acceptance tests pass.
+
+
+### 2026-10-21 — loading stability correctness
+
+- The original pinned `device/ui.ts` does **not** replace a missing CIF texture with solid color and does **not** abort the whole UI frame. It skips only the not-yet-resident draw and mask. The WebGL2 port now matches that behavior in `native-ui-webgl2.ts` (visible `missingQuads` statistic).
+- Chromium pixel smoke tests confirm a missing retail CIF art source and a missing alpha mask hide ONLY their own quads while another loaded retail UI image keeps rendering. This prevents avoidable blank title frames while original asset loads complete.
+- `original-frontend-stage.ts` and `native-world-webgl2.ts` now pin pending scene textures until atomic admission, preventing LRU from evicting earlier title/character images while the next ones load. Cancellation, errors and completed admission release the pin.
+- Original GPU TypeScript contract CI and WebGL2 browser pixel runs validated the changes at commits `5dc70f8309d1d970cffd78ab8a24380de51c6d79` and `517e7c9054175a91c6ee9157e6361e5b31791bc5` respectively. This evidence verifies **local render subsystem correctness, not the game**.

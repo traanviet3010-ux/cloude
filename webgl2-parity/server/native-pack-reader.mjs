@@ -11,9 +11,11 @@ const MAX_MANIFEST=28*1024*1024;
 const MAX_ASSET=36*1024*1024;
 const MAX_HEADER=12*1024*1024;
 const defaultCacheBytes=96*1024*1024;
-const safePath=(path)=>typeof path==="string"&&
- /^\/assets\/[A-Za-z0-9_.+()/-]+$/.test(path)&&
- !path.includes("..")&&!path.includes("//")&&!path.includes("\\");
+// Match the pinned HieuSRO SROPACK2 reader's path admission, including
+// authentic asset filenames with spaces; reject traversal and URL escapes.
+const safePath=(path)=>typeof path==="string"&&path.startsWith("/assets/")&&
+ !path.includes("..")&&!path.includes("%")&&!path.includes("?")&&
+ !path.includes("\\")&&!path.includes("//");
 export class MissingOriginalAsset extends Error{
  constructor(path){super("Original v1.150 asset missing: "+path);this.name="MissingOriginalAsset";}
 }

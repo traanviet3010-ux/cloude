@@ -56,6 +56,9 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
   if(mat?.objectLight!==undefined &&
       (!Number.isFinite(mat.objectLight)||mat.objectLight<0))
     throw Error("Original object lighting scalar invalid");
+  if(mat?.stageFactor!==undefined &&
+     (!Number.isFinite(mat.stageFactor)||mat.stageFactor<0||mat.stageFactor>4))
+    throw Error("Original native material stage factor invalid");
   if(mat?.ambient && (mat.ambient.length!==3 ||
      mat.ambient.some(v=>!Number.isFinite(v)||v<0||v>1)))
     throw Error("Original ambient lighting color invalid");

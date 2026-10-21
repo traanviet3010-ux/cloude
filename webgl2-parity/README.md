@@ -21,11 +21,17 @@ Use exactly the original HieuSRO GPU game experience: authentic retail Silkroad 
 - `src/native-geometry.ts`: validates/authors original `Geometry` buffers as GL arrays; rejects unported materials, skins, draw instancing or dynamic streams rather than silently drawing fake substitutes.
 - `src/clip-space.ts`: maps canonical OpenSRO WebGPU 0..1 clip depth to WebGL2 -1..1 while preserving camera perspective.
 - `src/native-world-webgl2.ts`: renders the subset of original unlit static Geometry with bounded GPU memory and original camera, no fake terrain.
-- `src/original-webgl2-compositor.ts`: original geometry + native UI on **one** WebGL2 canvas context.
+- `src/original-webgl2-compositor.ts`: original geometry + native UI on **one** WebGL2 canvas context. Now exposes callbacks compatible with the authentic `createFrontend()` / `createUi()` contracts: `adoptWorld`, `setWorldCamera`, `setWorldTexture`, `neededWorldTextures`, `worldStats`, `setUi`, `setUiTexture` and bounded `originalFrontendFrame()`.
+- `src/original-ui-runtime-bridge.ts`: original `Renderer.setUi/setUiTexture` publication path, with no new HTML controls or synthetic character slots.
+- `src/original-frontend-stage.ts`: consumes the real one-shot OpenSRO `WorldSceneLease`, carries the exact original group IDs/materials/UVs and defers scene publication until genuine required textures finish loading. Safe cancel/replacement with no premature `ready`.
+- `src/original-world-textures.ts`: native Silkroad UV texture upload using BGRA/BC1/BC2/BC3 and S3TC/Safari fallback under memory budgets.
+- `tests/original-frontend-flow.integration.mjs`: replays the actual pinned original frontend state machine, never a new login controller.
+- `tests/original-frontend-stage.test.mjs`: lease identity, byte-budget, partial-load cancellation, real image dependency and no-fake-world-ready tests.
+- `tests/native-compose-pixels.mjs`: Chromium WebGL2 pixel readback of original WorldSceneLease shape + native BGRA WorldTexture + original camera projection + original native UI compositor. This is a renderer integration test, not a live game login.
 - Pure Node unit tests and Chromium software-WebGL2 pixel tests check scissor/tint/BCn/triangles/context composition. The strict TypeScript CI checks these against the exact original OpenSRO contracts after cloning the pinned engine.
 - No deployment from this branch. No accounts, DB, shaders or UI on LIVE modified.
 
-**Supported implementation subset is not the full game**. Never describe as a working login, native character viewer or playable MMORPG. The previous independent Babylon WebGL2 experiment is not the port source of truth.
+**Supported subset is still not an actual populated Constantinople scene, animated character dock or GameWorld login; advanced lit/animated textures, terrain, masks, skeletal actors and gameplay renderer paths remain blocked.** Never describe as a working login, native character viewer or playable MMORPG. The previous independent Babylon WebGL2 experiment is not the port source of truth.
 
 ## Remaining production-blocking work
 

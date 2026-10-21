@@ -56,8 +56,22 @@ try{
      unlit:true,doubleSided:true,alphaCutoff:0,blend:false}));
    owner.render(identity,["lit"]);
    const unlit=sample();
+   const a=identity.slice();a[12]=-.55;
+   const b=identity.slice();b[12]=.55;
+   owner.set("original-instance-group",{
+      positions:new Float32Array([-.22,-.35,.5,.22,-.35,.5,0,.35,.5]),
+      normals:new Float32Array([0,0,1,0,0,1,0,0,1]),
+      indices:new Uint32Array([0,1,2]),
+      instances:new Float32Array([...a,...b]),
+      transform:identity,
+      material:{color:[1,0,0,1],unlit:true,doubleSided:true,alphaCutoff:0,blend:false}
+   });
+   const instanceStats=owner.render(identity,["original-instance-group"]);
+   const at=(x,y)=>{const rgba=new Uint8Array(4);
+     gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,rgba);return [...rgba];};
+   const firstInstance=at(14,32),secondInstance=at(50,32),midpoint=at(32,32);
    owner.dispose();
-   return {refused,front,back,unlit};
+   return {refused,front,back,unlit,firstInstance,secondInstance,midpoint,instanceStats};
  });
  assert.ok(results.refused,"Uninitialized native environment must fail, not pretend world ready");
  assert.ok(results.front[0]>150&&results.front[0]<195,
@@ -68,5 +82,13 @@ try{
    "Original object-light normal direction must change pixel luminance");
  assert.ok(results.unlit[2]>230&&results.unlit[0]<10&&results.unlit[1]<10,
    "Retail native NOLIGHT must remain color-faithful independently of lighting");
+ assert.ok(results.firstInstance[0]>225&&results.firstInstance[1]<20,
+   "First native Silkroad placement must be drawn at the original matrix translation");
+ assert.ok(results.secondInstance[0]>225&&results.secondInstance[1]<20,
+   "Second native Silkroad placement must be drawn from the same GPU vertex mesh");
+ assert.ok(results.midpoint[0]<10,
+   "Native instance decoder must not invent a middle placement");
+ assert.equal(results.instanceStats.triangleCount,2,
+   "One native triangle with two placements counts as two real GPU triangles");
  console.log("ORIGINAL_SRO_OBJECT_LIGHTING_GL_PIXEL_PASS",JSON.stringify(results));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

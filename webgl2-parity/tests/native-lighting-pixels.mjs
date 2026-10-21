@@ -64,14 +64,26 @@ try{
       indices:new Uint32Array([0,1,2]),
       instances:new Float32Array([...a,...b]),
       transform:identity,
-      material:{color:[1,0,0,1],unlit:true,doubleSided:true,alphaCutoff:0,blend:false}
+      material:{color:[1,0,0,1],unlit:true,doubleSided:true,alphaCutoff:0,blend:false,objectFade:true}
    });
    const instanceStats=owner.render(identity,["original-instance-group"]);
    const at=(x,y)=>{const rgba=new Uint8Array(4);
      gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,rgba);return [...rgba];};
    const firstInstance=at(14,32),secondInstance=at(50,32),midpoint=at(32,32);
+   owner.updateOriginalInstances("original-instance-group",new Float32Array([...a,...b]),
+     new Float32Array([.5,1]));
+   const partialStats=owner.render(identity,["original-instance-group"]);
+   const fadedNear=at(14,32),retainedFar=at(50,32);
+   owner.updateOriginalInstances("original-instance-group",new Float32Array(0),new Float32Array(0));
+   const emptyStats=owner.render(identity,["original-instance-group"]);
+   const absent=at(14,32);
+   let rejected=false;
+   try{owner.updateOriginalInstances("original-instance-group",
+     new Float32Array([...a,...b]),new Float32Array([1,NaN]));}
+   catch(e){rejected=String(e).includes("invalid");}
    owner.dispose();
-   return {refused,front,back,unlit,firstInstance,secondInstance,midpoint,instanceStats};
+   return {refused,front,back,unlit,firstInstance,secondInstance,midpoint,
+     instanceStats,partialStats,fadedNear,retainedFar,emptyStats,absent,rejected};
  });
  assert.ok(results.refused,"Uninitialized native environment must fail, not pretend world ready");
  assert.ok(results.front[0]>150&&results.front[0]<195,
@@ -90,5 +102,15 @@ try{
    "Native instance decoder must not invent a middle placement");
  assert.equal(results.instanceStats.triangleCount,2,
    "One native triangle with two placements counts as two real GPU triangles");
+ assert.ok(results.fadedNear[0]>=115&&results.fadedNear[0]<=140,
+   "Original placed object with 128/255 fade must blend at native half opacity");
+ assert.ok(results.retainedFar[0]>225,
+   "Second native object placement must retain full original opacity");
+ assert.equal(results.partialStats.triangleCount,2);
+ assert.equal(results.emptyStats.triangleCount,0);
+ assert.equal(results.absent[0],0,
+   "Native residentSlots removing all placements must clear GPU draw without fake mesh");
+ assert.equal(results.rejected,true,
+   "Corrupt original per-placement alpha must not reach the GPU");
  console.log("ORIGINAL_SRO_OBJECT_LIGHTING_GL_PIXEL_PASS",JSON.stringify(results));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

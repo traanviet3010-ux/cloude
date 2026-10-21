@@ -4,6 +4,8 @@ on:
     branches: [hieusro-original-webgl2-parity]
     paths:
       - "webgl2-parity/scripts/audit-original-sropack2-test.mjs"
+      - "webgl2-parity/scripts/verify-native-stage-pack-bytes.mjs"
+      - "webgl2-parity/server/**"
       - ".github/workflows/hieusro-original-pack-audit.yml"
   workflow_dispatch:
 permissions:
@@ -21,4 +23,6 @@ jobs:
         env:
           HIEUSRO_TEST_PACK_CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
         working-directory: webgl2-parity
-        run: node scripts/audit-original-sropack2-test.mjs
+        run: |
+          node scripts/audit-original-sropack2-test.mjs
+          node scripts/verify-native-stage-pack-bytes.mjs

@@ -9,8 +9,9 @@ import {admitOriginalGeometry,type GlNativeGeometry} from "./native-geometry";
 import {originalCameraToWebgl2} from "./clip-space";
 import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
+import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;
-  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean; }
+  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -21,19 +22,58 @@ uniform mat4 uViewProjection;
 uniform mat4 uModel;
 out vec4 vColor;
 out vec2 vUv;
-void main(){gl_Position=uViewProjection*uModel*vec4(aPos,1.0);vColor=aColor;vUv=aUv;}`;
+out vec3 vNormal;
+out vec3 vVertexLighting;
+uniform vec3 uDiffuse;
+uniform vec3 uAmbient;
+uniform vec3 uAmbientFactor;
+uniform vec3 uLightDirection;
+uniform vec3 uMaterialDiffuse;
+uniform float uAmbientScale;
+void main(){
+ gl_Position=uViewProjection*uModel*vec4(aPos,1.0);
+ vColor=aColor;vUv=aUv;
+ // Matches OpenSRO's inverse-transpose world normal and retained vertex
+ // object-light calculation, not a new lighting preset.
+ vNormal=transpose(inverse(mat3(uModel)))*aNormal;
+ vVertexLighting=clamp(uMaterialDiffuse*uDiffuse*
+   max(0.0,dot(vNormal,uLightDirection))+
+   uAmbient*uAmbientFactor*uAmbientScale,0.0,1.0);
+}`;
 const FS=`#version 300 es
 precision mediump float;
 in vec4 vColor;
 in vec2 vUv;
+in vec3 vNormal;
+in vec3 vVertexLighting;
 uniform vec4 uMaterialColor;
+uniform vec3 uDiffuse;
+uniform vec3 uAmbient;
+uniform vec3 uAmbientFactor;
+uniform vec3 uLightDirection;
+uniform float uAmbientScale;
+uniform int uLit;
+uniform int uObjectVertexLighting;
 uniform sampler2D uTexture;
 uniform int uUseTexture;
 uniform float uCutoff;
 out vec4 fragColor;
-void main(){vec4 c=vColor*uMaterialColor;
- if(uUseTexture==1)c*=texture(uTexture,vUv);
- if(c.a<=uCutoff)discard;fragColor=c;}`;
+void main(){
+ vec4 texel=uUseTexture==1?texture(uTexture,vUv):vec4(1.0);
+ vec4 c;
+ if(uLit==1){
+   vec3 lit=uObjectVertexLighting==1?vVertexLighting:
+     clamp(uMaterialColor.rgb*uDiffuse*
+       max(0.0,dot(normalize(vNormal),uLightDirection))+
+       uAmbient*uAmbientFactor*uAmbientScale,0.0,1.0);
+   // Native stage-off lit mode multiplies texel and vertex color by
+   // saturated world illumination; material diffuse is inside lit.
+   c=vec4(texel.rgb*vColor.rgb*lit,
+     texel.a*vColor.a*uMaterialColor.a);
+ }else c=texel*vColor*uMaterialColor;
+ if(c.a<=uCutoff)discard;
+ fragColor=c;
+}`;
 function shader(gl:WebGL2RenderingContext,kind:number,source:string){
  const sh=gl.createShader(kind);if(!sh)throw Error("Cannot allocate native GL shader");
  gl.shaderSource(sh,source);gl.compileShader(sh);
@@ -48,6 +88,7 @@ export class OriginalWorldWebgl2 {
  private readonly entries=new Map<string,Slot>();
  private readonly worldTextures:OriginalWorldTextures;
  private readonly white:WebGLTexture;
+ private lighting:OriginalGlLighting|null=null;
  private readonly budget:number;
  private used=0;
  private frame=0;
@@ -92,6 +133,11 @@ export class OriginalWorldWebgl2 {
    this.worldTextures.put(path,image,used);
  }
  hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
+ /** The ORIGINAL worldEnvironment() packed Float32Array; never sample fabricated palette. */
+ setOriginalLighting(packed:Float32Array,useNativeSun=false){
+   this.validate();
+   this.lighting=readOriginalGlLighting(packed,useNativeSun);
+ }
  /**
   * Update native CPU-skinned vertices in the existing VBO. No reallocation
   * of VAO or GPU buffers on each original animation frame.
@@ -122,9 +168,25 @@ export class OriginalWorldWebgl2 {
    if(!id||id.length>512)throw Error("Invalid original SRO geometry id");
    if(this.entries.has(id))this.retire(id);
    if(!geometry)return;
-   // Exact original materials with unported lighting/textures must not appear as flat fallback.
-   if(geometry.material && !geometry.material.unlit)
-     throw Error("Original SRO object lighting is not ported; cannot replace it with debug material");
+   const material=geometry.material;
+   const lit=material?.unlit===false;
+   if(lit){
+     if(!geometry.normals||geometry.normals.length!==geometry.positions.length)
+       throw Error("Original lit Silkroad geometry missing normals");
+     if(material?.objectLight!==undefined &&
+       (!Number.isFinite(material.objectLight)||material.objectLight<0))
+       throw Error("Original object-light ambient scalar invalid");
+     const mat=geometry.transform;
+     const a0=mat[0]!,a1=mat[1]!,a2=mat[2]!,
+       b0=mat[4]!,b1=mat[5]!,b2=mat[6]!,
+       c0=mat[8]!,c1=mat[9]!,c2=mat[10]!;
+     const det=a0*(b1*c2-b2*c1)-b0*(a1*c2-a2*c1)+c0*(a1*b2-a2*b1);
+     if(!Number.isFinite(det)||Math.abs(det)<1e-8)
+       throw Error("Original lit Silkroad normal transform singular");
+   }
+   if(material?.ambient &&
+       (material.ambient.length!==3||material.ambient.some(v=>!Number.isFinite(v)||v<0||v>1)))
+     throw Error("Invalid native ambient material color");
    const row:GlNativeGeometry=admitOriginalGeometry(geometry);
    if(row.byteSize>this.budget)throw Error("One original mesh exceeds GPU residency limit");
    for(const [key] of [...this.entries].sort((a,b)=>a[1].last-b[1].last)){
@@ -153,7 +215,10 @@ export class OriginalWorldWebgl2 {
        texture:geometry.material?.texture??"",
        blend:geometry.material?.blend??false,
        doubleSided:geometry.material?.doubleSided??false,
-       depthWrite:geometry.material?.depthWrite??!geometry.material?.blend});
+       depthWrite:geometry.material?.depthWrite??!geometry.material?.blend,
+       lit,ambient:new Float32Array(material?.ambient??[1,1,1]),
+       ambientScale:material?.objectLight??1,
+       objectVertexLighting:material?.objectLight!==undefined});
      this.used+=row.byteSize;
    }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);throw e;}
  }
@@ -166,6 +231,8 @@ export class OriginalWorldWebgl2 {
      if(s.texture&&!this.worldTextures.has(s.texture))
        throw Error("Original world material texture not resident: "+s.texture);
    }
+   if(sceneIds.some(id=>this.entries.get(id)!.lit)&&!this.lighting)
+     throw Error("Original lit Silkroad world requires native packed environment");
    const camera=originalCameraToWebgl2(cameraMatrix);
    this.frame++;this.visible=new Set(sceneIds);this.worldTextures.frame();
    const gl=this.gl;gl.viewport(0,0,this.canvas.width,this.canvas.height);
@@ -175,12 +242,26 @@ export class OriginalWorldWebgl2 {
    gl.uniform1i(gl.getUniformLocation(this.program,"uTexture"),0);
    gl.activeTexture(gl.TEXTURE0);
    gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uViewProjection"),false,camera);
+   const environment=this.lighting;
+   gl.uniform3fv(gl.getUniformLocation(this.program,"uDiffuse"),
+     environment?.diffuse??new Float32Array([1,1,1]));
+   gl.uniform3fv(gl.getUniformLocation(this.program,"uAmbient"),
+     environment?.ambient??new Float32Array([0,0,0]));
+   gl.uniform3fv(gl.getUniformLocation(this.program,"uLightDirection"),
+     environment?.direction??new Float32Array([Math.SQRT1_2,Math.SQRT1_2,0]));
    let triangles=0;
    for(const id of sceneIds){
      const s=this.entries.get(id)!;s.last=this.frame;
      gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uModel"),false,s.transform);
      gl.uniform4fv(gl.getUniformLocation(this.program,"uMaterialColor"),s.color);
      gl.uniform1f(gl.getUniformLocation(this.program,"uCutoff"),s.alphaCutoff);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
+       s.objectVertexLighting?1:0);
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uMaterialDiffuse"),
+       new Float32Array(s.color.subarray(0,3)));
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uAmbientFactor"),s.ambient);
+     gl.uniform1f(gl.getUniformLocation(this.program,"uAmbientScale"),s.ambientScale);
      gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),s.texture?1:0);
      gl.bindTexture(gl.TEXTURE_2D,s.texture?this.worldTextures.get(s.texture):this.white);
      if(s.doubleSided)gl.disable(gl.CULL_FACE);else{gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);}
@@ -201,6 +282,7 @@ export class OriginalWorldWebgl2 {
    this.disposed=true;this.canvas.removeEventListener("webglcontextlost",this.lostHandler);
    for(const id of [...this.entries.keys()])this.retire(id);
    this.worldTextures.dispose();this.gl.deleteTexture(this.white);
+   this.lighting=null;
    this.gl.deleteProgram(this.program);
  }
 }

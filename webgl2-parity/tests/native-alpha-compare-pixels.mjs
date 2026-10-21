@@ -28,25 +28,35 @@ try{
    const own=new OriginalWorldWebgl2(canvas,16),gl=canvas.getContext("webgl2");
    const I=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
    const data=[];
-   for(let compare=1;compare<=8;compare++){
-     own.set("native-alpha-compare",{
-       positions:new Float32Array([-.9,-.9,.5,.9,-.9,.5,0,.9,.5]),
-       indices:new Uint32Array([0,1,2]),transform:I,
-       material:{color:[1,0,0,.5],unlit:true,doubleSided:true,
-         alphaCutoff:.5,alphaCompare:compare,blend:false}
-     });
-     own.render(I,["native-alpha-compare"]);
-     const pixel=new Uint8Array(4);
-     gl.readPixels(32,32,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
-     data.push({compare,red:pixel[0]});
+   for(const testAlpha of [.5,.501]){
+     const results=[];
+     for(let compare=1;compare<=8;compare++){
+       own.set("native-alpha-compare",{
+         positions:new Float32Array([-.9,-.9,.5,.9,-.9,.5,0,.9,.5]),
+         indices:new Uint32Array([0,1,2]),transform:I,
+         material:{color:[1,0,0,testAlpha],unlit:true,doubleSided:true,
+           alphaCutoff:.5,alphaCompare:compare,blend:false}
+       });
+       own.render(I,["native-alpha-compare"]);
+       const pixel=new Uint8Array(4);
+       gl.readPixels(32,32,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+       results.push({compare,red:pixel[0]});
+     }
+     data.push({testAlpha,results});
    }
    own.dispose();
    return data;
  });
- const expected=[false,false,true,true,false,false,true,true];
- for(let i=0;i<8;i++){
-   assert.equal(result[i].red>220,expected[i],
-    "Original Silkroad D3D comparison "+(i+1)+" does not match native equality semantics");
+ const expected=[
+   // D3D9 HAL: exactly .5 becomes 127, but .5 ref rounds to 128.
+   [false,true,false,true,false,true,false,true],
+   // .501 becomes 128 and is equal to the same 128 cutoff reference.
+   [false,false,true,true,false,false,true,true]
+ ];
+ for(let t=0;t<2;t++)for(let i=0;i<8;i++){
+   assert.equal(result[t].results[i].red>220,expected[t][i],
+     "Pinned Silkroad HAL quantization differs for alpha "+result[t].testAlpha+
+     " and D3DCMPFUNC "+(i+1));
  }
  console.log("ORIGINAL_SILKROAD_D3DCMPFUNC_1_8_WEBGL2_PIXEL_PASS",JSON.stringify(result));
 }finally{

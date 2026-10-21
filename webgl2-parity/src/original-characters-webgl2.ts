@@ -83,7 +83,7 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
        actor.pose.x,actor.pose.y,actor.pose.z,actor.pose.yaw);
      // Scale authored actor basis exactly once. Preserve translation from
      // native region placement; geometry retains its own model root basis.
-     for(const index of [0,1,2,4,5,6,8,9,10])placementMatrix[index]!*=(actor.scale);
+     for(const index of [0,1,2,4,5,6,8,9,10])placementMatrix[index]=placementMatrix[index]!*actor.scale;
      for(let i=0;i<entry.source.primitives.length;i++){
        const p=entry.source.primitives[i]!;
        const imagePath=entry.imagePaths[p.image]!;

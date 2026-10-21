@@ -18,22 +18,27 @@ layout(location=2) in vec4 aColor;
 uniform vec2 uResolution;
 out vec2 vUv;
 out vec4 vColor;
+out vec2 vPoint;
 void main(){
   vec2 p=aPosition/uResolution;
   gl_Position=vec4(p.x*2.0-1.0,1.0-p.y*2.0,0.0,1.0);
-  vUv=aUv; vColor=aColor;
+  vUv=aUv; vColor=aColor;vPoint=aPosition;
 }`;
 const FRAGMENT = `#version 300 es
 precision mediump float;
 in vec2 vUv;
 in vec4 vColor;
+in vec2 vPoint;
 uniform sampler2D uSampler;
+uniform sampler2D uMask;
+uniform vec4 uMaskRect;
 uniform float uAlphaCutoff;
 out vec4 fragColor;
 void main(){
   vec4 c=texture(uSampler,vUv)*vColor;
-  if(c.a<=uAlphaCutoff)discard;
-  fragColor=c;
+  if(c.a<uAlphaCutoff)discard;
+  vec2 maskUv=(vPoint-uMaskRect.xy)/uMaskRect.zw;
+  fragColor=vec4(c.rgb,c.a*texture(uMask,maskUv).a);
 }`;
 function compile(gl:WebGL2RenderingContext,type:number,source:string):WebGLShader{
   const shader=gl.createShader(type);
@@ -166,7 +171,8 @@ export class NativeUiWebgl2Renderer {
     if(this.closed||this.lost)throw Error("Native UI renderer unavailable; must be rebuilt after context loss");
     // Validate whole frame *before* changing GPU state: no partial/misleading UI frame.
     const commands=compileNativeUi(scene);
-    const required=new Set(commands.map(c=>c.texture).filter(Boolean));
+    const required=new Set(commands.flatMap(c=>
+      [c.texture,...(c.maskTexture?[c.maskTexture]:[])].filter(Boolean)));
     for(const id of required)if(!this.textures.has(id))throw Error("Original Silkroad UI texture not resident: "+id);
     this.frameNo++;this.calls=0;this.pinned=required;
     for(const id of required)this.textures.get(id)!.lastFrame=this.frameNo;
@@ -178,6 +184,7 @@ export class NativeUiWebgl2Renderer {
     gl.useProgram(this.program);
     gl.uniform2f(gl.getUniformLocation(this.program,"uResolution"),scene.width,scene.height);
     gl.uniform1i(gl.getUniformLocation(this.program,"uSampler"),0);
+    gl.uniform1i(gl.getUniformLocation(this.program,"uMask"),1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(this.vao);
     if(clearBackground){
@@ -193,10 +200,17 @@ export class NativeUiWebgl2Renderer {
       if(right<=left||top<=bottom)continue;
       gl.scissor(left,bottom,right-left,top-bottom);
       const t=cmd.texture?this.textures.get(cmd.texture)!.texture:this.placeholder;
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D,t);
       const min=cmd.sampling==="nearest"?gl.NEAREST:gl.LINEAR;
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,min);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,min);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D,cmd.maskTexture?
+        this.textures.get(cmd.maskTexture)!.texture:this.placeholder);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,min);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,min);
+      gl.uniform4fv(gl.getUniformLocation(this.program,"uMaskRect"),cmd.maskRect);
       gl.uniform1f(gl.getUniformLocation(this.program,"uAlphaCutoff"),cmd.alphaCutoff);
       gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
       gl.bufferSubData(gl.ARRAY_BUFFER,0,cmd.vertexData);

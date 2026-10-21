@@ -108,3 +108,23 @@ Read-only audit `hieusro-original-test-stage-audit.yml` checks actual Constantin
 - `scripts/rebuild-original-v150-assets-test.sh` is an **optional, not-yet-run** fallback that uses the upstream pinned OpenSRO `pnpm assets prepare; pnpm assets doctor; pnpm assets build full` from a disposable licensed PK2 copy and verifies all four stage outputs. Existing TEST CDN already contains the four stage resources, so rebuilding would be unnecessary unless real-world bundle validation later exposes a missing source.
 
 **Remaining before user-facing game URL:** Mount asset bridge on a separately verified TEST client runtime; implement remaining original `Renderer` interface (including terrain/multistage shaders/sky/particles/portrait, full native character assembly, picking), use untouched `startRuntime` and original WSS GameWorld state machine, then perform real TEST login/character-create/world-entry and iPhone hardware acceptance. `acceptance.json.releaseEligible` remains false. Never switch the old Icons Preview/LIVE routes to this branch.
+
+
+## 2026-10-21 — authentic client WorldScene (not a synthetic geometry test)
+
+Read-only GitHub Actions used the exact pinned original `createWorldDecoder()`, fetching precompiled binary-safe region JSON from the isolated TEST SROPACK2 CDN. The original CPU decoder successfully produced fully populated `WorldScene` objects for ALL four retail frontend scenes:
+
+| Native scene | Decoded GPU groups | Triangles | Distinct image dependencies | Groups with original instance matrices |
+| --- | ---: | ---: | ---: | ---: |
+| Intro Constantinople, 0x694e | 1536 | 2,072,067 | 463 | 1536 |
+| Character select, 0x6951 | 794 | 687,447 | 249 | 794 |
+| EU creation, 0x694f | 961 | 795,632 | 429 | 961 |
+| CH creation, 0x62a8 | 967 | 724,372 | 381 | 967 |
+
+Original native material/environment, terrain, sky, water, lightmaps, cloth, navmesh survived the decode. The China region decoder reported two unimplemented waterfall texture-animation warnings which must not be ignored for full visual parity.
+
+**Critical blocker identified on genuine scenes:** Previous GL path had rejected all native `geometry.instances`, which every decoded world group owns. `native-geometry.ts` and `native-world-webgl2.ts` now validate and upload actual column-major placement matrices and render through GLSL ES 3.00 instanced attributes (4..7) with `gl.drawElementsInstanced`; no mesh duplication/recreation. Browser pixel readback confirms both exact original matrix translations and proper triangle counts, and pinned OpenSRO TypeScript CI passed.
+
+**Still not visually supported as a whole scene:** Despite decoder success, the production WebGL2 stage fail-closed audit currently admits 0 of 1536 intro groups. Source shows 916 groups with world visibility/fading, 110 terrain range groups, 638 advanced material/water/sky/lightmap groups (overlap permitted). All 4 scenes currently have 0 full-stage groups admitted. This is expected because current stage guards require original fade/visibility handling, terrain association LOD, water/sky/lightmaps, shader multi-stages and cloth before release. Adding instancing alone does not satisfy these. Thus no public play link or deployment is permitted.
+
+Exact data source: the user's existing TEST SROPACK2 CDN with 213 packs, 36,843 real assets, source SHA-256 verification. No source images/PK2/game art have been committed to GitHub. Original GPU runtime/GameWorld and LIVE are untouched.

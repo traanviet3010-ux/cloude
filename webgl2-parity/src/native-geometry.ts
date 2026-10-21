@@ -59,8 +59,11 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
   if(mat?.ambient && (mat.ambient.length!==3 ||
      mat.ambient.some(v=>!Number.isFinite(v)||v<0||v>1)))
     throw Error("Original ambient lighting color invalid");
-  if(mat?.alphaCompare!==undefined && mat.alphaCompare!==7)
-    throw Error("Original material needs native alternate alpha comparison stage");
+  if(mat?.alphaCompare!==undefined &&
+    (!Number.isInteger(mat.alphaCompare) || mat.alphaCompare<1 || mat.alphaCompare>8))
+    throw Error("Original Silkroad D3DCMPFUNC alpha comparison invalid");
+  if(mat && (!Number.isFinite(mat.alphaCutoff)||mat.alphaCutoff<0||mat.alphaCutoff>1))
+    throw Error("Original Silkroad alpha cutoff outside native 0..1 range");
   if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
      mat?.water||mat?.sky||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||mat?.blendPair||

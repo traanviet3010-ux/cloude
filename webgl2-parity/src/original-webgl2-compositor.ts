@@ -12,6 +12,7 @@ import { NativeUiWebgl2Renderer } from "./native-ui-webgl2";
 import { createOriginalStageBridge } from "./original-frontend-stage";
 import { createOriginalUiBridge } from "./original-ui-runtime-bridge";
 import {createOriginalWebgl2Characters} from "./original-characters-webgl2";
+import {createOriginalInstanceSelection} from "./original-instance-selection";
 import {viewProjection} from "@/engine/foundation/rendering/world-math";
 import {worldEnvironment} from "@/engine/foundation/rendering/world-environment";
 import type {WorldCamera} from "@/engine/contracts/scene";
@@ -24,6 +25,9 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   const bridge=createOriginalUiBridge(ui);
   const characters=createOriginalWebgl2Characters(world);
   let titleCamera:WorldCamera|null=null;
+  let visibleGroupSet:ReturnType<typeof createOriginalInstanceSelection>|null=null;
+  let selectedSceneGroups:ReturnType<typeof stage.activeGroups>|null=null;
+  let nativeFrameIndex=0,nativeLastSeconds:number|null=null;
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
   return {
@@ -55,8 +59,37 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       world.setOriginalLighting(nativeEnvironment);
       const matrix=viewProjection(titleCamera,aspect);
       const origin=stage.originRegion();
+      const groups=stage.activeGroups();
+      if(groups!==selectedSceneGroups){
+        visibleGroupSet?.dispose();
+        visibleGroupSet=createOriginalInstanceSelection(groups);
+        selectedSceneGroups=groups;
+      }
+      const dx=titleCamera.originRegion && origin!==null ?
+        ((titleCamera.originRegion&255)-(origin&255))*1920:0;
+      const dz=titleCamera.originRegion && origin!==null ?
+        ((titleCamera.originRegion>>>8)-(origin>>>8))*1920:0;
+      const localCamera={
+        eye:[titleCamera.eye[0]+dx,titleCamera.eye[1],titleCamera.eye[2]+dz] as [number,number,number],
+        target:[titleCamera.target[0]+dx,titleCamera.target[1],titleCamera.target[2]+dz] as [number,number,number]
+      };
+      const dt=nativeLastSeconds===null?0:
+        Math.min(1,Math.max(0,originalSeconds-nativeLastSeconds));
+      nativeLastSeconds=originalSeconds;
+      const selection=visibleGroupSet!.select(localCamera,dt,++nativeFrameIndex);
+      const nativeSelected=new Map(selection.map(row=>[row.id,row]));
+      const stageIds=stage.drawIds().filter(id=>{
+        const original=groups.find(g=>g.id===id);
+        if(!original || original.instanceRadius===undefined ||
+           !!original.ranges || !!original.material.sky)return true;
+        const row=nativeSelected.get(id);
+        world.updateOriginalInstances(id,
+          row?.matrices??new Float32Array(0),
+          row?.opacity??new Float32Array(0));
+        return !!row?.count;
+      });
       const actorIds=origin===null?[]:characters.update(origin);
-      const scene=world.render(matrix,[...stage.drawIds(),...actorIds]);
+      const scene=world.render(matrix,[...stageIds,...actorIds]);
       const visible=bridge.draw();
       return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),characters:characters.stats()};
     },
@@ -71,7 +104,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     },
     dispose(){
       if(disposed)return;disposed=true;
-      bridge.dispose();characters.dispose();stage.dispose();ui.dispose();world.dispose();
+      visibleGroupSet?.dispose();bridge.dispose();characters.dispose();stage.dispose();ui.dispose();world.dispose();
     }
   };
 }

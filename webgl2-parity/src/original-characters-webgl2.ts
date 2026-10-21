@@ -33,8 +33,11 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
    for(const primitive of model.primitives){
      if(!Number.isInteger(primitive.image)||primitive.image<0||primitive.image>=images.length)
        throw Error("Original character model texture binding invalid");
-     if(!primitive.geometry.material?.unlit)
-       throw Error("Native character lighting/material stage not yet ported to WebGL2");
+     // OpenSRO's default undefined unlit is NOLIGHT. Explicit false is
+     // original object-lit mode supported by the native lighting pass.
+     // Complex stage/reflection/cloth shaders are still rejected at admission.
+     if(primitive.geometry.material?.unlit===false && !primitive.geometry.normals)
+       throw Error("Original lit character primitive needs normal stream");
    }
    const uploaded:string[]=[];
    try{

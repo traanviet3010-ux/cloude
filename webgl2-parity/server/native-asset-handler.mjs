@@ -29,7 +29,11 @@ export function createNativeAssetHttpHandler(reader){
      res.writeHead(405,{"Allow":"GET, HEAD","Cache-Control":"no-store"});res.end();return true;
    }
    let path;
-   try{path=new URL(req.url,"https://webgl2-test.invalid").pathname;}
+   try{
+     // Browsers percent-encode authentic retail filenames with spaces.
+     // Decode once; the verified SROPACK2 reader rejects traversal/escapes.
+     path=decodeURIComponent(new URL(req.url,"https://webgl2-test.invalid").pathname);
+   }
    catch{res.writeHead(400,{"Cache-Control":"no-store"});res.end();return true;}
    const cancel=new AbortController();
    const abort=()=>cancel.abort();

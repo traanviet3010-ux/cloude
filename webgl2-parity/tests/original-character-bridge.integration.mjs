@@ -19,7 +19,7 @@ const primitive=()=>({
   uvs:new Float32Array([0,0,1,0,0,1]),indices:new Uint32Array([0,1,2]),
   joints:new Uint32Array(12),
   weights:new Float32Array([1,0,0,0,1,0,0,0,1,0,0,0]),
-  transform:identity(),material:{unlit:true,color:[1,1,1,1],doubleSided:true}}
+  transform:identity(),material:{unlit:false,color:[1,1,1,1],doubleSided:true}}
 });
 const model=()=>({
  nodes:[{name:"Bip01",parent:-1,translation:[0,0,0],rotation:[0,0,0,1],scale:[1,1,1]}],

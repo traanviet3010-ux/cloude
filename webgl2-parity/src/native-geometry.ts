@@ -7,12 +7,14 @@ import type { Geometry } from "@/engine/contracts/geometry";
 export interface GlNativeGeometry {
   vertices:Float32Array; // pos3, normals3, uv2, color4
   indices:Uint32Array;
+  instances:Float32Array;
+  instanceCount:number;
   transform:Float32Array;
   vertexCount:number;
   triangles:number;
   byteSize:number;
 }
-const MAX_VERTICES=250_000, MAX_INDICES=900_000;
+const MAX_VERTICES=250_000, MAX_INDICES=900_000, MAX_INSTANCES=8192;
 const finite=(v:ArrayLike<number>)=>{
   for(let i=0;i<v.length;i++)if(!Number.isFinite(v[i]))return false;
   return true;
@@ -34,8 +36,19 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original geometry index outside admitted vertex buffer");
   if(source.joints||source.weights||source.bones||source.cloth)
     throw Error("SRO skeleton/cloth cannot be silently drawn as static geometry");
-  if(source.instances&&source.instances.length)
-    throw Error("Original scenery instancing requires true WebGL2 instance backend");
+  const instanceBuffer=source.instances;
+  if(instanceBuffer&&(!(instanceBuffer instanceof Float32Array)||
+     !instanceBuffer.length||instanceBuffer.length%16!==0||
+     instanceBuffer.length/16>MAX_INSTANCES||!finite(instanceBuffer)))
+    throw Error("Original Silkroad instance matrices invalid/exceed WebGL2 budget");
+  const instances=instanceBuffer??new Float32Array([
+    1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+  ]);
+  for(let i=0;i<instances.length;i+=16){
+    if(Math.abs(instances[i+3]!)>1e-4||Math.abs(instances[i+7]!)>1e-4||
+      Math.abs(instances[i+11]!)>1e-4||Math.abs(instances[i+15]!-1)>1e-4)
+      throw Error("Original Silkroad instance matrix invalid affine transform");
+  }
   if(source.dynamicVertices||source.vertices)throw Error("Original dynamic vertex mesh needs native update pipeline");
   const mat=source.material;
   if(mat?.unlit===false&&(!normals||normals.length!==n*3))
@@ -75,7 +88,8 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     data[o+10]=colors?.[i*4+2]??1;
     data[o+11]=colors?.[i*4+3]??1;
   }
-  return {vertices:data,indices:indices.slice(),transform:transform.slice(),
-    vertexCount:n,triangles:indices.length/3,
-    byteSize:data.byteLength+indices.byteLength+transform.byteLength};
+  return {vertices:data,indices:indices.slice(),instances:instances.slice(),
+    instanceCount:instances.length/16,transform:transform.slice(),
+    vertexCount:n,triangles:indices.length/3*instances.length/16,
+    byteSize:data.byteLength+indices.byteLength+transform.byteLength+instances.byteLength};
 }

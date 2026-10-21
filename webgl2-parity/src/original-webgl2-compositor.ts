@@ -36,6 +36,11 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     // Direct adapters for the ACTUAL createFrontend()/createUi() callbacks.
     adoptWorld:stage.adoptWorld,
     cancelWorldUpdate:stage.cancelWorldUpdate,
+    setWorld(scene:import("@/engine/contracts/scene").WorldScene|null){
+      assert();
+      if(scene!==null)throw Error("Original GameWorld direct WebGL2 scene publishing is not yet ported");
+      stage.clearWorld();
+    },
     worldStats:stage.worldStats,
     neededWorldTextures:stage.neededWorldTextures,
     setWorldTexture:stage.setWorldTexture,

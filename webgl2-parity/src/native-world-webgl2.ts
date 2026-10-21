@@ -10,7 +10,7 @@ import {originalCameraToWebgl2} from "./clip-space";
 import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
-interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;
+interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;instances:number;
   count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
@@ -18,6 +18,7 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
 layout(location=3) in vec4 aColor;
+layout(location=4) in mat4 aInstanceModel;
 uniform mat4 uViewProjection;
 uniform mat4 uModel;
 out vec4 vColor;
@@ -31,11 +32,12 @@ uniform vec3 uLightDirection;
 uniform vec3 uMaterialDiffuse;
 uniform float uAmbientScale;
 void main(){
- gl_Position=uViewProjection*uModel*vec4(aPos,1.0);
+ mat4 instance=uModel*aInstanceModel;
+ gl_Position=uViewProjection*instance*vec4(aPos,1.0);
  vColor=aColor;vUv=aUv;
  // Matches OpenSRO's inverse-transpose world normal and retained vertex
  // object-light calculation, not a new lighting preset.
- vNormal=transpose(inverse(mat3(uModel)))*aNormal;
+ vNormal=transpose(inverse(mat3(instance)))*aNormal;
  vVertexLighting=clamp(uMaterialDiffuse*uDiffuse*
    max(0.0,dot(vNormal,uLightDirection))+
    uAmbient*uAmbientFactor*uAmbientScale,0.0,1.0);
@@ -155,13 +157,16 @@ export class OriginalWorldWebgl2 {
    const slot=this.entries.get(id);
    if(!slot)throw Error("Native animated geometry not admitted: "+id);
    const source=admitOriginalGeometry(geometry);
-   if(source.indices.length!==slot.count||source.byteSize!==slot.bytes)
+   if(source.indices.length!==slot.count||source.instanceCount!==slot.instances||
+     source.byteSize!==slot.bytes)
      throw Error("Original animated mesh topology changed");
    if((geometry.material?.texture??"")!==slot.texture)
      throw Error("Original character material texture changed during animation");
    const gl=this.gl;
    gl.bindBuffer(gl.ARRAY_BUFFER,slot.vbo);
    gl.bufferSubData(gl.ARRAY_BUFFER,0,source.vertices);
+   gl.bindBuffer(gl.ARRAY_BUFFER,slot.instanceVbo);
+   gl.bufferSubData(gl.ARRAY_BUFFER,0,source.instances);
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original animated Silkroad vertex update failed");
    slot.transform.set(source.transform);
    slot.last=this.frame;
@@ -169,6 +174,7 @@ export class OriginalWorldWebgl2 {
  private retire(id:string){
    const s=this.entries.get(id);if(!s)return;
    this.gl.deleteBuffer(s.vbo);this.gl.deleteBuffer(s.ebo);
+   this.gl.deleteBuffer(s.instanceVbo);
    this.gl.deleteVertexArray(s.vao);this.used-=s.bytes;this.entries.delete(id);
  }
  set(id:string,geometry:Geometry|null){
@@ -203,8 +209,15 @@ export class OriginalWorldWebgl2 {
    }
    if(this.used+row.byteSize>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
    const gl=this.gl;
-   const vao=gl.createVertexArray(),vbo=gl.createBuffer(),ebo=gl.createBuffer();
-   if(!vao||!vbo||!ebo)throw Error("Original WebGL2 mesh buffer allocation failed");
+   const vao=gl.createVertexArray(),vbo=gl.createBuffer(),ebo=gl.createBuffer(),
+     instanceVbo=gl.createBuffer();
+   if(!vao||!vbo||!ebo||!instanceVbo){
+     if(vao)gl.deleteVertexArray(vao);
+     if(vbo)gl.deleteBuffer(vbo);
+     if(ebo)gl.deleteBuffer(ebo);
+     if(instanceVbo)gl.deleteBuffer(instanceVbo);
+     throw Error("Original WebGL2 mesh buffer allocation failed");
+   }
    try{
      gl.bindVertexArray(vao);
      gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
@@ -215,9 +228,21 @@ export class OriginalWorldWebgl2 {
        gl.enableVertexAttribArray(attribute!);
        gl.vertexAttribPointer(attribute!,size!,gl.FLOAT,false,48,offset!);
      }
+     // Native OpenSRO world decoder owns a column-major per-instance
+     // mapPlacement matrix. GLSL ES 3.00 mat4 occupies four vec4 lanes;
+     // divisor=1 changes exactly once per original scenery placement.
+     gl.bindBuffer(gl.ARRAY_BUFFER,instanceVbo);
+     gl.bufferData(gl.ARRAY_BUFFER,row.instances,gl.STATIC_DRAW);
+     for(let column=0;column<4;column++){
+       const loc=4+column;
+       gl.enableVertexAttribArray(loc);
+       gl.vertexAttribPointer(loc,4,gl.FLOAT,false,64,column*16);
+       gl.vertexAttribDivisor(loc,1);
+     }
      gl.bindVertexArray(null);
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
-     this.entries.set(id,{vao,vbo,ebo,count:row.indices.length,transform:row.transform,
+     this.entries.set(id,{vao,vbo,ebo,instanceVbo,instances:row.instanceCount,
+       count:row.indices.length,transform:row.transform,
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,
        bytes:row.byteSize,last:this.frame,
        texture:geometry.material?.texture??"",
@@ -228,7 +253,8 @@ export class OriginalWorldWebgl2 {
        ambientScale:material?.objectLight??1,
        objectVertexLighting:material?.objectLight!==undefined});
      this.used+=row.byteSize;
-   }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);throw e;}
+   }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);
+     gl.deleteBuffer(instanceVbo);throw e;}
  }
  render(cameraMatrix:Float32Array,sceneIds:readonly string[]){
    this.validate();
@@ -277,8 +303,8 @@ export class OriginalWorldWebgl2 {
      else gl.disable(gl.BLEND);
      gl.depthMask(s.depthWrite);
      gl.bindVertexArray(s.vao);
-     gl.drawElements(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,0);
-     triangles+=s.count/3;
+     gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,0,s.instances);
+     triangles+=s.count/3*s.instances;
    }
    gl.bindVertexArray(null);gl.depthMask(true);gl.disable(gl.BLEND);
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original World WebGL2 draw failed");

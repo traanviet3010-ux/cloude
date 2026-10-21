@@ -6,6 +6,7 @@ on:
       - "webgl2-parity/scripts/audit-original-sropack2-test.mjs"
       - "webgl2-parity/scripts/verify-native-stage-pack-bytes.mjs"
       - "webgl2-parity/scripts/verify-native-asset-gateway-http.mjs"
+      - "webgl2-parity/scripts/audit-original-stage-bundle.mjs"
       - "webgl2-parity/scripts/audit-native-silkroad-regions.mjs"
       - "webgl2-parity/server/**"
       - ".github/workflows/hieusro-original-pack-audit.yml"
@@ -30,3 +31,4 @@ jobs:
           node scripts/verify-native-stage-pack-bytes.mjs
           node scripts/verify-native-asset-gateway-http.mjs
           node scripts/audit-native-silkroad-regions.mjs
+          node scripts/audit-original-stage-bundle.mjs

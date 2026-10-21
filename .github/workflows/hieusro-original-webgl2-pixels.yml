@@ -7,6 +7,7 @@ on:
       - "webgl2-parity/tests/native-ui-pixels.mjs"
       - "webgl2-parity/tests/native-compose-pixels.mjs"
       - "webgl2-parity/tests/native-lighting-pixels.mjs"
+      - "webgl2-parity/tests/native-alpha-compare-pixels.mjs"
       - ".github/workflows/hieusro-original-webgl2-pixels.yml"
   workflow_dispatch:
 permissions:
@@ -41,3 +42,4 @@ jobs:
           node tests/native-ui-pixels.mjs
           node tests/native-compose-pixels.mjs
           node tests/native-lighting-pixels.mjs
+          node tests/native-alpha-compare-pixels.mjs

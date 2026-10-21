@@ -27,7 +27,7 @@ jobs:
       - name: Resolve pinned TypeScript dependencies for pure native UI parity tests
         run: |
           cd webgl2-parity
-          npm install --no-audit --no-fund --no-save typescript@5.9.3
+          npm install --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.28.2
           node --test tests/*.test.mjs
       - name: Checkout EXACT native HieuSRO GPU engine revision
         run: |

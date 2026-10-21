@@ -9,7 +9,8 @@ import {chromium} from "playwright";
 const cwd=dirname(fileURLToPath(import.meta.url));
 const output=join(cwd,"compose-bundle.js");
 await build({entryPoints:[join(cwd,"../src/original-webgl2-compositor.ts")],bundle:true,
-  format:"esm",platform:"browser",target:"es2022",outfile:output});
+  format:"esm",platform:"browser",target:"es2022",outfile:output,
+  alias:{"@":process.env.SRO_SOURCE_ROOT+"/apps/client-next/src"}});
 const httpServer=http.createServer((req,res)=>{
  if(req.url==="/compose-bundle.js"){res.writeHead(200,{"Content-Type":"text/javascript"});res.end(readFileSync(output));return;}
  res.writeHead(200,{"Content-Type":"text/html"});res.end("<!doctype html><title>Original OpenSRO 3D + UI on one WebGL2 context</title>");

@@ -52,10 +52,11 @@ try{
    const realGroup={
       id:"native-constantinople-triangle",
       center:[0,0,1],radius:1,
-      material:{color:[1,1,1,1],texture:texturePath,unlit:true,
+      material:{color:[1,1,1,1],texture:texturePath,unlit:false,
         doubleSided:true,alphaCutoff:0,blend:false},
       geometry:{
          positions:new Float32Array([-.7,-.7,1,.7,-.7,1,0,.7,1]),
+         normals:new Float32Array([0,1,0,0,1,0,0,1,0]),
          uvs:new Float32Array([0,0,1,0,.5,1]),
          indices:new Uint32Array([0,1,2]),
          transform:I

@@ -52,6 +52,7 @@ jobs:
         working-directory: webgl2-parity
         run: |
           node --test tests/original-character-cpu-skin.integration.mjs
+          node --test tests/original-character-bridge.integration.mjs
       - name: Type-check new WebGL2 owner in real original UI and renderer contracts
         run: |
           corepack enable

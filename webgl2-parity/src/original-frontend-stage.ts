@@ -14,6 +14,7 @@ import { OriginalWorldWebgl2 } from "./native-world-webgl2";
 
 type Stage = {
   readonly sceneId:string;
+  readonly groups:readonly import("@/engine/contracts/scene").WorldGroup[];
   readonly entries:readonly {id:string;geometry:import("@/engine/contracts/geometry").Geometry}[];
   cursor:number;
   texturePaths:readonly string[];
@@ -29,6 +30,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   let originRegion:number|null=null;
   let activeEnvironment:import("@/engine/contracts/scene").WorldEnvironment|undefined;
   let readyIds:string[]=[];
+  let activeGroups:readonly import("@/engine/contracts/scene").WorldGroup[]=[];
   let disposed=false;
   let error:string|null=null;
   const check=()=>{if(disposed)throw Error("Original Silkroad WebGL2 stage disposed");};
@@ -51,7 +53,11 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       if(!g.id||seen.has(g.id))throw Error("Original scene has duplicate/empty group ID");
       if(readyIds.includes(g.id))throw Error("Original stage shares resident group id; safe atomic replacement not yet supported: "+g.id);
       seen.add(g.id);
-      if(g.animation||g.visibility||g.ranges||g.material.terrain||
+      if(g.visibility && (
+        !g.geometry.instances || !g.instanceRadius ||
+        g.visibility.length>g.geometry.instances.length/16
+      ))throw Error("Original scene visibility has invalid placement binding");
+      if(g.animation||g.ranges||g.material.terrain||
          g.material.water||g.material.sky||g.material.lightmap){
         throw Error("Original stage needs native animated/terrain/sky/lightmap GL pass: "+g.id);
       }
@@ -65,7 +71,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     }
     const requiredPaths=[...required];
     world.protectPendingTextures(requiredPaths);
-    pending={sceneId:prepared.scene.id,entries,cursor:0,texturePaths:requiredPaths,originRegion:prepared.scene.originRegion,environment:prepared.scene.environment};
+    pending={sceneId:prepared.scene.id,groups:prepared.scene.groups,entries,cursor:0,texturePaths:requiredPaths,originRegion:prepared.scene.originRegion,environment:prepared.scene.environment};
     error=null;
   };
   function step(maxGroups=2):number{
@@ -87,7 +93,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         // throughout admission; publish new draw-order only on completion.
         const nextIds=task.entries.map(g=>g.id);
         for(const old of readyIds)if(!nextIds.includes(old))world.set(old,null);
-        readyIds=nextIds;sceneId=task.sceneId;originRegion=task.originRegion;
+        readyIds=nextIds;sceneId=task.sceneId;activeGroups=task.groups;originRegion=task.originRegion;
         activeEnvironment=task.environment;pending=null;
         world.protectPendingTextures([]);
       }
@@ -134,6 +140,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   return {
     adoptWorld,cancelWorldUpdate,neededWorldTextures,setWorldTexture,worldStats,step,
     drawIds:()=>{check();return [...readyIds];},
+    activeGroups:()=>{check();return activeGroups;},
     originRegion:()=>{check();return originRegion;},
     activeEnvironment:()=>{check();return activeEnvironment;},
     error:()=>error,
@@ -144,7 +151,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         if(!readyIds.includes(id))world.set(id,null);
       }
       for(const id of readyIds)world.set(id,null);
-      pending=null;readyIds=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
+      pending=null;readyIds=[];activeGroups=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
       world.protectPendingTextures([]);
     }
   };

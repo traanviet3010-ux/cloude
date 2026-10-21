@@ -38,14 +38,26 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original scenery instancing requires true WebGL2 instance backend");
   if(source.dynamicVertices||source.vertices)throw Error("Original dynamic vertex mesh needs native update pipeline");
   const mat=source.material;
+  if(mat?.unlit===false&&(!normals||normals.length!==n*3))
+    throw Error("Original lighting requires native per-vertex normals");
+  if(mat?.objectLight!==undefined &&
+      (!Number.isFinite(mat.objectLight)||mat.objectLight<0))
+    throw Error("Original object lighting scalar invalid");
+  if(mat?.ambient && (mat.ambient.length!==3 ||
+     mat.ambient.some(v=>!Number.isFinite(v)||v<0||v>1)))
+    throw Error("Original ambient lighting color invalid");
+  if(mat?.alphaCompare!==undefined && mat.alphaCompare!==7)
+    throw Error("Original material needs native alternate alpha comparison stage");
   if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
      mat?.water||mat?.sky||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||mat?.blendPair||
-     mat?.fog||mat?.groundDecal||mat?.objectFade||mat?.instanceFade)
+     mat?.fog||mat?.groundDecal||mat?.objectFade||mat?.instanceFade||
+     mat?.instanceMaterialTint||mat?.textureAlpha||mat?.surfaceAlpha||
+     mat?.shaderDiffuse||mat?.decal||mat?.fogDisabled)
     throw Error("Original material requires native staged WebGL2 shader parity");
   if(mat?.texture && (!uvs||uvs.length!==n*2))
     throw Error("Original textured Silkroad mesh has no native UV coordinates");
-  // Only the minimal unlit vertex format is admitted for the first real draw.
+  // The native static geometry layout supports explicit original lit and NOLIGHT modes.
   // Authored geometry values are preserved without scaling or triangulation.
   const data=new Float32Array(n*12);
   for(let i=0;i<n;i++){

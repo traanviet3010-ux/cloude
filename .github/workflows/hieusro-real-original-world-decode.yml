@@ -4,6 +4,7 @@ on:
     branches: [hieusro-original-webgl2-parity]
     paths:
       - "webgl2-parity/tests/real-original-world-decode.integration.mjs"
+      - "webgl2-parity/src/original-terrain-selection.ts"
       - "webgl2-parity/server/native-pack-reader.mjs"
       - ".github/workflows/hieusro-real-original-world-decode.yml"
   workflow_dispatch:

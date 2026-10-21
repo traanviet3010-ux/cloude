@@ -119,6 +119,25 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     pending=null;
     world.protectPendingTextures([]);
   };
+  /**
+   * Native createFrontend() calls renderer.setWorld(null) when leaving the
+   * title/character dock for authoritative GameWorld. Release all old GPU
+   * stage leases atomically: no stale Constantinople geometry is retained.
+   */
+  function clearWorld(){
+    check();
+    if(pending){
+      for(let i=0;i<pending.cursor;i++){
+        const id=pending.entries[i]!.id;
+        if(!readyIds.includes(id))world.set(id,null);
+      }
+      pending=null;
+    }
+    for(const id of readyIds)world.set(id,null);
+    readyIds=[];activeGroups=[];sceneId=null;originRegion=null;
+    activeEnvironment=undefined;error=null;
+    world.protectPendingTextures([]);
+  }
   const neededWorldTextures:Renderer["neededWorldTextures"]=()=>{
     check();
     return pending?.texturePaths.filter(path=>!world.hasTexture(path))??[];
@@ -138,7 +157,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       bundleRebuilds:0};
   };
   return {
-    adoptWorld,cancelWorldUpdate,neededWorldTextures,setWorldTexture,worldStats,step,
+    adoptWorld,cancelWorldUpdate,clearWorld,neededWorldTextures,setWorldTexture,worldStats,step,
     drawIds:()=>{check();return [...readyIds];},
     activeGroups:()=>{check();return activeGroups;},
     originRegion:()=>{check();return originRegion;},

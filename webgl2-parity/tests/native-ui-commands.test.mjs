@@ -27,9 +27,9 @@ test("preserves glyph-run paint order and atlas texture identity",()=>{
   assert.deepEqual([...draws[0].vertexData.subarray(0,4)],[20,31,0,Math.fround(.2)]);
   assert.equal(draws[1].vertexData[0],29);
 });
-test("unported inventory dolls, masks and scene-anchored labels fail closed, never disappear silently",()=>{
+test("unported inventory dolls and scene-anchored labels fail closed, never disappear silently",()=>{
   for(const x of [
-    {doll:{gid:100,yaw:0}},{mask:{texture:"mask",rect:[0,0,1,1]}},
+    {doll:{gid:100,yaw:0}},
     {worldAnchor:{x:0,y:0,z:0,regionId:0}},
     {portraitGid:1},{occlusion:"scene"}
   ])assert.throws(()=>compileNativeUi(scene([quad(x)])),/missing 3D\/occlusion\/mask/);
@@ -45,4 +45,16 @@ test("rotation and left/right tint remain authored native geometry",()=>{
   assert.ok(Math.abs(c.vertexData[0]-20)<1e-4);
   assert.ok(Math.abs(c.vertexData[1]-10)<1e-4);
   assert.equal(c.vertexData[8+4],.5);
+});
+
+test("retail CIF alpha-mask remains a distinct texture with original screen-space rectangle",()=>{
+ const rect=[10,15,20,25],mask={texture:"original-mask",rect:[5,6,28,40]};
+ const [cmd]=compileNativeUi(scene([quad({rect,mask})]));
+ assert.equal(cmd.maskTexture,"original-mask");
+ assert.deepEqual(cmd.maskRect,mask.rect);
+ assert.equal(cmd.texture,"original-silkroad-ui");
+ assert.deepEqual([...cmd.vertexData.slice(0,2)],[10,15]);
+ assert.equal(compileNativeUi(scene())[0].maskTexture,null);
+ assert.throws(()=>compileNativeUi(scene([quad({mask:{texture:"",rect:[0,0,1,1]}})])),/mask invalid/);
+ assert.throws(()=>compileNativeUi(scene([quad({mask:{texture:"m",rect:[0,0,0,1]}})])),/mask invalid/);
 });

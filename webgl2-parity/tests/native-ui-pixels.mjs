@@ -49,6 +49,21 @@ try{
     state.maskInside=read(4,48);
     state.maskOutside=read(28,48);
     state.maskTextureCount=owner.stats().textureCount;
+    // Original WebGPU UI intentionally skips only missing CIF art, not the
+    // entire login scene while other real textures are downloading.
+    owner.draw({revision:3,width:64,height:64,quads:[
+      {rect:[0,0,16,32],clip:[0,0,64,64],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"missing-native-CIF-art"},
+      {rect:[32,0,16,32],clip:[0,0,64,64],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-raster"},
+      {rect:[16,0,16,32],clip:[0,0,64,64],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-raster",
+       mask:{texture:"not-yet-resident-mask",rect:[16,0,16,32]}}
+    ]});
+    state.missingOriginalArt=read(8,50);
+    state.missingOriginalMask=read(24,50);
+    state.loadedOriginalArt=read(40,50);
+    state.loadingStats=owner.stats();
     owner.dispose();
     return state;
   });
@@ -63,6 +78,13 @@ try{
   assert.equal(state.maskOutside[3],0,
     "Original CIF mask must remove alpha from its second half");
   assert.equal(state.maskTextureCount,2);
+  assert.equal(state.missingOriginalArt[3],0,"Missing original CIF asset must not render fake art");
+  assert.equal(state.missingOriginalMask[3],0,"Missing original CIF alpha mask must hide only its quad");
+  assert.ok(state.loadedOriginalArt[0]>220&&state.loadedOriginalArt[3]>220,
+    "Already loaded genuine CIF asset must still render during pending asset requests");
+  assert.equal(state.loadingStats.missingQuads,2);
+  assert.equal(state.loadingStats.drawCalls,1);
+
 
   console.log("OPEN_SRO_UI_WEBGL2_GL_PIXEL_TEST_PASS",JSON.stringify(state));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

@@ -10,6 +10,8 @@ import type { UiQuad, UiRect, UiScene } from "@/engine/contracts/ui";
 
 export type NativeUiCommand = {
   readonly texture: string;
+  readonly maskTexture: string | null;
+  readonly maskRect: UiRect;
   readonly clip: UiRect;
   readonly sampling: "linear" | "nearest";
   readonly alphaCutoff: number;
@@ -30,11 +32,14 @@ function tile(q: UiQuad): NativeUiCommand | null {
   }
   if (q.doll || q.portraitGid !== undefined || q.worldAnchor ||
       q.characterAnchor !== undefined || q.occlusion === "scene" ||
-      q.mask || (q.depth !== undefined && q.depth !== 0)) {
+      (q.depth !== undefined && q.depth !== 0)) {
     // Port these in the world/portrait pass before accepting these scenes.
-    // Silent omission would break inventory dolls, masks, overhead labels.
+    // Silent omission would break inventory dolls or overhead labels.
     throw Error("Native UI command requires missing 3D/occlusion/mask WebGL2 pass");
   }
+  if(q.mask && (!q.mask.texture || q.mask.texture.length>1024 ||
+      !validRect(q.mask.rect) || !q.mask.rect[2] || !q.mask.rect[3]))
+    throw Error("Original Silkroad UI mask invalid");
   const [x,y,w,h] = q.rect;
   if (!w || !h || !q.clip[2] || !q.clip[3]) return null;
   if (q.uvTurn !== undefined && ![0,1,2,3].includes(q.uvTurn))
@@ -59,7 +64,9 @@ function tile(q: UiQuad): NativeUiCommand | null {
     if(angle){const dx=px-centerX,dy=py-centerY;px=centerX+dx*cs-dy*sn;py=centerY+dx*sn+dy*cs;}
     vertex(out,px,py,uv[i]![0],uv[i]![1],colors[i]!);
   }
-  return {texture:q.texture,clip:q.clip,sampling:q.sampling??"linear",alphaCutoff,
+  return {texture:q.texture,maskTexture:q.mask?.texture??null,
+    maskRect:q.mask?.rect??[0,0,1,1],clip:q.clip,
+    sampling:q.sampling??"linear",alphaCutoff,
     vertexData:new Float32Array(out)};
 }
 export function compileNativeUi(scene:UiScene):NativeUiCommand[]{

@@ -18,6 +18,7 @@ type Stage = {
   cursor:number;
   texturePaths:readonly string[];
   originRegion:number;
+  environment:import("@/engine/contracts/scene").WorldEnvironment|undefined;
 };
 const MAX_PENDING_BYTES=128*1024*1024;
 const MAX_GROUPS=12_000;
@@ -26,6 +27,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   let pending:Stage|null=null;
   let sceneId:string|null=null;
   let originRegion:number|null=null;
+  let activeEnvironment:import("@/engine/contracts/scene").WorldEnvironment|undefined;
   let readyIds:string[]=[];
   let disposed=false;
   let error:string|null=null;
@@ -56,13 +58,12 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       // WorldGroup owns its material, not necessarily Geometry.material.
       const mesh={...g.geometry,material:g.material};
       const native=admitOriginalGeometry(mesh);
-      if(!g.material.unlit)throw Error("Native lighting pass not yet available for "+g.id);
       if(g.material.texture)required.add(g.material.texture);
       bytes+=native.byteSize;
       if(bytes>MAX_PENDING_BYTES)throw Error("Original stage exceeds GPU budget");
       entries.push({id:g.id,geometry:mesh});
     }
-    pending={sceneId:prepared.scene.id,entries,cursor:0,texturePaths:[...required],originRegion:prepared.scene.originRegion};
+    pending={sceneId:prepared.scene.id,entries,cursor:0,texturePaths:[...required],originRegion:prepared.scene.originRegion,environment:prepared.scene.environment};
     error=null;
   };
   function step(maxGroups=2):number{
@@ -84,7 +85,8 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         // throughout admission; publish new draw-order only on completion.
         const nextIds=task.entries.map(g=>g.id);
         for(const old of readyIds)if(!nextIds.includes(old))world.set(old,null);
-        readyIds=nextIds;sceneId=task.sceneId;originRegion=task.originRegion;pending=null;
+        readyIds=nextIds;sceneId=task.sceneId;originRegion=task.originRegion;
+        activeEnvironment=task.environment;pending=null;
       }
       return n;
     }catch(e){
@@ -128,6 +130,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     adoptWorld,cancelWorldUpdate,neededWorldTextures,setWorldTexture,worldStats,step,
     drawIds:()=>{check();return [...readyIds];},
     originRegion:()=>{check();return originRegion;},
+    activeEnvironment:()=>{check();return activeEnvironment;},
     error:()=>error,
     dispose(){
       if(disposed)return;
@@ -136,7 +139,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         if(!readyIds.includes(id))world.set(id,null);
       }
       for(const id of readyIds)world.set(id,null);
-      pending=null;readyIds=[];sceneId=null;originRegion=null;disposed=true;
+      pending=null;readyIds=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
     }
   };
 }

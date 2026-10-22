@@ -50,7 +50,12 @@ function tile(q: UiQuad): NativeUiCommand | null {
   const corner:[[number,number],[number,number],[number,number],[number,number]] =
     [[u,v],[u+uw,v],[u+uw,v+vh],[u,v+vh]];
   const steps=q.uvTurn??0;
-  const uv=[0,1,2,3].map(i=>corner[(i+steps)&3]!) as [number,number][];
+  // EXACT pinned WebGPU UI WGSL:
+  // turn 1 -> (c.y,1-c.x), turn 2 -> 1-c, turn 3 -> (1-c.y,c.x).
+  // The GL corner order is TL,TR,BR,BL, so uvTurn 1 rotates AGAINST
+  // that order. The old (i+steps) mapping reversed turns 1 and 3,
+  // misorienting original CIF arrows, minimap parts and rotated HUD art.
+  const uv=[0,1,2,3].map(i=>corner[(i+4-steps)&3]!) as [number,number][];
   const centerX=x+w/2,centerY=y+h/2,angle=q.rotation??0;
   if(!FINITE(angle))throw Error("Invalid native UI rotation");
   const cs=Math.cos(angle),sn=Math.sin(angle);

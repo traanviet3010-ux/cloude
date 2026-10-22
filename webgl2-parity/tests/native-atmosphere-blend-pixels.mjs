@@ -93,8 +93,24 @@ try{
        alphaCutoff:0,blend:true,blendPair:{source:1,destination:3}}});
    renderer.render(identity,["original-red-base","original-blue-additive"]);
    const lightmapMultiply=read(32,32);
+   // Real authored native WorldMaterial.lightmap must select the same blend
+   // and a separate baked-light shader, not a synthetic BlendPair authored
+   // by the test. It reads the original Environment shadow floor offset.
+   const imagePath="/original/sro/terrain/lightmap-test.dds";
+   renderer.setTexture(imagePath,{
+     kind:"native-texture",width:1,height:1,format:"bgra8unorm",
+     levels:[new Uint8Array([255,128,64,255])]
+   });
+   packed.set([.10,.10,.10],40);
+   renderer.setOriginalLighting(packed,false,false);
+   renderer.set("original-blue-additive",{...ground,
+     material:{color:[1,1,1,1],texture:imagePath,unlit:true,
+       lightmap:true,blend:false,doubleSided:true,alphaCutoff:0}});
+   renderer.render(identity,["original-red-base","original-blue-additive"]);
+   const realLightmap=read(32,32);
    renderer.dispose();
-   return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha,lightmapMultiply};
+   return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha,
+     lightmapMultiply,realLightmap};
  });
  console.log("ORIGINAL_SKY_BLEND_PIXELS_DIAGNOSTIC",JSON.stringify(result));
  assert.ok(result.skyTop[1]>135&&result.skyTop[0]<125,
@@ -114,6 +130,10 @@ try{
    result.lightmapMultiply[1]>90&&result.lightmapMultiply[1]<120&&
    result.lightmapMultiply[2]>180&&result.lightmapMultiply[2]<220,
    "OpenSRO lightmap ZERO/SRCCOLOR factor must multiply existing RGB");
+ assert.ok(result.realLightmap[0]>55&&result.realLightmap[0]<90 &&
+   result.realLightmap[1]>103&&result.realLightmap[1]<143 &&
+   result.realLightmap[2]>180&&result.realLightmap[2]<222,
+   "Actual WorldMaterial.lightmap texture must multiply terrain using source + packed shadow floor");
  console.log("ORIGINAL_OPEN_SRO_ATMOSPHERE_D3D_BLEND_PIXELS_PASS",JSON.stringify(result));
 }finally{
  await browser.close();await new Promise(r=>server.close(r));

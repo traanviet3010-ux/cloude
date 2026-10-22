@@ -29,7 +29,7 @@ try{
    const {createOriginalGlOwners}=await import("/owner.js");
    const canvas=document.createElement("canvas");
    canvas.width=64;canvas.height=64;document.body.appendChild(canvas);
-   const owners=createOriginalGlOwners(canvas,{mobile:true,maxResidentMB:32});
+   const owners=createOriginalGlOwners(canvas,{mobile:false,maxResidentMB:32});
    const gl=owners.device.gl;
    const read=(x,y)=>{const pixel=new Uint8Array(4);
      gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
@@ -70,7 +70,37 @@ try{
    catch(error){budget=/budget|dimensions/.test(String(error));}
    owners.dispose();
    const cleaned=owners.stats();
-   return {frame,pixels,before,during,after,cleaned,nested,invalidSize,budget};
+
+   // The mobile implementation reuses the browser backbuffer and does not
+   // allocate a second full-screen color+depth framebuffer.
+   const mobileCanvas=document.createElement("canvas");
+   mobileCanvas.width=64;mobileCanvas.height=64;
+   document.body.appendChild(mobileCanvas);
+   const mobile=createOriginalGlOwners(mobileCanvas,{
+     mobile:true,maxResidentMB:32
+   });
+   const gm=mobile.device.gl;
+   const mobileFrame=mobile.frame.render({
+     width:64,height:64,
+     world:()=>{
+       gm.clearColor(1,0,0,1);gm.clear(gm.COLOR_BUFFER_BIT|gm.DEPTH_BUFFER_BIT);
+       return "native-original-world";
+     },
+     hud:()=>{
+       gm.enable(gm.SCISSOR_TEST);gm.scissor(0,0,16,16);
+       gm.clearColor(0,0,1,1);gm.clear(gm.COLOR_BUFFER_BIT);
+       gm.disable(gm.SCISSOR_TEST);return "native-original-hud";
+     }
+   });
+   const mPixels=(x,y)=>{const pix=new Uint8Array(4);
+     gm.readPixels(x,y,1,1,gm.RGBA,gm.UNSIGNED_BYTE,pix);return [...pix];
+   };
+   const mobilePixels={world:mPixels(32,32),hud:mPixels(8,8)};
+   const mobileStats=mobile.stats();
+   mobile.dispose();
+   const mobileAfter=mobile.stats();
+   return {frame,pixels,before,during,after,cleaned,nested,invalidSize,budget,
+     mobileFrame,mobilePixels,mobileStats,mobileAfter};
  });
  assert.deepEqual(result.frame,{
    scene:{scene:"retained-original-world"},
@@ -89,6 +119,13 @@ try{
  assert.equal(result.cleaned.device.bytes,0);
  assert.equal(result.cleaned.device.resources,0);
  assert.equal(result.cleaned.disposed,true);
+ assert.equal(result.mobileStats.surface.directToCanvas,true);
+ assert.equal(result.mobileStats.surface.allocated,false);
+ assert.equal(result.mobileStats.device.resources,0,
+   "Mobile native frame must avoid duplicate full-resolution FBO resources");
+ assert.ok(result.mobilePixels.world[0]>240&&result.mobilePixels.hud[2]>240,
+   "Mobile browser canvas must preserve genuine world/HUD drawing order");
+ assert.equal(result.mobileAfter.device.bytes,0);
  assert.ok(result.nested&&result.invalidSize&&result.budget,
    "Native GL ownership must reject unsafe frame nesting and allocations");
  console.log("HIEUSRO_ORIGINAL_GL_DEVICE_SURFACE_FRAME_PASS",JSON.stringify(result));

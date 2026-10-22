@@ -106,10 +106,14 @@ try{
      clip:"native-idle",time:0,loop:true,scale:1
    }]);
    const characterFrame=game.originalFrontendFrame(2);
+   const actualRosterPick=game.pickFrontendCharacter(.5,.5,[4]);
+   const excludedRosterPick=game.pickFrontendCharacter(.5,.5,[999]);
+   const outsideRosterPick=game.pickFrontendCharacter(0,0,[4]);
    const characterPixel=new Uint8Array(4);
    stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,characterPixel);
    const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel],
-     characterFrame,characterPixel:[...characterPixel]};
+     characterFrame,characterPixel:[...characterPixel],actualRosterPick,
+     excludedRosterPick,outsideRosterPick};
    game.dispose();
 
    // End-to-end native WorldScene.visibility -> pinned OpenSRO
@@ -250,6 +254,12 @@ try{
    "Native character CPU skinned mesh must render on top of original scene in one GL context");
  assert.equal(data.characterFrame.characters.actors,1);
  assert.equal(data.characterFrame.triangleCount,2);
+ assert.equal(data.actualRosterPick,4,
+   "Original frontend picking must identify the real CPU-skinned character GID drawn in the previous frame");
+ assert.equal(data.excludedRosterPick,null,
+   "Other account/roster model GIDs must not be selected");
+ assert.equal(data.outsideRosterPick,null,
+   "Touching outside the actual drawn character triangle cannot select it");
  console.log("NATIVE_SRO_RESIDENT_PLACEMENT_DIAGNOSTIC",JSON.stringify({row:data.placedRow,first:data.placedFirst,second:data.placedSecond,stats:data.placedStats}));
  assert.ok(data.placedFirst[0]>225&&data.placedFirst[2]>225,
    "Original SRO WorldScene placement in resident target cell must be visible");

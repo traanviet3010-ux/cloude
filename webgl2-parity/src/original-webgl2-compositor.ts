@@ -71,7 +71,12 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     setCharacterModel(id:string,model:CharacterModel,images:WorldTexture[]){
       assert();characters.retainModel(id,model,images);
     },
-    setCharacterActors(actors:readonly CharacterActor[]){assert();characters.setActors(actors);}, 
+    setCharacterActors(actors:readonly CharacterActor[]){
+      assert();characters.setActors(actors);
+      // A fresh original frontend roster is only clickable after it has
+      // survived the next real GL upload and frame submission.
+      lastRenderedPickView=null;
+    }, 
     /** Original frontend roster selection against last painted CPU-skinned
      * triangles. Uses pinned OpenSRO pickRay()/pickGeometry(), not GPU
      * color-coded mock IDs; alpha-masked retail picks still need porting.
@@ -96,6 +101,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     originalFrontendFrame(maxUploads=2,originalSeconds=0){
       assert();
       if(!titleCamera)throw Error("Original Silkroad frontend camera not available");
+      lastRenderedPickView=null;
       stage.step(maxUploads);
       const aspect=canvas.width/Math.max(1,canvas.height);
       // The packed world lighting is produced by the EXACT OpenSRO owner,

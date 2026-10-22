@@ -72,6 +72,8 @@ try{
      format:"bgra8unorm",levels:[new Uint8Array([0,0,255,255])]});
    game.setUi({revision:1,width:64,height:64,quads:[]});
    const stageStats=game.originalFrontendFrame(2);
+   const renderedSceneryPick=game.pickRenderedScenery(.5,.5);
+   const outsideSceneryPick=game.pickRenderedScenery(0,0);
    const stageGl=nativeCanvas.getContext("webgl2");
    const nativePixel=new Uint8Array(4);
    stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,nativePixel);
@@ -115,7 +117,8 @@ try{
    stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,characterPixel);
    const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel],
      characterFrame,characterPixel:[...characterPixel],actualRosterPick,
-     excludedRosterPick,outsideRosterPick,originalNineRayPick,excludedNineRayPick};
+     excludedRosterPick,outsideRosterPick,originalNineRayPick,excludedNineRayPick,
+     renderedSceneryPick,outsideSceneryPick};
    game.dispose();
 
    // End-to-end native WorldScene.visibility -> pinned OpenSRO
@@ -252,6 +255,10 @@ try{
    "Original WorldTexture BGRA upload must texture genuine OpenSRO Geometry through native camera");
  assert.equal(data.originalStage.stage.sceneId,"constantinople-genuine-contract");
  assert.equal(data.originalStage.stage.pendingTextures,0);
+ assert.equal(data.renderedSceneryPick?.id,"native-constantinople-triangle",
+   "Original stage hit testing must find the same opaque native scene triangle already drawn by GL");
+ assert.equal(data.outsideSceneryPick,null,
+   "A native ray outside original resident geometry must never return invented map hits");
  assert.ok(data.characterPixel[1]>220 && data.characterPixel[0]<40 && data.characterPixel[2]<40,
    "Native character CPU skinned mesh must render on top of original scene in one GL context");
  assert.equal(data.characterFrame.characters.actors,1);

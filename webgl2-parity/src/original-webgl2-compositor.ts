@@ -93,6 +93,9 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
         eye:[titleCamera.eye[0]+dx,titleCamera.eye[1],titleCamera.eye[2]+dz] as [number,number,number],
         target:[titleCamera.target[0]+dx,titleCamera.target[1],titleCamera.target[2]+dz] as [number,number,number]
       };
+      // The old OpenSRO terrainLod() selector drives exact resident
+      // index-buffer/height updates; this is NOT regenerated landscape.
+      stage.updateTerrain(localCamera.eye);
       const dt=nativeLastSeconds===null?0:
         Math.min(1,Math.max(0,originalSeconds-nativeLastSeconds));
       nativeLastSeconds=originalSeconds;

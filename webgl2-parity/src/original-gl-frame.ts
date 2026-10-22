@@ -5,6 +5,7 @@
  */
 import type {OriginalGlDevice} from "./original-gl-device";
 import type {OriginalGlSurface} from "./original-gl-surface";
+import {createOriginalGlGpuCommands} from "./original-gl-gpu-commands";
 export interface OriginalGlFrameInputs<TScene,THud> {
  readonly width:number;
  readonly height:number;
@@ -13,6 +14,7 @@ export interface OriginalGlFrameInputs<TScene,THud> {
 }
 export function createOriginalGlFrame(device:OriginalGlDevice,surface:OriginalGlSurface){
  let disposed=false;
+ const commands=createOriginalGlGpuCommands(device);
  const render=<TScene,THud>(inputs:OriginalGlFrameInputs<TScene,THud>)=>{
    if(disposed)throw Error("Original GL frame coordinator disposed");
    device.assert();
@@ -37,6 +39,6 @@ export function createOriginalGlFrame(device:OriginalGlDevice,surface:OriginalGl
      device.endFrame();
    }
  };
- return {render,dispose(){disposed=true;}};
+ return {render,commands,dispose(){if(disposed)return;disposed=true;commands.dispose();}};
 }
 export type OriginalGlFrame=ReturnType<typeof createOriginalGlFrame>;

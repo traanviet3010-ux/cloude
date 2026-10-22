@@ -96,7 +96,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         !g.geometry.instances || !g.instanceRadius ||
         g.visibility.length>g.geometry.instances.length/16
       ))throw Error("Original scene visibility has invalid placement binding");
-      if(g.animation||g.material.water||
+      if(g.animation||
          (g.material.sky!==undefined&&![1,2,3,4,5,6].includes(g.material.sky)))
         throw Error("Original stage needs an unported native animated, star/moon or water GPU pass: "+g.id);
       if(!!g.ranges!==!!g.material.terrain)
@@ -113,8 +113,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       // All lunar phases remain original authored DDS frames. Admission
       // cannot publish until every image used by the native sky:4 path is
       // uploaded; never substitute the first image for missing phases.
-      if(g.material.sky===4)
-        for(const frame of g.material.frames??[])required.add(frame);
+      for(const frame of g.material.frames??[])required.add(frame);
       bytes+=native.byteSize;
       if(bytes>MAX_PENDING_BYTES)throw Error("Original stage exceeds GPU budget");
       entries.push({id:g.id,key,geometry:mesh,terrain:g.ranges?g:undefined});

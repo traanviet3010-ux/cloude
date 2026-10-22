@@ -27,7 +27,9 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   const glDevice=createOriginalGlDevice(canvas,{
     context:world.glContext(),mobile:/iPhone|iPad|Android/.test(navigator.userAgent)
   });
-  const glSurface=createOriginalGlSurface(glDevice);
+  const glSurface=createOriginalGlSurface(glDevice,{
+    directToCanvas:/iPhone|iPad|Android/.test(navigator.userAgent)
+  });
   const glFrame=createOriginalGlFrame(glDevice,glSurface);
   let ui:NativeUiWebgl2Renderer;
   try{ui=new NativeUiWebgl2Renderer(canvas,/iPhone|iPad/.test(navigator.userAgent)?96:256,world.glContext());}

@@ -68,7 +68,7 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
   if(mat?.alphaCutoff!==undefined && (!Number.isFinite(mat.alphaCutoff)||mat.alphaCutoff<0||mat.alphaCutoff>1))
     throw Error("Original Silkroad alpha cutoff outside native 0..1 range");
   if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
-     mat?.water||(mat?.sky!==undefined&&mat.sky!==1&&mat.sky!==6)||mat?.colorTimeline||mat?.textureFactorPulse||
+     mat?.water||(mat?.sky!==undefined&&![1,3,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||
      mat?.fog||mat?.groundDecal||mat?.instanceFade||
      mat?.instanceMaterialTint||mat?.textureAlpha||mat?.surfaceAlpha||

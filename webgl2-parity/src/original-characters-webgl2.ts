@@ -109,10 +109,13 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
        multiply(placementMatrix,skinned.geometry.transform,root);
        const material={...p.geometry.material!,texture:imagePath};
        const geometry:Geometry={...skinned.geometry,material,transform:root};
-       state.drawn[i]=geometry;
        const id="original-character:"+actor.gid+":"+i;
        if(i>=state.ids.length){world.set(id,geometry);state.ids.push(id);}
        else world.updateAnimatedGeometry(id,geometry);
+       // Only publish a pickable skinned surface AFTER successful actual
+       // WebGL2 upload; a Safari VBO allocation failure must not expose
+       // triangle positions that the user never saw on screen.
+       state.drawn[i]=geometry;
        drawIds.push(id);
      }
      state.drawn.length=entry.source.primitives.length;

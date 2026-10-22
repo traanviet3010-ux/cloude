@@ -164,6 +164,24 @@ try{
       state.uvTurns.push([...p]);
     }
     turnOwner.dispose();
+
+    // Pinned original GPU UI uses *separate alpha factors*, not a generic
+    // gl.blendFunc: output alpha must be ~0.5, never ~0.25.
+    const alphaCanvas=document.createElement("canvas");
+    alphaCanvas.width=16;alphaCanvas.height=16;
+    document.body.appendChild(alphaCanvas);
+    const alphaOwner=new NativeUiWebgl2Renderer(alphaCanvas,8);
+    alphaOwner.setTexture("native-original-half-alpha",
+      new ImageData(new Uint8ClampedArray([255,0,0,128]),1,1));
+    alphaOwner.draw({revision:1,width:16,height:16,quads:[{
+      rect:[0,0,16,16],clip:[0,0,16,16],uv:[0,0,1,1],
+      color:[1,1,1,1],texture:"native-original-half-alpha"
+    }]});
+    const ga=alphaCanvas.getContext("webgl2");
+    const p=new Uint8Array(4);
+    ga.readPixels(8,8,1,1,ga.RGBA,ga.UNSIGNED_BYTE,p);
+    state.originalAlphaBlend=[...p];
+    alphaOwner.dispose();
     return state;
   });
   assert.ok(state.inside[0]>=240&&state.inside[1]<20&&state.inside[2]<20,
@@ -207,6 +225,12 @@ try{
   ];
   assert.deepEqual(state.uvTurns,expectedOriginalUvTurns,
     "All retail CIF 90-degree atlas rotations must match pinned OpenSRO WGSL in GL pixels");
+  assert.ok(state.originalAlphaBlend[3]>=123 &&
+      state.originalAlphaBlend[3]<=132,
+    "Native original UI alpha must use (ONE,ONE_MINUS_SRC_ALPHA) not squared-alpha blending");
+  assert.ok(state.originalAlphaBlend[0]>=120 &&
+      state.originalAlphaBlend[0]<=135,
+    "Native original UI RGB must still use SRC_ALPHA color blending");
 
   console.log("OPEN_SRO_UI_WEBGL2_GL_PIXEL_TEST_PASS",JSON.stringify(state));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

@@ -64,7 +64,67 @@ try{
     state.missingOriginalMask=read(24,50);
     state.loadedOriginalArt=read(40,50);
     state.loadingStats=owner.stats();
+    // A failed original CIF replacement must keep the last completed GPU
+    // artwork visible, rather than blank the character/title screen.
+    try{
+      owner.setTexture("original-raster",{
+        kind:"native-texture",format:"bgra8unorm",
+        width:2,height:2,levels:[new Uint8Array(1)]
+      });
+      state.corruptReplacementRejected=false;
+    }catch(err){
+      state.corruptReplacementRejected=/truncated/.test(String(err));
+    }
+    owner.draw({revision:4,width:64,height:64,quads:[{
+      rect:[0,0,64,64],clip:[0,0,64,64],uv:[0,0,1,1],
+      color:[1,1,1,1],texture:"original-raster"
+    }]});
+    state.originalArtAfterRejection=read(12,12);
+    state.atomicStats=owner.stats();
+    owner.setTexture("original-raster",new ImageData(
+      new Uint8ClampedArray([0,255,0,255]),1,1));
+    owner.draw({revision:5,width:64,height:64,quads:[{
+      rect:[0,0,64,64],clip:[0,0,64,64],uv:[0,0,1,1],
+      color:[1,1,1,1],texture:"original-raster"
+    }]});
+    state.newArtAfterCommit=read(12,12);
     owner.dispose();
+
+    // The two genuine UI images are needed by the SAME native frame.
+    // Safari pressure must refuse a third image instead of releasing either
+    // protected inventory/skill-bar image before a successful upload.
+    const budgetCanvas=document.createElement("canvas");
+    budgetCanvas.width=8;budgetCanvas.height=8;
+    document.body.appendChild(budgetCanvas);
+    const budgetOwner=new NativeUiWebgl2Renderer(budgetCanvas,8);
+    const pixel=new Uint8ClampedArray(1024*1024*4);
+    pixel.fill(255);
+    budgetOwner.setTexture("original-hud-a",
+      new ImageData(pixel,1024,1024));
+    budgetOwner.setTexture("original-hud-b",
+      new ImageData(pixel,1024,1024));
+    budgetOwner.draw({revision:1,width:8,height:8,quads:[
+      {rect:[0,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-hud-a"},
+      {rect:[4,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-hud-b"}
+    ]});
+    try{
+      budgetOwner.setTexture("third-texture",
+        new ImageData(new Uint8ClampedArray([255,0,0,255]),1,1));
+      state.protectedBudgetRejected=false;
+    }catch(err){
+      state.protectedBudgetRejected=/protected textures/.test(String(err));
+    }
+    state.protectedBudgetStats=budgetOwner.stats();
+    budgetOwner.draw({revision:2,width:8,height:8,quads:[
+      {rect:[0,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-hud-a"},
+      {rect:[4,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-hud-b"}
+    ]});
+    state.budgetStillDrawn=budgetOwner.stats().drawCalls;
+    budgetOwner.dispose();
     return state;
   });
   assert.ok(state.inside[0]>=240&&state.inside[1]<20&&state.inside[2]<20,
@@ -84,6 +144,22 @@ try{
     "Already loaded genuine CIF asset must still render during pending asset requests");
   assert.equal(state.loadingStats.missingQuads,2);
   assert.equal(state.loadingStats.drawCalls,1);
+  assert.equal(state.corruptReplacementRejected,true);
+  assert.ok(state.originalArtAfterRejection[0]>220 &&
+    state.originalArtAfterRejection[1]<20,
+    "The existing original CIF art must remain red after corrupt GPU upload");
+  assert.equal(state.atomicStats.textureCount,2,
+    "Refused updates must not remove other native UI images");
+  assert.ok(state.atomicStats.failedUploads>=1);
+  assert.ok(state.newArtAfterCommit[1]>220 &&
+    state.newArtAfterCommit[0]<20,
+    "An accepted replacement must atomically publish the new green native art");
+  assert.equal(state.protectedBudgetRejected,true,
+    "Do not evict the two images referenced by the original current frame");
+  assert.equal(state.protectedBudgetStats.textureCount,2);
+  assert.ok(state.protectedBudgetStats.failedUploads>=1);
+  assert.equal(state.protectedBudgetStats.residentMB,8);
+  assert.equal(state.budgetStillDrawn,2);
 
 
   console.log("OPEN_SRO_UI_WEBGL2_GL_PIXEL_TEST_PASS",JSON.stringify(state));

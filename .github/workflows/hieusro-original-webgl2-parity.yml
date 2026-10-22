@@ -88,6 +88,11 @@ jobs:
           cp "$GITHUB_WORKSPACE"/webgl2-parity/src/*.ts apps/client-next/src/engine/runtime/renderer/webgl2/
           corepack pnpm --filter @sro/client-next typecheck
           echo 'ORIGINAL_UI_WEBGL2_TYPECHECK=PASS'
+      - name: Build the REAL original client with graphics factory seams (TEST compile only)
+        run: |
+          cd /tmp/opensro-original
+          corepack pnpm --filter @sro/client-next build
+          echo 'ORIGINAL_GAME_CLIENT_WITH_GRAPHICS_SEAM_BUILD=PASS'
       - name: Audit EXACT original renderer methods before declaring game playable
         working-directory: webgl2-parity
         env:

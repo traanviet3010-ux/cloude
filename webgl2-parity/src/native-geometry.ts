@@ -6,6 +6,7 @@
 import type { Geometry } from "@/engine/contracts/geometry";
 export interface GlNativeGeometry {
   vertices:Float32Array; // pos3, normals3, uv2, color4
+  starMasks?:Float32Array; // original sky:2 maskUVs (batch, corner scale)
   indices:Uint32Array;
   instances:Float32Array;
   instanceCount:number;
@@ -67,13 +68,19 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original Silkroad D3DCMPFUNC alpha comparison invalid");
   if(mat?.alphaCutoff!==undefined && (!Number.isFinite(mat.alphaCutoff)||mat.alphaCutoff<0||mat.alphaCutoff>1))
     throw Error("Original Silkroad alpha cutoff outside native 0..1 range");
-  if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
-     mat?.water||(mat?.sky!==undefined&&![1,3,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
+  if((mat?.frames&&mat.sky!==4)||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
+     mat?.water||(mat?.sky!==undefined&&![1,2,3,4,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||
      mat?.instanceFade||
      mat?.instanceMaterialTint||mat?.textureAlpha||mat?.surfaceAlpha||
      mat?.shaderDiffuse)
     throw Error("Original material requires native staged WebGL2 shader parity");
+  if(mat?.sky===2&&(!(source.maskUVs instanceof Float32Array)||
+      source.maskUVs.length!==n*2||!finite(source.maskUVs)))
+    throw Error("Original Silkroad star field requires native batch/size maskUV coordinates");
+  if(mat?.sky===4&&(!mat.frames?.length||mat.frames.length>64||
+      mat.frames.some(path=>!path||path.length>1024)))
+    throw Error("Original Silkroad moon must retain its authored texture frames");
   if(mat?.fog && (!Number.isInteger(mat.fog.color)||mat.fog.color<0||
      mat.fog.color>0xffffffff||!Number.isFinite(mat.fog.nearPlane)||
      !Number.isFinite(mat.fog.farPlane)||mat.fog.farPlane<mat.fog.nearPlane||
@@ -99,8 +106,10 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     data[o+10]=colors?.[i*4+2]??1;
     data[o+11]=colors?.[i*4+3]??1;
   }
-  return {vertices:data,indices:indices.slice(),instances:instances.slice(),
+  return {vertices:data,starMasks:mat?.sky===2?source.maskUVs?.slice():undefined,
+    indices:indices.slice(),instances:instances.slice(),
     instanceCount:instances.length/16,transform:transform.slice(),
     vertexCount:n,triangles:indices.length/3*instances.length/16,
-    byteSize:data.byteLength+indices.byteLength+transform.byteLength+instances.byteLength};
+    byteSize:data.byteLength+indices.byteLength+transform.byteLength+instances.byteLength+
+      (mat?.sky===2?source.maskUVs?.byteLength??0:0)};
 }

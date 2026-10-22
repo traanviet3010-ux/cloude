@@ -107,13 +107,15 @@ try{
    }]);
    const characterFrame=game.originalFrontendFrame(2);
    const actualRosterPick=game.pickFrontendCharacter(.5,.5,[4]);
+   const originalNineRayPick=game.pickRenderedEntity(.5,.5);
+   const excludedNineRayPick=game.pickRenderedEntity(.5,.5,[4]);
    const excludedRosterPick=game.pickFrontendCharacter(.5,.5,[999]);
    const outsideRosterPick=game.pickFrontendCharacter(0,0,[4]);
    const characterPixel=new Uint8Array(4);
    stageGl.readPixels(32,32,1,1,stageGl.RGBA,stageGl.UNSIGNED_BYTE,characterPixel);
    const complete={...state,originalStage:stageStats,nativePixel:[...nativePixel],
      characterFrame,characterPixel:[...characterPixel],actualRosterPick,
-     excludedRosterPick,outsideRosterPick};
+     excludedRosterPick,outsideRosterPick,originalNineRayPick,excludedNineRayPick};
    game.dispose();
 
    // End-to-end native WorldScene.visibility -> pinned OpenSRO
@@ -256,6 +258,10 @@ try{
  assert.equal(data.characterFrame.triangleCount,2);
  assert.equal(data.actualRosterPick,4,
    "Original frontend picking must identify the real CPU-skinned character GID drawn in the previous frame");
+ assert.equal(data.originalNineRayPick,4,
+   "Original World_PickEntityAtScreenPoint 3x3 ray fan must select the already-painted actor");
+ assert.equal(data.excludedNineRayPick,null,
+   "Excluded native actor GIDs are not eligible for world ray selection");
  assert.equal(data.excludedRosterPick,null,
    "Other account/roster model GIDs must not be selected");
  assert.equal(data.outsideRosterPick,null,

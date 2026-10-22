@@ -14,7 +14,7 @@ import {originalBlendPair} from "./original-blend-webgl2";
 import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 precision highp int;
@@ -123,6 +123,10 @@ uniform int uLightmapFogEnabled;
 uniform vec3 uLightmapFogColor;
 uniform float uLightmapFogStart;
 uniform float uLightmapFogEnd;
+uniform int uWorldFogEnabled;
+uniform vec3 uWorldFogColor;
+uniform float uWorldFogStart;
+uniform float uWorldFogEnd;
 out vec4 fragColor;
 bool originalAlphaAccept(float pixelAlpha,float reference){
  // Exact pinned GPU shader D3D9 HAL quantization: truncate alpha to
@@ -193,7 +197,13 @@ void main(){
  if(!originalAlphaAccept(fading?fadeAlpha:c.a,alphaRef))discard;
  float outAlpha=uObjectFade==1?
    (fading?fadeAlpha:(uSurfaceAlpha==1?c.a:1.0)):c.a;
- fragColor=vec4(clamp(c.rgb*uStageFactor,vec3(0.0),vec3(1.0)),outAlpha);
+ vec3 shaded=clamp(c.rgb*uStageFactor,vec3(0.0),vec3(1.0));
+ if(uWorldFogEnabled==1){
+   float f=clamp((vViewZ-uWorldFogStart)/
+     max(0.001,uWorldFogEnd-uWorldFogStart),0.0,1.0);
+   shaded=mix(shaded,uWorldFogColor,f);
+ }
+ fragColor=vec4(shaded,outAlpha);
 }`;
 function shader(gl:WebGL2RenderingContext,kind:number,source:string){
  const sh=gl.createShader(kind);if(!sh)throw Error("Cannot allocate native GL shader");
@@ -471,6 +481,13 @@ export class OriginalWorldWebgl2 {
        depthWrite:material?.sky?false:material?.lightmap?false:
          (geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade)),
        lightmap:!!material?.lightmap,sky:material?.sky??0,
+       fogDisabled:!!material?.fogDisabled,
+       localFog:material?.fog?[
+         ((material.fog.color>>>16)&255)/255,
+         ((material.fog.color>>>8)&255)/255,
+         (material.fog.color&255)/255,
+         material.fog.nearPlane,material.fog.farPlane
+       ]:null,
        stageFactor:material?.stageFactor??1,
        objectFade:!!material?.objectFade,fadeAlphaOnly:!!material?.fadeAlphaOnly,
        surfaceAlpha:!!material?.surfaceAlpha,
@@ -540,6 +557,18 @@ export class OriginalWorldWebgl2 {
      gl.uniform1i(gl.getUniformLocation(this.program,"uSurfaceAlpha"),s.surfaceAlpha?1:0);
      gl.uniform1f(gl.getUniformLocation(this.program,"uStageFactor"),s.stageFactor);
       gl.uniform1i(gl.getUniformLocation(this.program,"uSkyKind"),s.sky);
+      const localFog=s.localFog;
+      const envFog=this.environmentPacked;
+      const hasFog=!s.fogDisabled&&!s.sky&&!s.lightmap&&
+        (!!localFog||!!envFog&&envFog[33]!>0.5);
+      gl.uniform1i(gl.getUniformLocation(this.program,"uWorldFogEnabled"),hasFog?1:0);
+      gl.uniform3fv(gl.getUniformLocation(this.program,"uWorldFogColor"),
+        localFog?new Float32Array(localFog.slice(0,3)):
+        envFog?.subarray(28,31)??new Float32Array([0,0,0]));
+      gl.uniform1f(gl.getUniformLocation(this.program,"uWorldFogStart"),
+        localFog?.[3]??envFog?.[31]??0);
+      gl.uniform1f(gl.getUniformLocation(this.program,"uWorldFogEnd"),
+        localFog?.[4]??envFog?.[32]??0);
       gl.uniform1i(gl.getUniformLocation(this.program,"uLightmap"),s.lightmap?1:0);
       gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapShadow"),
         this.environmentPacked?.subarray(40,43)??new Float32Array([0,0,0]));

@@ -68,6 +68,16 @@ try{
    pack[60]=0;gpu.setOriginalLighting(pack,false,false);
    gpu.render(I,[star.id]);
    const invisibleStar=read();
+   // The authentic moon moves on a separate 1.2x lunar arc: center it with
+   // the original cameraBasis() rather than assuming it sits at the sun's
+   // center. This retains the original vertex sky projection unchanged.
+   const lunarArc=(.25+(fract(.8+.25)-.25)*1.2)*Math.PI*2;
+   function fract(v){return v-Math.floor(v);}
+   const lunarCamera={...camera,
+     target:[Math.cos(lunarArc),Math.sin(lunarArc),0]};
+   const lunarPacked=worldEnvironment(undefined,lunarCamera,1,0);
+   pack.set(lunarPacked.subarray(16,28),16);
+   gpu.setOriginalLighting(pack,false,false);
    gpu.render(I,[moon.id]);const moonFrame1=read();
    pack[56]=0;gpu.setOriginalLighting(pack,false,false);
    gpu.render(I,[moon.id]);const moonFrame0=read();
@@ -90,6 +100,7 @@ try{
  assert.deepEqual(data.sourceMoonTextureFrames,[
    "/native/moon/phase-0.dds","/native/moon/phase-1.dds"
  ]);
+ console.log("ORIGINAL_STAR_MOON_DIAGNOSTIC",JSON.stringify(data));
  assert.equal(data.starTriangles,6000);
  assert.ok(data.visibleStar[0]>180&&data.visibleStar[1]<40,
    "OpenSRO star mask UV + batch flicker must render true source-color GPU pixels");

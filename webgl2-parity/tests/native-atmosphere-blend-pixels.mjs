@@ -177,10 +177,14 @@ try{
    result.realLightmap[1]>103&&result.realLightmap[1]<143 &&
    result.realLightmap[2]>180&&result.realLightmap[2]<222,
    "Actual WorldMaterial.lightmap texture must multiply terrain using source + packed shadow floor");
- assert.ok(result.linearFogLightmap[0]>100&&result.linearFogLightmap[0]<135 &&
-   result.linearFogLightmap[1]>67&&result.linearFogLightmap[1]<100 &&
-   result.linearFogLightmap[2]>104&&result.linearFogLightmap[2]<143,
-   "Authentic linear terrain lightmap fog must interpolate baked light with packed terrainFog");
+ // The newly ported original material fog also applies to the BASE
+ // terrain before the lightmap-multiply pass: (.8 * .5) *
+ // mix(bakedLight,terrainFog,.5). Retail GPU color is approximately
+ // [59,41,61], not the former unfogged-base [115,81,122].
+ assert.ok(result.linearFogLightmap[0]>54&&result.linearFogLightmap[0]<66 &&
+   result.linearFogLightmap[1]>35&&result.linearFogLightmap[1]<49 &&
+   result.linearFogLightmap[2]>54&&result.linearFogLightmap[2]<70,
+   "Native terrain and lightmap fog must both compose before ZERO/SRCCOLOR multiply");
  assert.ok(result.localFog[0]>116&&result.localFog[0]<140&&
    result.localFog[2]>116&&result.localFog[2]<140,
    "Native material local fog must mix author RGB, near/far and original shader viewZ");

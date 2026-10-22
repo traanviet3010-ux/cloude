@@ -230,7 +230,13 @@ export class NativeUiWebgl2Renderer {
     const gl=this.gl;
     gl.viewport(0,0,this.canvas.width,this.canvas.height);
     gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);
-    gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+    // Pinned original OpenSRO device/ui.ts uses different RGBA blend
+    // factors: color=(SRC_ALPHA,ONE_MINUS_SRC_ALPHA), alpha=(ONE,
+    // ONE_MINUS_SRC_ALPHA). Using blendFunc for both channels would square
+    // semi-transparent inventory/tooltips alpha and flatten original CIF.
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,
+      gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.enable(gl.SCISSOR_TEST);
     gl.useProgram(this.program);
     gl.uniform2f(gl.getUniformLocation(this.program,"uResolution"),scene.width,scene.height);

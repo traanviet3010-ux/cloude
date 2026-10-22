@@ -248,7 +248,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         throw Error("Invalid native renderer world frame evidence");
       renderedVisible=visible;renderedTriangles=triangles;
     },
-    drawIds:()=>{check();return [...readyIds];
+    drawIds:()=>{check();return [...readyIds];},
     drawEntries:()=>{check();return readyEntries.map(({id,key})=>({id,key}));},
     /** Native terrainLod() updates GPU buffers only on a new eye cell.
      * Neither meshes nor their textures are rebuilt as the camera moves.

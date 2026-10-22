@@ -11,7 +11,7 @@ import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -251,6 +251,43 @@ export class OriginalWorldWebgl2 {
    slot.instances=count;
    slot.last=this.frame;
  }
+ /** Update original terrain LOD without recreating the VAO or authored mesh.
+  * Selects indices/heights from original Geometry and WorldGroup.ranges.
+  * Unselected terrain cells draw zero indices, never substitute terrain.
+  */
+ updateOriginalTerrain(id:string,geometry:Geometry){
+   this.validate();
+   const slot=this.entries.get(id);
+   if(!slot)throw Error("Original terrain GPU mesh not admitted: "+id);
+   if(!geometry.material?.terrain)
+     throw Error("Cannot update native terrain from nonterrain material");
+   if(geometry.indices.length===0){slot.count=0;return;}
+   const row=admitOriginalGeometry(geometry);
+   if(row.vertexCount!==slot.vertexCount||row.instanceCount!==slot.capacity)
+     throw Error("Original Silkroad terrain topology/instances changed");
+   if((geometry.material.texture??"")!==slot.texture)
+     throw Error("Original Silkroad terrain texture changed during LOD");
+   const gl=this.gl;
+   gl.bindBuffer(gl.ARRAY_BUFFER,slot.vbo);
+   gl.bufferSubData(gl.ARRAY_BUFFER,0,row.vertices);
+   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,slot.ebo);
+   if(row.indices.length>slot.indexCapacity){
+     const additional=(row.indices.length-slot.indexCapacity)*4;
+     if(this.used+additional>this.budget)
+       throw Error("Original terrain LOD needs more GPU index memory");
+     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,row.indices,gl.DYNAMIC_DRAW);
+     if(gl.getError()!==gl.NO_ERROR)
+       throw Error("Original terrain GPU index resize failed");
+     slot.indexCapacity=row.indices.length;slot.bytes+=additional;
+     this.used+=additional;
+   }else{
+     gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER,0,row.indices);
+   }
+   if(gl.getError()!==gl.NO_ERROR)
+     throw Error("Original terrain GPU LOD upload failed");
+   slot.count=row.indices.length;
+   slot.last=this.frame;
+ }
  private retire(id:string){
    const s=this.entries.get(id);if(!s)return;
    this.gl.deleteBuffer(s.vbo);this.gl.deleteBuffer(s.ebo);
@@ -330,7 +367,7 @@ export class OriginalWorldWebgl2 {
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
      this.entries.set(id,{vao,vbo,ebo,instanceVbo,opacityVbo,instances:row.instanceCount,
        capacity:row.instanceCount,sourceByteSize:row.byteSize,
-       count:row.indices.length,transform:row.transform,
+       count:row.indices.length,vertexCount:row.vertexCount,indexCapacity:row.indices.length,transform:row.transform,
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
        bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",

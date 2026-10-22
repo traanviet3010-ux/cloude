@@ -70,10 +70,15 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
   if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
      mat?.water||(mat?.sky!==undefined&&![1,3,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||
-     mat?.fog||mat?.groundDecal||mat?.instanceFade||
+     mat?.groundDecal||mat?.instanceFade||
      mat?.instanceMaterialTint||mat?.textureAlpha||mat?.surfaceAlpha||
-     mat?.shaderDiffuse||mat?.decal||mat?.fogDisabled)
+     mat?.shaderDiffuse||mat?.decal)
     throw Error("Original material requires native staged WebGL2 shader parity");
+  if(mat?.fog && (!Number.isInteger(mat.fog.color)||mat.fog.color<0||
+     mat.fog.color>0xffffffff||!Number.isFinite(mat.fog.nearPlane)||
+     !Number.isFinite(mat.fog.farPlane)||mat.fog.farPlane<mat.fog.nearPlane||
+     !Number.isFinite(mat.fog.intensity)))
+    throw Error("Invalid original Silkroad local fog material metadata");
   if(mat?.texture && (!uvs||uvs.length!==n*2))
     throw Error("Original textured Silkroad mesh has no native UV coordinates");
   // The native static geometry layout supports explicit original lit and NOLIGHT modes.

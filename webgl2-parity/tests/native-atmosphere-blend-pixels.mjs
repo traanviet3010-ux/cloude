@@ -130,9 +130,30 @@ try{
        fog:{color:0xff0000ff,nearPlane:0,farPlane:2,intensity:1}}});
    renderer.render(identity,["original-local-fog"]);
    const fogDisabled=read(32,32);
+   // Real original 8BA130 ground-decal bypasses depth test; ordinary decal
+   // retains LEQUAL and therefore cannot draw through nearer geometry.
+   const base={...ground,
+     positions:new Float32Array([-.9,-.9,.2,.9,-.9,.2,0,.9,.2]),
+     material:{color:[1,0,0,1],unlit:true,blend:false,
+       doubleSided:true,alphaCutoff:0}};
+   const far={...ground,
+     positions:new Float32Array([-.9,-.9,.7,.9,-.9,.7,0,.9,.7]),
+     material:{color:[0,1,0,.5],unlit:true,blend:false,
+       doubleSided:true,alphaCutoff:0,groundDecal:true}};
+   packed[33]=0;
+   renderer.setOriginalLighting(packed,false,false);
+   renderer.set("old-world-base",base);
+   renderer.set("old-world-overlay",far);
+   renderer.render(identity,["old-world-base","old-world-overlay"]);
+   const groundDecal=read(32,32);
+   renderer.set("old-world-overlay",{...far,
+     material:{...far.material,groundDecal:false,decal:true}});
+   renderer.render(identity,["old-world-base","old-world-overlay"]);
+   const regularDecal=read(32,32);
    renderer.dispose();
    return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha,
-     lightmapMultiply,realLightmap,linearFogLightmap,localFog,fogDisabled};
+     lightmapMultiply,realLightmap,linearFogLightmap,localFog,fogDisabled,
+     groundDecal,regularDecal};
  });
  console.log("ORIGINAL_SKY_BLEND_PIXELS_DIAGNOSTIC",JSON.stringify(result));
  assert.ok(result.skyTop[1]>135&&result.skyTop[0]<125,
@@ -165,6 +186,11 @@ try{
    "Native material local fog must mix author RGB, near/far and original shader viewZ");
  assert.ok(result.fogDisabled[0]>240&&result.fogDisabled[2]<12,
    "D3DRS_FOGENABLE disabled material must retain author RGB without fog");
+ assert.ok(result.groundDecal[0]>100&&result.groundDecal[0]<160&&
+   result.groundDecal[1]>100&&result.groundDecal[1]<160,
+   "Original ground decal must alpha-blend despite failing world depth comparison");
+ assert.ok(result.regularDecal[0]>240&&result.regularDecal[1]<15,
+   "Original regular decal must respect LEQUAL and never paint through closer geometry");
  console.log("ORIGINAL_OPEN_SRO_ATMOSPHERE_D3D_BLEND_PIXELS_PASS",JSON.stringify(result));
 }finally{
  await browser.close();await new Promise(r=>server.close(r));

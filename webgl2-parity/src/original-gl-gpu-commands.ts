@@ -25,6 +25,9 @@ export interface OriginalGlDraw {
     readonly constant?:readonly [number,number,number,number];
   };
 }
+export interface OriginalGlRenderBundle {
+ readonly draws:readonly OriginalGlDraw[];
+}
 export interface OriginalGlPass {
   readonly framebuffer?:WebGLFramebuffer|null;
   readonly width:number;
@@ -46,6 +49,27 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
  let disposed=false,commandIndex=0,submissions=0,drawCalls=0;
  const assert=()=>{device.assert();if(disposed)throw Error("Original GL command owner disposed");};
  const maximum=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number;
+ function createRenderBundleEncoder(){
+   assert();
+   let closed=false;
+   const draws:OriginalGlDraw[]=[];
+   return {
+     drawIndexed(draw:OriginalGlDraw){
+       assert();
+       if(closed)throw Error("Original GPU render bundle already finished");
+       if(!Number.isSafeInteger(draw.count)||draw.count<0||
+         !Number.isSafeInteger(draw.instances)||draw.instances<0)
+         throw Error("Original GPU render bundle contains invalid draw");
+       draws.push(draw);
+     },
+     finish():OriginalGlRenderBundle{
+       assert();
+       if(closed)throw Error("Original GPU render bundle already finished");
+       closed=true;
+       return Object.freeze({draws:Object.freeze(draws.slice())});
+     }
+   };
+ }
  function encoder(){
    assert();
    const generation=++commandIndex,ops:Op[]=[];
@@ -81,6 +105,14 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
              ))
              throw Error("Invalid native WebGL2 indexed draw submission");
            ops.push({type:"draw",draw});
+         },
+         executeBundles(bundles:readonly OriginalGlRenderBundle[]){
+           active();if(!pass)throw Error("Original GPU pass not active");
+           for(const bundle of bundles){
+             if(!bundle||!Array.isArray(bundle.draws)||!Object.isFrozen(bundle.draws))
+               throw Error("Original GPU render bundle is invalid/uncommitted");
+             for(const draw of bundle.draws)this.drawIndexed(draw);
+           }
          },
          scissor(rect:readonly [number,number,number,number]|null){
            active();if(!pass)throw Error("Native GPU pass not active");
@@ -182,7 +214,7 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
    };
  }
  return {
-   encoder,
+   encoder,createRenderBundleEncoder,
    stats:()=>({submissions,drawCalls,commandIndex,disposed}),
    dispose(){disposed=true;}
  };

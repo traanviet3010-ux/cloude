@@ -98,7 +98,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       ))throw Error("Original scene visibility has invalid placement binding");
       if(g.animation||g.material.water||
          (g.material.sky!==undefined&&![1,3,5,6].includes(g.material.sky)))
-        throw Error("Original stage needs native animated/sky/water/lightmap GL pass: "+g.id);
+        throw Error("Original stage needs an unported native animation, star/moon or water GPU pass: "+g.id);
       if(!!g.ranges!==!!g.material.terrain)
         throw Error("Original terrain requires matching native material and cell ranges: "+g.id);
       // WorldGroup owns its material, not necessarily Geometry.material.

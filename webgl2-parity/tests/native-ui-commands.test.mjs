@@ -58,3 +58,22 @@ test("retail CIF alpha-mask remains a distinct texture with original screen-spac
  assert.throws(()=>compileNativeUi(scene([quad({mask:{texture:"",rect:[0,0,1,1]}})])),/mask invalid/);
  assert.throws(()=>compileNativeUi(scene([quad({mask:{texture:"m",rect:[0,0,0,1]}})])),/mask invalid/);
 });
+
+
+test("all original OpenSRO WGSL uvTurn values use the EXACT retail corner winding",()=>{
+  // Pinned createUiResources() WGSL maps c -> (c.y,1-c.x) for turn=1
+  // and c -> (1-c.y,c.x) for turn=3, not the reverse.
+  const layouts=[
+    [[0,0],[1,0],[1,1],[0,1]],
+    [[0,1],[0,0],[1,0],[1,1]],
+    [[1,1],[0,1],[0,0],[1,0]],
+    [[1,0],[1,1],[0,1],[0,0]]
+  ];
+  for(let turn=0;turn<4;turn++){
+    const [cmd]=compileNativeUi(scene([quad({uvTurn:turn})]));
+    const vertices=cmd.vertexData;
+    assert.deepEqual([0,1,2,5].map(index=>[
+      vertices[index*8+2],vertices[index*8+3]
+    ]),layouts[turn],"Original UI RGBA atlas winding for uvTurn "+turn);
+  }
+});

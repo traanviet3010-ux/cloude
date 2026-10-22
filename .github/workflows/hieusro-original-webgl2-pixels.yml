@@ -17,6 +17,7 @@ on:
       - "webgl2-parity/tests/original-gl-owners-pixels.mjs"
       - "webgl2-parity/tests/native-lighting-pixels.mjs"
       - "webgl2-parity/tests/native-alpha-compare-pixels.mjs"
+      - "webgl2-parity/tests/native-residency-atomic-pixels.mjs"
       - ".github/workflows/hieusro-original-webgl2-pixels.yml"
   workflow_dispatch:
 permissions:
@@ -59,3 +60,4 @@ jobs:
           node tests/original-gl-owners-pixels.mjs
           node tests/native-lighting-pixels.mjs
           node tests/native-alpha-compare-pixels.mjs
+          node tests/native-residency-atomic-pixels.mjs

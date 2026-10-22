@@ -14,7 +14,7 @@ import {originalBlendPair} from "./original-blend-webgl2";
 import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -29,6 +29,7 @@ out vec4 vColor;
 out vec2 vUv;
 out vec3 vNormal;
 out vec3 vVertexLighting;
+out vec3 vSkyColor;
 out float vViewZ;
 flat out float vInstanceOpacity;
 uniform vec3 uDiffuse;
@@ -37,11 +38,36 @@ uniform vec3 uAmbientFactor;
 uniform vec3 uLightDirection;
 uniform vec3 uMaterialDiffuse;
 uniform float uAmbientScale;
+uniform int uSkyKind;
+uniform vec3 uSkyForward;
+uniform vec3 uSkyRight;
+uniform vec3 uSkyUp;
+uniform vec4 uSkyZenith;
+uniform vec3 uSkyHorizon;
+uniform vec4 uSkyScatter;
+uniform vec4 uSkySun;
+uniform vec3 uSkyFog;
+uniform float uSkyTime;
 void main(){
  mat4 instance=uModel*aInstanceModel;
  gl_Position=uViewProjection*instance*vec4(aPos,1.0);
  vViewZ=gl_Position.w;
  vColor=aColor;vUv=aUv;vInstanceOpacity=aInstanceOpacity;
+ vSkyColor=vec3(0.0);
+ if(uSkyKind==1||uSkyKind==6){
+   // OpenSRO sky geometry has observer-relative world coordinates.
+   float z=dot(aPos,uSkyForward);
+   gl_Position=vec4(dot(aPos,uSkyRight)/dot(uSkyRight,uSkyRight),
+     dot(aPos,uSkyUp)/dot(uSkyUp,uSkyUp),z,z);
+   if(uSkyKind==1){
+     float angle=(uSkyTime-0.25)*6.28318530718;
+     vec3 sunPosition=vec3(cos(angle),sin(angle),0.0)*20000.0;
+     vec3 base=mix(uSkyHorizon,uSkyZenith.rgb,
+       clamp(aPos.y/5000.0*uSkySun.w,0.0,1.0));
+     vSkyColor=mix(uSkyScatter.rgb,base,
+       min(1.0,distance(aPos,sunPosition)/max(0.00001,uSkyScatter.w)));
+   }else vSkyColor=uSkyFog;
+ }
  // Matches OpenSRO's inverse-transpose world normal and retained vertex
  // object-light calculation, not a new lighting preset.
  vNormal=transpose(inverse(mat3(instance)))*aNormal;
@@ -55,6 +81,7 @@ in vec4 vColor;
 in vec2 vUv;
 in vec3 vNormal;
 in vec3 vVertexLighting;
+in vec3 vSkyColor;
 in float vViewZ;
 flat in float vInstanceOpacity;
 uniform vec4 uMaterialColor;
@@ -74,6 +101,7 @@ uniform int uFadeAlphaOnly;
 uniform int uSurfaceAlpha;
 uniform float uStageFactor;
 uniform int uLightmap;
+uniform int uSkyKind;
 uniform vec3 uLightmapShadow;
 uniform int uLightmapFogEnabled;
 uniform vec3 uLightmapFogColor;
@@ -99,6 +127,8 @@ bool originalAlphaAccept(float pixelAlpha,float reference){
  return true;
 }
 void main(){
+ if(uSkyKind==1){fragColor=vec4(vSkyColor,1.0);return;}
+ if(uSkyKind==6){fragColor=vec4(vSkyColor,vColor.a);return;}
  vec4 texel=uUseTexture==1?texture(uTexture,vUv):vec4(1.0);
  // Pinned OpenSRO geometry shader: baked lightmap branch produces
  // clamp(light.rgb + env.shadow.rgb). The pipeline then multiplies the
@@ -409,8 +439,9 @@ export class OriginalWorldWebgl2 {
        blend:(geometry.material?.blend??false)||(material?.objectFade??false)||!!material?.lightmap,
        blendPair:material?.lightmap?{source:1,destination:3}:material?.blendPair,
        doubleSided:geometry.material?.doubleSided??false,
-       depthWrite:material?.lightmap?false:(geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade)),
-       lightmap:!!material?.lightmap,
+       depthWrite:material?.sky?false:material?.lightmap?false:
+         (geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade)),
+       lightmap:!!material?.lightmap,sky:material?.sky??0,
        stageFactor:material?.stageFactor??1,
        objectFade:!!material?.objectFade,fadeAlphaOnly:!!material?.fadeAlphaOnly,
        surfaceAlpha:!!material?.surfaceAlpha,
@@ -430,6 +461,8 @@ export class OriginalWorldWebgl2 {
      if(s.texture&&!this.worldTextures.has(s.texture))
        throw Error("Original world material texture not resident: "+s.texture);
    }
+   if(sceneIds.some(id=>this.entries.get(id)!.sky)&&!this.environmentPacked)
+     throw Error("Original sky geometry requires packed native WorldEnvironment");
    if(sceneIds.some(id=>this.entries.get(id)!.lit)&&!this.lighting)
      throw Error("Original lit Silkroad world requires native packed environment");
    const camera=originalCameraToWebgl2(cameraMatrix);
@@ -443,6 +476,18 @@ export class OriginalWorldWebgl2 {
    if(this.skyPacked)this.atmosphere.draw(this.skyPacked);
    gl.useProgram(this.program);
    gl.uniform1i(gl.getUniformLocation(this.program,"uTexture"),0);
+   const sky=this.environmentPacked;
+   if(sky){
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uSkyForward"),sky.subarray(16,19));
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uSkyRight"),sky.subarray(20,23));
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uSkyUp"),sky.subarray(24,27));
+     gl.uniform4fv(gl.getUniformLocation(this.program,"uSkyZenith"),sky.subarray(0,4));
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uSkyHorizon"),sky.subarray(4,7));
+     gl.uniform4fv(gl.getUniformLocation(this.program,"uSkyScatter"),sky.subarray(44,48));
+     gl.uniform4fv(gl.getUniformLocation(this.program,"uSkySun"),sky.subarray(52,56));
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uSkyFog"),sky.subarray(28,31));
+     gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTime"),sky[48]!);
+   }
    gl.activeTexture(gl.TEXTURE0);
    gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uViewProjection"),false,camera);
    const environment=this.lighting;
@@ -463,6 +508,7 @@ export class OriginalWorldWebgl2 {
      gl.uniform1i(gl.getUniformLocation(this.program,"uFadeAlphaOnly"),s.fadeAlphaOnly?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uSurfaceAlpha"),s.surfaceAlpha?1:0);
      gl.uniform1f(gl.getUniformLocation(this.program,"uStageFactor"),s.stageFactor);
+      gl.uniform1i(gl.getUniformLocation(this.program,"uSkyKind"),s.sky);
       gl.uniform1i(gl.getUniformLocation(this.program,"uLightmap"),s.lightmap?1:0);
       gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapShadow"),
         this.environmentPacked?.subarray(40,43)??new Float32Array([0,0,0]));
@@ -490,6 +536,8 @@ export class OriginalWorldWebgl2 {
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,
         s.lightmap?gl.CLAMP_TO_EDGE:gl.REPEAT);
      if(s.doubleSided)gl.disable(gl.CULL_FACE);else{gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);}
+      if(s.sky)gl.disable(gl.DEPTH_TEST);
+      else gl.enable(gl.DEPTH_TEST);
      originalBlendPair(gl,s.blend,s.blendPair);
      gl.depthMask(s.depthWrite);
      gl.bindVertexArray(s.vao);

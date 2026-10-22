@@ -51,3 +51,36 @@ complete** and gameplay release remains blocked.
 - Never edit the original gameplay, map and GUI sources merely to satisfy a WebGL2 shim.
 - On failure of a graphics feature, report the exact original unsupported pass; never replace it with a hand-drawn asset, flat placeholder or custom interface.
 - CI must separately prove (A) source/runtime ownership retained, (B) WebGL2 API parity with the original renderer contract, (C) the actual full original client built using the adapter, and (D) authenticated browser gameplay. Current status: **(A) partially proven, (B) incomplete, (C) NOT built, (D) NOT tested.**
+
+
+## Native terrain and real GameWorld admission work (2026-10-22)
+
+The TEST WebGL2 native scene owner now:
+- Consumes authentic `WorldGroup.ranges`, `terrainLod()` and skirt/seam
+  vertices. It admits original LOD0 first, then updates **resident** GL VBO
+  and EBO for the original camera's selected cell. Camera changes do not
+  create substitute landscape meshes.
+- Receives actual `setWorld(WorldScene)` from the old renderer contract and
+  wraps **that same** source object into an admission-only one-use transport.
+  This is not a new GameWorld or new session state machine.
+- Composes existing `WorldTerrainPart` groups into the original WorldScene in
+  the original scene-origin coordinate space with validation for duplicate
+  region IDs, origins and bounded asset sizes; nothing is procedurally drawn.
+- Retains the existing exact frontend UI, actor bridge, instance fade and
+  WebGL2 context resource lifetime logic.
+
+**Acceptance evidence**: tests `original-frontend-stage.test.mjs`,
+`original-terrain-selection.integration.mjs`,
+`original-scene-lease.test.mjs`, and
+`native-terrain-pixels.mjs` (Chromium actual GL readPixels). Original
+OpenSRO's full TypeScript/build CI remains mandatory on each change.
+
+**Limit of progress**: The experimental world GL renderer is still restricted
+to materials representable by its current shader. Sky, water, lightmap,
+animated scene groups, staged materials/particles and full original renderer
+commands are intentionally rejected rather than painted incorrectly.
+The real `DeviceOwner/SurfaceOwner/FrameOwner` WebGL2 implementations
+still need to replace all WebGPU-specific render encoders, shader passes and
+bundle generation for the **entire original runtime**. A passing geometry
+pixel test is not an authenticated Silkroad game session; do not deploy to
+LIVE, promote the draft PR or advertise any playable WebGL2 URL.

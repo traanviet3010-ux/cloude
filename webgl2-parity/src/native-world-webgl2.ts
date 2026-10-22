@@ -14,7 +14,7 @@ import {originalBlendPair} from "./original-blend-webgl2";
 import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;maskVbo:WebGLBuffer|null;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;frames:readonly string[];blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;decal:boolean;groundDecal:boolean;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;frames:readonly string[];blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;water:boolean;textureAlphaOff:boolean;decal:boolean;groundDecal:boolean;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 precision highp int;
@@ -139,6 +139,9 @@ uniform int uLightmapFogEnabled;
 uniform vec3 uLightmapFogColor;
 uniform float uLightmapFogStart;
 uniform float uLightmapFogEnd;
+uniform int uWater;
+uniform int uTextureAlphaOff;
+uniform vec3 uWaterTint;
 uniform int uWorldFogEnabled;
 uniform vec3 uWorldFogColor;
 uniform float uWorldFogStart;
@@ -212,6 +215,7 @@ void main(){
    c=vec4(texel.rgb*vColor.rgb*lit,
      texel.a*vColor.a*uMaterialColor.a);
  }else c=texel*vColor*uMaterialColor;
+ if(uTextureAlphaOff==1)c.a=vColor.a*uMaterialColor.a;
  bool fading=(uObjectFade==1 && vInstanceOpacity<1.0);
  // The original 2007 retail fade is a per-placement opacity, not a
  // replacement texture. Use pinned GPU pipeline's cutoff contraction.
@@ -221,6 +225,7 @@ void main(){
  float outAlpha=uObjectFade==1?
    (fading?fadeAlpha:(uSurfaceAlpha==1?c.a:1.0)):c.a;
  vec3 shaded=clamp(c.rgb*uStageFactor,vec3(0.0),vec3(1.0));
+ if(uWater==1)shaded*=uWaterTint;
  if(uWorldFogEnabled==1){
    float f=clamp((vViewZ-uWorldFogStart)/
      max(0.001,uWorldFogEnd-uWorldFogStart),0.0,1.0);
@@ -510,7 +515,7 @@ export class OriginalWorldWebgl2 {
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
        bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",
-       frames:geometry.material?.sky===4?geometry.material.frames??[]:[],
+       frames:geometry.material?.frames??[],
        blend:(geometry.material?.blend??false)||(material?.objectFade??false)||
          !!material?.lightmap||!!material?.decal||!!material?.groundDecal,
        blendPair:material?.lightmap?{source:1,destination:3}:
@@ -520,6 +525,7 @@ export class OriginalWorldWebgl2 {
          (geometry.material?.depthWrite??(!geometry.material?.blend||
            !!material?.objectFade||!!material?.decal)),
        lightmap:!!material?.lightmap,sky:material?.sky??0,
+       water:!!material?.water,textureAlphaOff:material?.textureAlpha===false,
        decal:!!material?.decal,groundDecal:!!material?.groundDecal,
        fogDisabled:!!material?.fogDisabled,
        localFog:material?.fog?[
@@ -545,7 +551,7 @@ export class OriginalWorldWebgl2 {
    for(const id of sceneIds){
      const s=this.entries.get(id);
      if(!s)throw Error("Original world group not resident: "+id);
-     const required=s.sky===4?s.frames:[s.texture];
+     const required=s.frames.length?s.frames:[s.texture];
      for(const path of required)if(path&&!this.worldTextures.has(path))
        throw Error("Original world material texture not resident: "+path);
    }
@@ -577,6 +583,8 @@ export class OriginalWorldWebgl2 {
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTime"),sky[48]!);
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudScroll"),sky[49]!);
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudAlpha"),sky[50]!);
+     gl.uniform1f(gl.getUniformLocation(this.program,"uFrameNumber"),sky[34]!);
+     gl.uniform3fv(gl.getUniformLocation(this.program,"uWaterTint"),sky.subarray(36,39));
      gl.uniform1f(gl.getUniformLocation(this.program,"uLunarDay"),sky[56]!);
      gl.uniform2fv(gl.getUniformLocation(this.program,"uSkyPixel"),sky.subarray(57,59));
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTwinkle"),sky[51]!);
@@ -616,6 +624,8 @@ export class OriginalWorldWebgl2 {
       gl.uniform1f(gl.getUniformLocation(this.program,"uWorldFogEnd"),
         localFog?.[4]??envFog?.[32]??0);
       gl.uniform1i(gl.getUniformLocation(this.program,"uLightmap"),s.lightmap?1:0);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uWater"),s.water?1:0);
+     gl.uniform1i(gl.getUniformLocation(this.program,"uTextureAlphaOff"),s.textureAlphaOff?1:0);
       gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapShadow"),
         this.environmentPacked?.subarray(40,43)??new Float32Array([0,0,0]));
       gl.uniform1i(gl.getUniformLocation(this.program,"uLightmapFogEnabled"),
@@ -633,8 +643,10 @@ export class OriginalWorldWebgl2 {
        new Float32Array(s.color.subarray(0,3)));
      gl.uniform3fv(gl.getUniformLocation(this.program,"uAmbientFactor"),s.ambient);
      gl.uniform1f(gl.getUniformLocation(this.program,"uAmbientScale"),s.ambientScale);
-     const texture=s.sky===4&&s.frames.length?
-       s.frames[Math.floor(Math.max(0,this.environmentPacked?.[56]??0))%s.frames.length]!:
+     const frameIndex=s.sky===4?this.environmentPacked?.[56]??0:
+       this.environmentPacked?.[34]??0;
+     const texture=s.frames.length?
+       s.frames[Math.floor(Math.max(0,frameIndex))%s.frames.length]!:
        s.texture;
      gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),texture?1:0);
      gl.bindTexture(gl.TEXTURE_2D,texture?this.worldTextures.get(texture):this.white);

@@ -35,6 +35,8 @@ jobs:
           node --check webgl2-parity/scripts/verify-native-stage-output.mjs
           node --check webgl2-parity/scripts/audit-original-test-stage.mjs
           node --check webgl2-parity/scripts/attach-original-runtime-renderer.mjs
+          node --check webgl2-parity/scripts/attach-original-graphics-backend.mjs
+          node --check webgl2-parity/scripts/audit-original-graphics-backend.mjs
       - name: Checkout EXACT native HieuSRO GPU engine revision
         run: |
           git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
@@ -78,6 +80,10 @@ jobs:
             sleep 8
           done
           node "$GITHUB_WORKSPACE/webgl2-parity/scripts/attach-original-runtime-renderer.mjs" /tmp/opensro-original
+          # Original renderer keeps every original gameplay/UI/character/picking
+          # method; only its WebGPU-only device/surface/frame factories vary.
+          node "$GITHUB_WORKSPACE/webgl2-parity/scripts/attach-original-graphics-backend.mjs" /tmp/opensro-original
+          node "$GITHUB_WORKSPACE/webgl2-parity/scripts/audit-original-graphics-backend.mjs" /tmp/opensro-original
           mkdir -p apps/client-next/src/engine/runtime/renderer/webgl2
           cp "$GITHUB_WORKSPACE"/webgl2-parity/src/*.ts apps/client-next/src/engine/runtime/renderer/webgl2/
           corepack pnpm --filter @sro/client-next typecheck

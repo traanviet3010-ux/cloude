@@ -7,7 +7,8 @@ import {fileURLToPath,pathToFileURL} from "node:url";
 const dir=dirname(fileURLToPath(import.meta.url));
 const out=join(dir,"original-stage-bundle.mjs");
 await build({entryPoints:[join(dir,"../src/original-frontend-stage.ts")],
- bundle:true,platform:"node",format:"esm",target:"es2022",outfile:out});
+ bundle:true,platform:"node",format:"esm",target:"es2022",outfile:out,
+ alias:{"@":process.env.SRO_SOURCE_ROOT+"/apps/client-next/src"}});
 const {createOriginalStageBridge}=await import(pathToFileURL(out).href+"?t=1");
 
 const identity=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);

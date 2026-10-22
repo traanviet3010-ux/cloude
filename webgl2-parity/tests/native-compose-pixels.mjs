@@ -152,6 +152,55 @@ try{
    complete.clearedStage=placementGame.originalFrontendFrame(2,.016);
    complete.clearedPixel=nativePlacementPixel(1,32);
    placementGame.dispose();
+
+   // Pixel-level proof that authentic WorldGroup IDs may be shared by
+   // intro/dock and the old GPU framebuffer persists until atomic publish.
+   // Shader contract fixture only: no Silkroad assets or UI are regenerated.
+   const overlapCanvas=document.createElement("canvas");
+   overlapCanvas.width=64;overlapCanvas.height=64;
+   document.body.appendChild(overlapCanvas);
+   const overlapGame=createOriginalSilkroadWebgl2(overlapCanvas);
+   const groupAt=(id,color,offset=0)=>({
+     id,center:[offset,0,1],radius:1,
+     material:{color,unlit:true,doubleSided:true,alphaCutoff:0,blend:false},
+     geometry:{positions:new Float32Array([
+       offset-.7,-.7,1,offset+.7,-.7,1,offset,.7,1
+     ]),indices:new Uint32Array([0,1,2]),transform:I}
+   });
+   const stageLease=(id,groups)=>({sceneId:id,takeWorld:()=>({
+     scene:{id,originRegion:0,warnings:[],groups},
+     bytes:2048,starBytes:0
+   })});
+   const oldGroup=groupAt("reused-native-geometry",[1,0,0,1]);
+   const nextGroups=[
+     groupAt("reused-native-geometry",[0,1,0,1]),
+     groupAt("dock-outside-camera",[0,0,1,1],8)
+   ];
+   overlapGame.setWorldCamera({eye:[0,0,0],target:[0,0,1],
+     fov:Math.PI/2,near:.1,far:10});
+   overlapGame.setUi({revision:1,width:64,height:64,quads:[]});
+   const overlapGl=overlapCanvas.getContext("webgl2");
+   const overlapPixel=()=>{const p=new Uint8Array(4);
+     overlapGl.readPixels(32,32,1,1,overlapGl.RGBA,overlapGl.UNSIGNED_BYTE,p);
+     return [...p];};
+   overlapGame.adoptWorld(stageLease("original-intro",[oldGroup]),"full");
+   overlapGame.originalFrontendFrame(1,0);
+   const oldPixel=overlapPixel();
+   overlapGame.adoptWorld(stageLease("cancelled-dock",nextGroups),"full");
+   overlapGame.originalFrontendFrame(1,.016);
+   const interruptedPixel=overlapPixel();
+   overlapGame.cancelWorldUpdate();
+   overlapGame.originalFrontendFrame(1,.032);
+   const cancelledPixel=overlapPixel();
+   overlapGame.adoptWorld(stageLease("original-dock",nextGroups),"full");
+   overlapGame.originalFrontendFrame(1,.048);
+   const pendingPixel=overlapPixel();
+   const switchedFrame=overlapGame.originalFrontendFrame(1,.064);
+   const switchedPixel=overlapPixel();
+   complete.overlap={oldPixel,interruptedPixel,cancelledPixel,
+     pendingPixel,switchedPixel,sceneId:switchedFrame.stage.sceneId,
+     triangles:switchedFrame.triangleCount};
+   overlapGame.dispose();
    return complete;
  });
  assert.ok(data.ui[0]>220&&data.ui[2]<40,"Authored UiScene must overlay the world on same WebGL2 context");
@@ -179,5 +228,13 @@ try{
    "World-entry stage must not expose the last title scene as a fake playable world");
  assert.equal(data.clearedPixel[0],0,
    "Original title GPU pixels must disappear when original frontend clears world");
+ for(const key of ["oldPixel","interruptedPixel","cancelledPixel","pendingPixel"]){
+   assert.ok(data.overlap[key][0]>220&&data.overlap[key][1]<40,
+     "Old native red geometry must remain on GPU until atomic stage publication: "+key);
+ }
+ assert.ok(data.overlap.switchedPixel[1]>220&&data.overlap.switchedPixel[0]<40,
+   "After complete native stage upload, the reused original group ID must draw new green geometry");
+ assert.equal(data.overlap.sceneId,"original-dock");
+ assert.equal(data.overlap.triangles,2);
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

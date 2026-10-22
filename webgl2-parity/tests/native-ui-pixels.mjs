@@ -97,12 +97,25 @@ try{
     budgetCanvas.width=8;budgetCanvas.height=8;
     document.body.appendChild(budgetCanvas);
     const budgetOwner=new NativeUiWebgl2Renderer(budgetCanvas,8);
+    // Simulate ORIGINAL createUi publishing new CIF quads before async
+    // texture arrivals. Residency pins must be installed before the first draw.
+    budgetOwner.protectUiScene({revision:1,width:8,height:8,quads:[
+      {rect:[0,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-hud-a"},
+      {rect:[4,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
+       color:[1,1,1,1],texture:"original-hud-b"}
+    ]});
     const pixel=new Uint8ClampedArray(1024*1024*4);
     pixel.fill(255);
     budgetOwner.setTexture("original-hud-a",
       new ImageData(pixel,1024,1024));
     budgetOwner.setTexture("original-hud-b",
       new ImageData(pixel,1024,1024));
+    try{
+      budgetOwner.setTexture("pre-draw-overflow",
+        new ImageData(new Uint8ClampedArray([1,2,3,255]),1,1));
+      state.predrawScenePinned=false;
+    }catch(err){state.predrawScenePinned=/protected textures/.test(String(err));}
     budgetOwner.draw({revision:1,width:8,height:8,quads:[
       {rect:[0,0,4,8],clip:[0,0,8,8],uv:[0,0,1,1],
        color:[1,1,1,1],texture:"original-hud-a"},
@@ -154,6 +167,8 @@ try{
   assert.ok(state.newArtAfterCommit[1]>220 &&
     state.newArtAfterCommit[0]<20,
     "An accepted replacement must atomically publish the new green native art");
+  assert.equal(state.predrawScenePinned,true,
+    "Do not evict a required original CIF image before the first HUD draw");
   assert.equal(state.protectedBudgetRejected,true,
     "Do not evict the two images referenced by the original current frame");
   assert.equal(state.protectedBudgetStats.textureCount,2);

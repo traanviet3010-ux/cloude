@@ -292,6 +292,9 @@ test("original frontend world-entry setWorld(null) releases all completed and pe
 test("Pandora-inspired four-group original texture demand window advances without blocking on distant groups",()=>{
  const world=renderer(),bridge=createOriginalStageBridge(world);
  const groups=Array.from({length:7},(_,i)=>group("native-group-"+i,{
+   // Textured original Geometry always carries an authored UV stream;
+   // no texture stand-in or generated procedural vertices are admitted.
+   geometry:{...mesh(),uvs:new Float32Array([0,0,1,0,0,1])},
    material:{...material(),texture:"/assets/sro/authored-"+i+".texture"}
  }));
  bridge.adoptWorld(lease("original-large-constantinople-stage",groups));

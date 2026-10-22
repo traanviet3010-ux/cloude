@@ -73,8 +73,10 @@ try{
    "The original dungeon water must use its authored initial red source frame");
  assert.ok(data.green[1]>80&&data.green[0]<12,
    "Native settings.z 10Hz frame selector must choose authored second image");
- assert.ok(data.tinted[1]>35&&data.tinted[1]<100,
-   "Native non-reflective world water must multiply source green by packed water tint");
+ console.log("ORIGINAL_WATER_FRAME_DIAGNOSTIC",JSON.stringify(data));
+ assert.ok(data.tinted[1]>85&&data.tinted[1]<150&&
+   data.tinted[1]<data.green[1],
+   "Native non-reflective water must multiply original green frame by .5 water tint");
  console.log("ORIGINAL_OPEN_SRO_DUNGEON_AND_WATER_FRAME_PIXELS_PASS",JSON.stringify(data));
 }finally{
  await browser.close();await new Promise(resolve=>server.close(resolve));

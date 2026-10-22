@@ -85,16 +85,18 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       nativeLastSeconds=originalSeconds;
       const selection=visibleGroupSet!.select(localCamera,dt,++nativeFrameIndex);
       const nativeSelected=new Map(selection.map(row=>[row.id,row]));
-      const stageIds=stage.drawIds().filter(id=>{
+      const stageIds=stage.drawEntries().filter(({id,key})=>{
         const original=stageGroupById.get(id);
         if(!original || original.instanceRadius===undefined ||
            !!original.ranges || !!original.material.sky)return true;
         const row=nativeSelected.get(id);
-        world.updateOriginalInstances(id,
+        // Native selection keys always use source WorldGroup IDs; GPU
+        // residency keys are private so two scene leases can overlap.
+        world.updateOriginalInstances(key,
           row?.matrices??new Float32Array(0),
           row?.opacity??new Float32Array(0));
         return !!row?.count;
-      });
+      }).map(({key})=>key);
       const actorIds=origin===null?[]:characters.update(origin);
       const scene=world.render(matrix,[...stageIds,...actorIds]);
       const visible=bridge.draw();

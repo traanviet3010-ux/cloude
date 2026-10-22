@@ -408,6 +408,9 @@ export class OriginalWorldWebgl2 {
    const camera=originalCameraToWebgl2(cameraMatrix);
    this.frame++;this.visible=new Set(sceneIds);this.worldTextures.frame();
    const gl=this.gl;gl.viewport(0,0,this.canvas.width,this.canvas.height);
+   // Retail UI uses scissor rectangles. GL state is shared between passes:
+   // never let the previous HUD clip the next original sky/world clear.
+   gl.disable(gl.SCISSOR_TEST);
    gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
    gl.clearColor(0,0,0,1);gl.clearDepth(1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
    if(this.skyPacked)this.atmosphere.draw(this.skyPacked);

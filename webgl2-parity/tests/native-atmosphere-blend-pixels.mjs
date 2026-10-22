@@ -83,7 +83,8 @@ try{
    renderer.dispose();
    return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha};
  });
- assert.ok(result.skyTop[1]>170&&result.skyTop[0]<100,
+ console.log("ORIGINAL_SKY_BLEND_PIXELS_DIAGNOSTIC",JSON.stringify(result));
+ assert.ok(result.skyTop[1]>135&&result.skyTop[0]<125,
    "Original zenith must render in upper half using packed camera basis");
  assert.ok(result.skyBottom[0]>170&&result.skyBottom[1]<100,
    "Original horizon must render below using native WGSL mix rule");

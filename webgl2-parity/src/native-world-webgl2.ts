@@ -139,6 +139,7 @@ export class OriginalWorldWebgl2 {
  private lighting:OriginalGlLighting|null=null;
  private atmosphere:ReturnType<typeof createOriginalAtmosphereWebgl2>;
  private skyPacked:Float32Array|null=null;
+ private environmentPacked:Float32Array|null=null;
  private readonly budget:number;
  private used=0;
  private frame=0;
@@ -216,6 +217,7 @@ export class OriginalWorldWebgl2 {
  setOriginalLighting(packed:Float32Array,useNativeSun=false,drawAtmosphere=false){
    this.validate();
    this.lighting=readOriginalGlLighting(packed,useNativeSun);
+   this.environmentPacked=packed.slice();
    // Atmosphere uses the actual retail packed zenith/horizon/camera basis.
    // No fake cloud/stars are injected, and empty scenes remain black.
    this.skyPacked=drawAtmosphere?packed.slice():null;
@@ -449,7 +451,7 @@ export class OriginalWorldWebgl2 {
      gl.uniform1f(gl.getUniformLocation(this.program,"uStageFactor"),s.stageFactor);
       gl.uniform1i(gl.getUniformLocation(this.program,"uLightmap"),s.lightmap?1:0);
       gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapShadow"),
-        this.skyPacked?.subarray(40,43)??new Float32Array([0,0,0]));
+        this.environmentPacked?.subarray(40,43)??new Float32Array([0,0,0]));
      gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
        s.objectVertexLighting?1:0);
@@ -482,7 +484,7 @@ export class OriginalWorldWebgl2 {
    this.disposed=true;this.canvas.removeEventListener("webglcontextlost",this.lostHandler);
    for(const id of [...this.entries.keys()])this.retire(id);
    this.worldTextures.dispose();this.gl.deleteTexture(this.white);
-   this.lighting=null;this.skyPacked=null;
+   this.lighting=null;this.skyPacked=null;this.environmentPacked=null;
    this.atmosphere.dispose();
    this.protectedStageGroups.clear();
    this.gl.deleteProgram(this.program);

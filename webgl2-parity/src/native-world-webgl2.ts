@@ -24,6 +24,7 @@ layout(location=2) in vec2 aUv;
 layout(location=3) in vec4 aColor;
 layout(location=4) in mat4 aInstanceModel;
 layout(location=8) in float aInstanceOpacity;
+layout(location=9) in vec2 aSkyMask;
 uniform mat4 uViewProjection;
 uniform mat4 uModel;
 out vec4 vColor;
@@ -50,25 +51,39 @@ uniform vec4 uSkySun;
 uniform vec3 uSkyFog;
 uniform float uSkyTime;
 uniform float uSkyCloudScroll;
+uniform vec2 uSkyPixel;
+uniform float uSkyTwinkle;
+uniform float uSkyFlicker[12];
 void main(){
  mat4 instance=uModel*aInstanceModel;
  gl_Position=uViewProjection*instance*vec4(aPos,1.0);
  vViewZ=gl_Position.w;
  vColor=aColor;vUv=aUv;vInstanceOpacity=aInstanceOpacity;
  vSkyColor=vec3(0.0);
- if(uSkyKind==1||uSkyKind==3||uSkyKind==5||uSkyKind==6){
+ if(uSkyKind>=1&&uSkyKind<=6){
    // OpenSRO sky geometry has observer-relative world coordinates.
    vec3 skyPosition=aPos;
    float angle=(uSkyTime-0.25)*6.28318530718;
-   if(uSkyKind==3){
-     vec3 center=vec3(cos(angle),sin(angle),0.0)*20000.0;
-     skyPosition=center+vec3(-aPos.y*sin(angle),
-       aPos.y*cos(angle),aPos.z)*666.666687;
+   if(uSkyKind==3||uSkyKind==4){
+     float arc=angle;
+     if(uSkyKind==4){
+       float w=fract(uSkyTime+0.25);
+       arc=(0.25+(w-0.25)*1.2)*6.28318530718;
+     }
+     vec3 center=vec3(cos(arc),sin(arc),0.0)*20000.0;
+     skyPosition=center+vec3(-aPos.y*sin(arc),
+       aPos.y*cos(arc),aPos.z)*(uSkyKind==4?1000.0:666.666687);
    }
    float z=dot(skyPosition,uSkyForward);
    gl_Position=vec4(dot(skyPosition,uSkyRight)/dot(uSkyRight,uSkyRight),
      dot(skyPosition,uSkyUp)/dot(uSkyUp,uSkyUp),z,z);
    vViewZ=z;
+   if(uSkyKind==2){
+     int batch=clamp(int(aSkyMask.x),0,11);
+     float alpha=uSkyFlicker[batch];
+     vColor.a*=mod(floor(max(0.0,alpha*uSkyTwinkle)),256.0)/255.0;
+     gl_Position.xy+=aUv*aSkyMask.y*uSkyPixel*z;
+   }
    if(uSkyKind==5)vUv=aUv+vec2(uSkyCloudScroll);
    if(uSkyKind==1){
      vec3 sunPosition=vec3(cos(angle),sin(angle),0.0)*20000.0;
@@ -118,6 +133,7 @@ uniform vec3 uSkyFog;
 uniform vec4 uSkyScatter;
 uniform float uSkyTime;
 uniform float uSkyCloudAlpha;
+uniform float uLunarDay;
 uniform vec3 uLightmapShadow;
 uniform int uLightmapFogEnabled;
 uniform vec3 uLightmapFogColor;
@@ -148,11 +164,18 @@ bool originalAlphaAccept(float pixelAlpha,float reference){
 }
 void main(){
  if(uSkyKind==1){fragColor=vec4(vSkyColor,1.0);return;}
+ if(uSkyKind==2){fragColor=vColor;return;}
  if(uSkyKind==6){fragColor=vec4(vSkyColor,vColor.a);return;}
  if(uSkyKind==3){
    vec4 sunTexel=texture(uTexture,vUv);
    bool daytime=uSkyTime>=0.25&&uSkyTime<=0.875;
    fragColor=vec4(clamp(uSkySun.rgb,0.0,1.0),sunTexel.a*(daytime?1.0:0.0));
+   return;
+ }
+ if(uSkyKind==4){
+   vec4 moon=texture(uTexture,vUv);
+   bool night=uSkyTime>0.75||uSkyTime<0.5;
+   fragColor=vec4(moon.rgb,moon.a*(night&&uLunarDay<29.0?1.0:0.0));
    return;
  }
  if(uSkyKind==5){

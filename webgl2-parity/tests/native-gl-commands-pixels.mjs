@@ -118,6 +118,12 @@ void main(){outColor=vec4(1,0,0,1);}`);
    });
    const cleared=px(32,32);
    const before=device.stats(),commandStats=frame.commands.stats();
+   const directTarget=surface.frameView();
+   let scaleBlocked=false,retainBlocked=false;
+   try{surface.acquire({width:64,height:64},false,70);}
+   catch{scaleBlocked=true;}
+   try{surface.acquire({width:64,height:64},true);}
+   catch{retainBlocked=true;}
    let retiredBlocked=false;
    const command=frame.commands.encoder();
    const pass=command.beginRenderPass({width:64,height:64,
@@ -128,7 +134,27 @@ void main(){outColor=vec4(1,0,0,1);}`);
    try{stale.submit();}catch{retiredBlocked=true;}
    const afterStale=px(32,32);
    frame.dispose();surface.dispose();device.dispose();
-   return {inside,outside,cleared,afterStale,
+   // Native SurfaceOwner: actual retained framebuffer, RGBA color and depth,
+   // blitted into default canvas before HUD. No substitute scene.
+   const secondary=document.createElement("canvas");
+   secondary.width=32;secondary.height=32;document.body.appendChild(secondary);
+   const secondDevice=createOriginalGlDevice(secondary,{mobile:true,maxResidentMB:32});
+   const secondSurface=createOriginalGlSurface(secondDevice,{directToCanvas:false});
+   const target=secondSurface.acquire({width:32,height:32},true);
+   secondDevice.beginFrame();
+   secondSurface.beginScene();
+   const secondGl=secondDevice.gl;
+   secondGl.clearColor(0,1,0,1);
+   secondGl.clear(secondGl.COLOR_BUFFER_BIT|secondGl.DEPTH_BUFFER_BIT);
+   secondSurface.encodePresent();
+   secondDevice.endFrame();
+   const green=new Uint8Array(4);
+   secondGl.readPixels(16,16,1,1,secondGl.RGBA,secondGl.UNSIGNED_BYTE,green);
+   secondSurface.dispose();secondDevice.dispose();
+   return {inside,outside,cleared,afterStale,offscreenGreen:[...green],
+     offscreenOwned:!!target.framebuffer&&!!target.color&&!!target.depth,
+     offscreenDisposed:secondDevice.stats(),
+     directToCanvas:directTarget.framebuffer===null,scaleBlocked,retainBlocked,
      nestedBlocked:attemptedNested,computeBlocked,twiceBlocked,bundleClosed,
      invalidBlendBlocked,
      retiredBlocked,run:run.scene,after:after.scene,
@@ -146,6 +172,15 @@ void main(){outColor=vec4(1,0,0,1);}`);
  assert.equal(r.after.drawCalls,0);
  assert.ok(r.bundleClosed&&r.invalidBlendBlocked,
    "Immutable render bundle and invalid GL blend state must fail closed");
+ assert.equal(r.directToCanvas,true);
+ assert.ok(r.scaleBlocked&&r.retainBlocked,
+   "Unsupported native render scales and retained direct-canvas targets must fail explicitly");
+ assert.equal(r.offscreenOwned,true,
+   "Native SurfaceOwner must own actual offscreen GL color/depth/framebuffer");
+ assert.ok(r.offscreenGreen[1]>240&&r.offscreenGreen[0]<15,
+   "Native SurfaceOwner encodePresent must resolve real retained GPU color into canvas");
+ assert.equal(r.offscreenDisposed.resources,0,
+   "Offscreen GPU color, depth and framebuffer must be freed on disposal");
  assert.ok(r.nestedBlocked&&r.computeBlocked&&r.twiceBlocked&&r.retiredBlocked,
    "Unsupported compute, nested render passes, duplicate submits and stale VAOs must fail closed");
  assert.equal(r.commandStats.submissions,2);

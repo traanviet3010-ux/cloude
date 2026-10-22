@@ -68,16 +68,19 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original Silkroad D3DCMPFUNC alpha comparison invalid");
   if(mat?.alphaCutoff!==undefined && (!Number.isFinite(mat.alphaCutoff)||mat.alphaCutoff<0||mat.alphaCutoff>1))
     throw Error("Original Silkroad alpha cutoff outside native 0..1 range");
-  if((mat?.frames&&mat.sky!==4)||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
-     mat?.water||(mat?.sky!==undefined&&![1,2,3,4,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
+  if((mat?.frames&&!mat.water&&mat.sky!==4&&!mat.unlit)||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
+     (mat?.sky!==undefined&&![1,2,3,4,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||
      mat?.instanceFade||
-     mat?.instanceMaterialTint||mat?.textureAlpha||mat?.surfaceAlpha||
+     mat?.instanceMaterialTint||(mat?.textureAlpha!==undefined&&mat.textureAlpha!==false)||mat?.surfaceAlpha||
      mat?.shaderDiffuse)
     throw Error("Original material requires native staged WebGL2 shader parity");
   if(mat?.sky===2&&(!(source.maskUVs instanceof Float32Array)||
       source.maskUVs.length!==n*2||!finite(source.maskUVs)))
     throw Error("Original Silkroad star field requires native batch/size maskUV coordinates");
+  if(mat?.frames&&(!mat.frames.length||mat.frames.length>64||
+      mat.frames.some(path=>!path||path.length>1024)))
+    throw Error("Invalid native Silkroad animated texture frame paths");
   if(mat?.sky===4&&(!mat.frames?.length||mat.frames.length>64||
       mat.frames.some(path=>!path||path.length>1024)))
     throw Error("Original Silkroad moon must retain its authored texture frames");

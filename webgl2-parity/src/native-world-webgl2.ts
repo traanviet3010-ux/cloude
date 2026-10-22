@@ -290,6 +290,13 @@ export class OriginalWorldWebgl2 {
    if(this.disposed||this.lost)throw Error("Original SRO WebGL2 scene no longer available");
  }
  setTexture(path:string,image:WorldTexture|null){
+   // A lost WebGL2 generation is unrecoverable without rebuilding genuine
+   // asset/GL owners. Resource RELEASE, however, must still be permitted so
+   // original scene and character disposers cannot leak CPU-side handles.
+   if(this.lost&&!this.disposed&&image===null){
+     this.worldTextures.put(path,null);
+     return;
+   }
    this.validate();
    const used=new Set<string>();
    for(const id of this.visible){
@@ -310,6 +317,10 @@ export class OriginalWorldWebgl2 {
  /** Pin ALL native assets of an admitting title/character stage, or fail
      explicitly instead of evicting the first texture while loading the last. */
  protectPendingTextures(paths:readonly string[]){
+   if(this.lost&&!this.disposed&&paths.length===0){
+     this.pendingTextures.clear();
+     return;
+   }
    this.validate();
    this.pendingTextures=new Set(paths);
  }
@@ -317,6 +328,10 @@ export class OriginalWorldWebgl2 {
   * A staged admission must fail, not silently evict a still-owned old scene.
   */
  protectStageGroups(ids:readonly string[]){
+   if(this.lost&&!this.disposed&&ids.length===0){
+     this.protectedStageGroups.clear();
+     return;
+   }
    this.validate();
    this.protectedStageGroups.clear();
    for(const id of ids)this.protectedStageGroups.add(id);
@@ -326,7 +341,12 @@ export class OriginalWorldWebgl2 {
    if(!this.entries.has(id))throw Error("Cannot protect an unadmitted native group: "+id);
    this.protectedStageGroups.add(id);
  }
- hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
+ hasTexture(path:string){
+   if(this.disposed)throw Error("Original Silkroad WebGL2 scene disposed");
+   // Read-only ownership checks remain valid after context loss solely for
+   // a full renderer-generation teardown; no GL command is issued here.
+   return this.worldTextures.has(path);
+ }
  /** The ORIGINAL worldEnvironment() packed Float32Array; never sample fabricated palette. */
  setOriginalLighting(packed:Float32Array,useNativeSun=false,drawAtmosphere=false){
    this.validate();
@@ -431,6 +451,10 @@ export class OriginalWorldWebgl2 {
    this.gl.deleteVertexArray(s.vao);this.used-=s.bytes;this.entries.delete(id);
  }
  set(id:string,geometry:Geometry|null){
+   if(this.lost&&!this.disposed&&geometry===null){
+     this.retire(id);
+     return;
+   }
    this.validate();
    if(!id||id.length>512)throw Error("Invalid original SRO geometry id");
    if(!geometry){this.retire(id);return;}

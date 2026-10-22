@@ -10,6 +10,31 @@
 - The original native renderer is defined in `apps/client-next/src/engine/runtime/renderer/renderer.ts`, with the `Renderer` interface at `apps/client-next/src/engine/contracts/runtime.ts`. Low-level WebGPU is in `runtime/renderer/device/*`, `surface/*`, `frame/*`. The active engine currently uses WebGPU shaders/resources/compute.
 - The existing isolated TEST SROPACK2 CDN contains the genuine intro, dock, Europe and China scene manifests and region bundles. This is not missing source art.
 
+## Updated integration decision — reuse the ENTIRE old renderer (2026-10-22)
+
+The original `createRenderer()` already implements the native world, character,
+picking, video, animation state and UI presentation contract. **Do not create
+37 duplicate gameplay-facing renderer functions in the WebGL2 experiments.**
+The separate `createOriginalSilkroadWebgl2()` remains a GPU pixel/parity test,
+**not** the shipping replacement for the old client.
+
+The isolated TEST checkout now exposes three injectable factories inside the
+genuine original `renderer.ts`: `createDevice`, `createSurface`, and
+`createFrame` (patched by
+`scripts/attach-original-graphics-backend.mjs`).
+`src/original-native-renderer-adapter.ts` binds these to the original
+`startRuntime(..., renderBackend)` injection created in the previous step.
+With the default factories, the native WebGPU client continues exactly as before.
+
+**No WebGL2 backend is accepted until its factories meet all of
+`DeviceOwner`, `SurfaceOwner` and `FrameOwner` from the original
+`internal/gpu-contract.ts`.** Those internal contracts still contain WebGPU
+encoders/render bundles, so their GL implementations must adapt equivalent
+commands instead of casting a GL context into `GPUDevice`. The existing
+world/character/UI/gameplay owners are kept intact. Current graphics factory
+injection is typed and CI-tested, but the GL implementations are **not yet
+complete** and gameplay release remains blocked.
+
 ## Required direct reconnect approach
 
 1. **Clone the exact old HieuSRO GPU build pipeline into an isolated TEST target**, with the same original source commit and same game-specific patches, WITHOUT overwriting any old deployed service, GAMEWORLD, account or character data.

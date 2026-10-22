@@ -13,8 +13,8 @@ import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lightin
 import {originalBlendPair} from "./original-blend-webgl2";
 import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
-interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;decal:boolean;groundDecal:boolean;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;maskVbo:WebGLBuffer|null;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;frames:readonly string[];blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;decal:boolean;groundDecal:boolean;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 precision highp int;
@@ -418,7 +418,8 @@ export class OriginalWorldWebgl2 {
  }
  private retire(id:string){
    const s=this.entries.get(id);if(!s)return;
-   this.gl.deleteBuffer(s.vbo);this.gl.deleteBuffer(s.ebo);
+   this.gl.deleteBuffer(s.vbo);if(s.maskVbo)this.gl.deleteBuffer(s.maskVbo);
+   this.gl.deleteBuffer(s.ebo);
    this.gl.deleteBuffer(s.instanceVbo);this.gl.deleteBuffer(s.opacityVbo);
    this.gl.deleteVertexArray(s.vao);this.used-=s.bytes;this.entries.delete(id);
  }
@@ -456,10 +457,12 @@ export class OriginalWorldWebgl2 {
    if(this.used+accounted>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
    const gl=this.gl;
    const vao=gl.createVertexArray(),vbo=gl.createBuffer(),ebo=gl.createBuffer(),
+     maskVbo=row.starMasks?gl.createBuffer():null,
      instanceVbo=gl.createBuffer(),opacityVbo=gl.createBuffer();
-   if(!vao||!vbo||!ebo||!instanceVbo||!opacityVbo){
+   if(!vao||!vbo||!ebo||!instanceVbo||!opacityVbo||(row.starMasks&&!maskVbo)){
      if(vao)gl.deleteVertexArray(vao);
      if(vbo)gl.deleteBuffer(vbo);
+     if(maskVbo)gl.deleteBuffer(maskVbo);
      if(ebo)gl.deleteBuffer(ebo);
      if(instanceVbo)gl.deleteBuffer(instanceVbo);
      if(opacityVbo)gl.deleteBuffer(opacityVbo);
@@ -474,6 +477,12 @@ export class OriginalWorldWebgl2 {
      for(const [attribute,size,offset] of [[0,3,0],[1,3,12],[2,2,24],[3,4,32]]){
        gl.enableVertexAttribArray(attribute!);
        gl.vertexAttribPointer(attribute!,size!,gl.FLOAT,false,48,offset!);
+     }
+     if(maskVbo&&row.starMasks){
+       gl.bindBuffer(gl.ARRAY_BUFFER,maskVbo);
+       gl.bufferData(gl.ARRAY_BUFFER,row.starMasks,gl.STATIC_DRAW);
+       gl.enableVertexAttribArray(9);
+       gl.vertexAttribPointer(9,2,gl.FLOAT,false,8,0);
      }
      // Native OpenSRO world decoder owns a column-major per-instance
      // mapPlacement matrix. GLSL ES 3.00 mat4 occupies four vec4 lanes;
@@ -493,12 +502,13 @@ export class OriginalWorldWebgl2 {
      gl.vertexAttribDivisor(8,1);
      gl.bindVertexArray(null);
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
-     this.entries.set(id,{vao,vbo,ebo,instanceVbo,opacityVbo,instances:row.instanceCount,
+     this.entries.set(id,{vao,vbo,maskVbo,ebo,instanceVbo,opacityVbo,instances:row.instanceCount,
        capacity:row.instanceCount,sourceByteSize:row.byteSize,
        count:row.indices.length,vertexCount:row.vertexCount,indexCapacity:row.indices.length,transform:row.transform,
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
        bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",
+       frames:geometry.material?.sky===4?geometry.material.frames??[]:[],
        blend:(geometry.material?.blend??false)||(material?.objectFade??false)||
          !!material?.lightmap||!!material?.decal||!!material?.groundDecal,
        blendPair:material?.lightmap?{source:1,destination:3}:
@@ -524,7 +534,8 @@ export class OriginalWorldWebgl2 {
        objectVertexLighting:material?.objectLight!==undefined});
      this.used+=accounted;
    }catch(e){gl.deleteVertexArray(vao);gl.deleteBuffer(vbo);gl.deleteBuffer(ebo);
-     gl.deleteBuffer(instanceVbo);gl.deleteBuffer(opacityVbo);throw e;}
+     gl.deleteBuffer(instanceVbo);gl.deleteBuffer(opacityVbo);
+     if(maskVbo)gl.deleteBuffer(maskVbo);throw e;}
  }
  render(cameraMatrix:Float32Array,sceneIds:readonly string[]){
    this.validate();

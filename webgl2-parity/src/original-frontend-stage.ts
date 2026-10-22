@@ -305,7 +305,11 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         const geo=entry.geometry,material=geo.material;
         // Real OpenSRO pick alpha and per-instance navmesh offsets are
         // required for these cases: never claim a solid hit without them.
-        if(geo.instances||(material?.alphaCutoff??0)>0||
+        if(geo.instances||material?.blend||material?.textureAlpha||
+           material?.surfaceAlpha||material?.textureFactorPulse||
+           material?.alphaCompare!==undefined||
+           (material?.textureFactor?.[3]??1)<1||
+           (material?.alphaCutoff??0)>0||
            (material?.color?.[3]??1)<1)continue;
         const depth=pickGeometry(ray,geo,geo.transform,undefined,{});
         if(depth!==null&&(!best||depth<best.depth))

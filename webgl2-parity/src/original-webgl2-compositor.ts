@@ -45,6 +45,9 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   let stageGroupById=new Map<string,ReturnType<typeof stage.activeGroups>[number]>();
   let sortedStageEntries:ReturnType<typeof stage.drawEntries>=[];
   let nativeFrameIndex=0,nativeLastSeconds:number|null=null;
+  // Picking can only use the camera matrix from the LAST successfully
+  // presented original GL frame. Never pick actors in an unpainted scene.
+  let lastRenderedPickView:Float32Array|null=null;
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
   return {
@@ -54,7 +57,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     cancelWorldUpdate:stage.cancelWorldUpdate,
     setWorld(scene:import("@/engine/contracts/scene").WorldScene|null){
       assert();
-      if(scene===null){stage.clearWorld();return;}
+      if(scene===null){stage.clearWorld();lastRenderedPickView=null;return;}
       // The original session publishes a real WorldScene here, not a new
       // login/scene implementation. Feed the exact source arrays into the
       // already validated one-use GPU admission path.
@@ -68,7 +71,16 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     setCharacterModel(id:string,model:CharacterModel,images:WorldTexture[]){
       assert();characters.retainModel(id,model,images);
     },
-    setCharacterActors(actors:readonly CharacterActor[]){assert();characters.setActors(actors);},
+    setCharacterActors(actors:readonly CharacterActor[]){assert();characters.setActors(actors);}, 
+    /** Original frontend roster selection against last painted CPU-skinned
+     * triangles. Uses pinned OpenSRO pickRay()/pickGeometry(), not GPU
+     * color-coded mock IDs; alpha-masked retail picks still need porting.
+     */
+    pickFrontendCharacter(x:number,y:number,ids:readonly number[]){
+      assert();
+      if(!lastRenderedPickView)return null;
+      return characters.pickRenderedActor(lastRenderedPickView,x,y,new Set(ids))?.gid??null;
+    },
     setWorldCamera(camera:WorldCamera){assert();titleCamera=camera;},
     /** Processes a single authentic world lease, never fakes GameWorld success. */
     originalFrontendFrame(maxUploads=2,originalSeconds=0){
@@ -137,6 +149,10 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       // WorldRenderStats.visibleGroups. Runtime must not infer readiness
       // from prepared-but-never-drawn title or GameWorld mesh uploads.
       stage.recordFrame(stageIds.length,world.authoredTriangles(stageIds));
+      // Promote camera ownership after GL world+HUD submission succeeds.
+      // Note: selecting the inventory doll or alpha-masked mesh is separately
+      // gated; this method only resolves real solid rendered actor triangles.
+      lastRenderedPickView=matrix.slice();
       return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),
         characters:characters.stats(),gpuResidency:world.residencyStats()};
     },
@@ -156,6 +172,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     },
     dispose(){
       if(disposed)return;disposed=true;
+      lastRenderedPickView=null;
       visibleGroupSet?.dispose();bridge.dispose();characters.dispose();stage.dispose();
       ui.dispose();glFrame.dispose();glSurface.dispose();glDevice.dispose();world.dispose();
     }

@@ -680,6 +680,20 @@ export class OriginalWorldWebgl2 {
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original World WebGL2 draw failed");
    return {triangleCount:triangles,geometryCount:sceneIds.length,residentMB:this.used/1048576};
  }
+ /** Exact triangles in successfully admitted original scene groups.
+  * This excludes character primitives, keeping original WorldRenderStats
+  * distinct from the renderer's all-pass triangle count.
+  */
+ authoredTriangles(ids:readonly string[]):number{
+   this.validate();
+   let count=0;
+   for(const id of ids){
+     const group=this.entries.get(id);
+     if(!group)throw Error("Cannot inspect unadmitted original world group: "+id);
+     count+=group.count/3*group.instances;
+   }
+   return count;
+ }
  /** Pandora-inspired read-only GPU residency diagnostics, in browser memory.
   * These are logical allocations and pending original assets, not a claim
   * about the iPhone process's physical GPU or WebKit memory use.

@@ -81,6 +81,10 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       // Never substitute a custom ambient/sun/clock for the original.
       const nativeEnvironment=worldEnvironment(
         stage.activeEnvironment(),titleCamera,aspect,originalSeconds);
+      // Identical to original world.render(): sky star quad offsets are
+      // exactly one pixel in clip space per old asset's maskUV coordinate.
+      nativeEnvironment[57]=1/Math.max(1,canvas.width);
+      nativeEnvironment[58]=1/Math.max(1,canvas.height);
       // Native OpenSRO source environment controls the zenith/horizon.
       // Do not draw synthetic sky in a cleared/out-of-world scene.
       world.setOriginalLighting(nativeEnvironment,false,

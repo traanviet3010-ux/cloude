@@ -18,7 +18,7 @@ export function createOriginalGlFrame(device:OriginalGlDevice,surface:OriginalGl
  const render=<TScene,THud>(inputs:OriginalGlFrameInputs<TScene,THud>)=>{
    if(disposed)throw Error("Original GL frame coordinator disposed");
    device.assert();
-   surface.resize(inputs.width,inputs.height);
+   surface.acquire({width:inputs.width,height:inputs.height});
    device.beginFrame();
    let scene!:TScene;
    let hud!:THud;
@@ -27,7 +27,7 @@ export function createOriginalGlFrame(device:OriginalGlDevice,surface:OriginalGl
      // Native WorldScene GL renderer retains its own shader/material selection
      // and clears the target at the beginning of the main world pass.
      scene=inputs.world();
-     surface.presentScene();
+     surface.encodePresent();
      // Hud layers must follow the world resolve, never vice versa.
      hud=inputs.hud();
      return {scene,hud};

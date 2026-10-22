@@ -133,8 +133,11 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
         world:()=>world.render(matrix,[...stageIds,...actorIds]),
         hud:()=>bridge.draw()
       });
-      return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),characters:characters.stats()};
+      return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),
+        characters:characters.stats(),gpuResidency:world.residencyStats()};
     },
+    /** Read-only mobile diagnostics; no extra GPU readback or network calls. */
+    gpuResidency(){assert();return {world:world.residencyStats(),ui:ui.stats()};},
     setOriginalUiTexture(id:string,image:ImageBitmap|ImageData|NativeTexture|null){assert();ui.setTexture(id,image);},
     frame(originalCamera:Float32Array,originalWorldGroups:readonly string[],originalUi:UiScene){
       assert();
@@ -145,7 +148,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
         world:()=>world.render(originalCamera,originalWorldGroups),
         hud:()=>ui.draw(originalUi,false)
       });
-      return {...scene,ui:ui.stats()};
+      return {...scene,ui:ui.stats(),gpuResidency:world.residencyStats()};
     },
     dispose(){
       if(disposed)return;disposed=true;

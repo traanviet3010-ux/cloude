@@ -12,7 +12,7 @@ await build({
  plugins:[{
   name:"original-renderer-contract-fixture",
   setup(builder){
-   builder.onResolve({filter:/^@\\/engine\\/runtime\\/renderer\\/renderer$/},
+   builder.onResolve({filter:/^@\/engine\/runtime\/renderer\/renderer$/},
      ()=>({path:"old-sro-renderer",namespace:"native"}));
    builder.onLoad({filter:/.*/,namespace:"native"},
      ()=>({contents:"export function createRenderer(...args){return {args, source:'ORIGINAL_OLD_RENDERER'};}",loader:"js"}));

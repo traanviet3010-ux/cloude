@@ -15,6 +15,7 @@ type UiConsumer = {
     import("@/engine/contracts/texture").NativeTexture | null): void;
   draw(scene: UiScene, clearBackground?: boolean): void;
   stats(): { residentMB: number; textureCount: number; drawCalls: number; frame: number };
+  protectUiScene?(scene: UiScene | null): void;
 };
 
 export function createOriginalUiBridge(consumer: UiConsumer) {
@@ -39,6 +40,9 @@ export function createOriginalUiBridge(consumer: UiConsumer) {
         !Number.isFinite(scene.height))) {
       throw new Error("Original Silkroad UiScene frame invalid");
     }
+    // Keep old already-painted CIF images alive while the original
+    // asynchronously publishes the next authentic title/HUD texture set.
+    consumer.protectUiScene?.(scene);
     lastScene = scene;
     updates++;
   };

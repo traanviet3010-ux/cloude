@@ -48,6 +48,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   // Picking can only use the camera matrix from the LAST successfully
   // presented original GL frame. Never pick actors in an unpainted scene.
   let lastRenderedPickView:Float32Array|null=null;
+  let lastRenderedStageIds=new Set<string>();
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
   return {
@@ -57,7 +58,9 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     cancelWorldUpdate:stage.cancelWorldUpdate,
     setWorld(scene:import("@/engine/contracts/scene").WorldScene|null){
       assert();
-      if(scene===null){stage.clearWorld();lastRenderedPickView=null;return;}
+      if(scene===null){
+        stage.clearWorld();lastRenderedPickView=null;lastRenderedStageIds.clear();return;
+      }
       // The original session publishes a real WorldScene here, not a new
       // login/scene implementation. Feed the exact source arrays into the
       // already validated one-use GPU admission path.
@@ -96,12 +99,20 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       return characters.pickRenderedEntityFan(lastRenderedPickView,x,y,
         canvas.width,canvas.height,new Set(excluded));
     },
+    /** Strictly native opaque static WorldGroup hit; the original SceneOwner
+     * picks terrain/navmesh/gates separately once their actual backends land.
+     */
+    pickRenderedScenery(x:number,y:number){
+      assert();
+      if(!lastRenderedPickView)return null;
+      return stage.pickStaticGroup(lastRenderedPickView,x,y,lastRenderedStageIds);
+    },
     setWorldCamera(camera:WorldCamera){assert();titleCamera=camera;},
     /** Processes a single authentic world lease, never fakes GameWorld success. */
     originalFrontendFrame(maxUploads=2,originalSeconds=0){
       assert();
       if(!titleCamera)throw Error("Original Silkroad frontend camera not available");
-      lastRenderedPickView=null;
+      lastRenderedPickView=null;lastRenderedStageIds.clear();
       stage.step(maxUploads);
       const aspect=canvas.width/Math.max(1,canvas.height);
       // The packed world lighting is produced by the EXACT OpenSRO owner,
@@ -169,6 +180,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       // Note: selecting the inventory doll or alpha-masked mesh is separately
       // gated; this method only resolves real solid rendered actor triangles.
       lastRenderedPickView=matrix.slice();
+      lastRenderedStageIds=new Set(stageIds);
       return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),
         characters:characters.stats(),gpuResidency:world.residencyStats()};
     },
@@ -188,7 +200,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     },
     dispose(){
       if(disposed)return;disposed=true;
-      lastRenderedPickView=null;
+      lastRenderedPickView=null;lastRenderedStageIds.clear();
       visibleGroupSet?.dispose();bridge.dispose();characters.dispose();stage.dispose();
       ui.dispose();glFrame.dispose();glSurface.dispose();glDevice.dispose();world.dispose();
     }

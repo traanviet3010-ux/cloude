@@ -44,6 +44,15 @@ type Op=
   |{type:"end"};
 
 function finite(v:readonly number[]){return v.every(Number.isFinite);}
+function snapshotDraw(draw:OriginalGlDraw):OriginalGlDraw{
+ return Object.freeze({...draw,blend:draw.blend?
+   Object.freeze({...draw.blend,constant:draw.blend.constant?
+     Object.freeze([...draw.blend.constant] as [number,number,number,number]):undefined}):undefined});
+}
+function snapshotPass(pass:OriginalGlPass):OriginalGlPass{
+ return Object.freeze({...pass,clearColor:pass.clearColor?
+   Object.freeze([...pass.clearColor] as [number,number,number,number]):undefined});
+}
 export function createOriginalGlGpuCommands(device:OriginalGlDevice){
  const {gl}=device;
  let disposed=false,commandIndex=0,submissions=0,drawCalls=0;
@@ -60,7 +69,7 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
        if(!Number.isSafeInteger(draw.count)||draw.count<0||
          !Number.isSafeInteger(draw.instances)||draw.instances<0)
          throw Error("Original GPU render bundle contains invalid draw");
-       draws.push(draw);
+       draws.push(snapshotDraw(draw));
      },
      finish():OriginalGlRenderBundle{
        assert();
@@ -88,7 +97,7 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
            options.clearDepth<0||options.clearDepth>1))
           throw Error("Original GPU render pass descriptor invalid");
        pass=true;
-       ops.push({type:"pass",options});
+       ops.push({type:"pass",options:snapshotPass(options)});
        return {
          drawIndexed(draw:OriginalGlDraw){
            active();if(!pass)throw Error("Native GPU pass not active");
@@ -97,14 +106,24 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
              !Number.isSafeInteger(draw.instances)||draw.instances<0||
              !Number.isSafeInteger(draw.firstIndex??0)||(draw.firstIndex??0)<0||
              draw.blend && (
-               !Number.isInteger(draw.blend.source)||!Number.isInteger(draw.blend.destination)||
+               ![gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,
+                 gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,
+                 gl.ONE_MINUS_DST_ALPHA,gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,
+                 gl.SRC_ALPHA_SATURATE,gl.CONSTANT_COLOR,
+                 gl.ONE_MINUS_CONSTANT_COLOR,gl.CONSTANT_ALPHA,
+                 gl.ONE_MINUS_CONSTANT_ALPHA].includes(draw.blend.source)||
+               ![gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,
+                 gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,
+                 gl.ONE_MINUS_DST_ALPHA,gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,
+                 gl.CONSTANT_COLOR,gl.ONE_MINUS_CONSTANT_COLOR,
+                 gl.CONSTANT_ALPHA,gl.ONE_MINUS_CONSTANT_ALPHA].includes(draw.blend.destination)||
                draw.blend.constant && (
                  draw.blend.constant.length!==4||!finite(draw.blend.constant)||
                  draw.blend.constant.some(v=>v<0||v>1)
                )
              ))
              throw Error("Invalid native WebGL2 indexed draw submission");
-           ops.push({type:"draw",draw});
+           ops.push({type:"draw",draw:snapshotDraw(draw)});
          },
          executeBundles(bundles:readonly OriginalGlRenderBundle[]){
            active();if(!pass)throw Error("Original GPU pass not active");
@@ -119,7 +138,8 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
            if(rect && (rect.length!==4||!rect.every(Number.isSafeInteger)||
              rect.some(v=>v<0)||rect[2]===0||rect[3]===0))
              throw Error("Original GL scissor invalid");
-           ops.push({type:"scissor",rect});
+           ops.push({type:"scissor",rect:rect?
+             Object.freeze([...rect] as [number,number,number,number]):null});
          },
          end(){active();if(!pass)throw Error("Original GPU render pass already ended");
            pass=false;ops.push({type:"end"});}

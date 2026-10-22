@@ -355,3 +355,66 @@ test("world readiness counters become positive only after an actual successful n
  assert.equal(bridge.worldStats().triangles,0);
  bridge.dispose();
 });
+
+
+test("original title-to-dock stage releases obsolete GPU images, retaining shared native DDS handles",()=>{
+ const w=renderer(),stage=createOriginalStageBridge(w);
+ const file=(id,path)=>group(id,{geometry:{...mesh(),
+   uvs:new Float32Array([0,0,1,0,0,1])},
+   material:{...material(),texture:path}});
+ const keep="/assets/sro/shared.dds",intro="/assets/sro/title.dds",
+   dock="/assets/sro/dock.dds";
+ const upload=path=>stage.setWorldTexture(path,{width:1,height:1});
+ stage.adoptWorld(lease("authentic-old-title",[
+   file("title-only",intro),file("shared-title",keep)
+ ]));
+ upload(intro);upload(keep);stage.step(2);
+ assert.equal(w.textures.size,2);
+ stage.recordFrame(2,2);
+ stage.adoptWorld(lease("authentic-next-dock",[
+   file("shared-dock",keep),file("dock-only",dock)
+ ]));
+ upload(dock);
+ stage.step(1);
+ assert.deepEqual([...w.textures.keys()].sort(),[intro,keep,dock].sort(),
+   "The previous original title image remains resident while dock admission is incomplete");
+ assert.equal(stage.worldStats().sceneId,null);
+ stage.step(1);
+ assert.equal(stage.worldStats().sceneId,"authentic-next-dock");
+ assert.deepEqual([...w.textures.keys()].sort(),[keep,dock].sort(),
+   "Free only unreachable original title GPU images");
+ assert.equal(w.textures.has(keep),true,
+   "The same original DDS referenced by both complete native stages retains its handle");
+ stage.clearWorld();
+ assert.equal(w.textures.size,0,
+   "GameWorld entry must free unreferenced title/character-dock GPU images");
+ assert.equal(w.present.size,0);
+ stage.dispose();
+});
+
+test("cancel and failed original native stage uploads never release an active stage image",()=>{
+ const w=renderer(),stage=createOriginalStageBridge(w);
+ const file=(id,path)=>group(id,{geometry:{...mesh(),
+   uvs:new Float32Array([0,0,1,0,0,1])},
+   material:{...material(),texture:path}});
+ const shared="/assets/sro/retained.dds",pending="/assets/sro/abandoned.dds";
+ stage.adoptWorld(lease("original-old",[file("old",shared)]));
+ stage.setWorldTexture(shared,{width:1,height:1});
+ stage.step();
+ assert.equal(stage.worldStats().sceneId,"original-old");
+ stage.adoptWorld(lease("original-pending",[
+   file("new-shared",shared),file("new-only",pending)
+ ]));
+ stage.setWorldTexture(pending,{width:1,height:1});
+ stage.step(1);
+ stage.cancelWorldUpdate();
+ assert.deepEqual([...w.textures.keys()],[shared],
+   "Native canceled next-screen uploads must be destroyed but shared old texture retained");
+ assert.deepEqual(stage.drawIds(),["old"]);
+ stage.adoptWorld(lease("next-tried-again",[file("other",pending)]));
+ stage.setWorldTexture(pending,{width:1,height:1});
+ stage.cancelWorldUpdate();
+ assert.deepEqual([...w.textures.keys()],[shared]);
+ stage.dispose();
+ assert.equal(w.textures.size,0);
+});

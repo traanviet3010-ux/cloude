@@ -15,7 +15,7 @@ import { OriginalWorldWebgl2 } from "./native-world-webgl2";
 type Stage = {
   readonly sceneId:string;
   readonly groups:readonly import("@/engine/contracts/scene").WorldGroup[];
-  readonly entries:readonly {id:string;geometry:import("@/engine/contracts/geometry").Geometry}[];
+  readonly entries:readonly {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry}[];
   cursor:number;
   texturePaths:readonly string[];
   originRegion:number;
@@ -30,6 +30,8 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   let originRegion:number|null=null;
   let activeEnvironment:import("@/engine/contracts/scene").WorldEnvironment|undefined;
   let readyIds:string[]=[];
+  let readyEntries:Stage["entries"]=[];
+  let namespace=0;
   let activeGroups:readonly import("@/engine/contracts/scene").WorldGroup[]=[];
   let disposed=false;
   let error:string|null=null;
@@ -46,13 +48,22 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     if(!Number.isSafeInteger(prepared.bytes)||prepared.bytes<0||
        prepared.bytes>MAX_PENDING_BYTES||prepared.scene.groups.length>MAX_GROUPS)
       throw Error("Original stage asset payload exceeds admission budget");
-    const entries: {id:string;geometry:import("@/engine/contracts/geometry").Geometry}[]=[];
+    const entries: {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry}[]=[];
+    const existingKeys=new Set(readyIds),newKeys=new Set<string>();
     const seen=new Set<string>(), required=new Set<string>();
     let bytes=0;
     for(const g of prepared.scene.groups){
       if(!g.id||seen.has(g.id))throw Error("Original scene has duplicate/empty group ID");
-      if(readyIds.includes(g.id))throw Error("Original stage shares resident group id; safe atomic replacement not yet supported: "+g.id);
       seen.add(g.id);
+      // A new authentic scene may reuse old WorldGroup IDs. Do not replace
+      // a live GPU mesh until the complete next scene is ready to publish.
+      let key=g.id;
+      if(existingKeys.has(key)||newKeys.has(key)){
+        do{key="__native_scene_"+(++namespace)+":"+g.id;}
+        while(existingKeys.has(key)||newKeys.has(key));
+      }
+      if(key.length>512)throw Error("Native stage GPU key exceeds renderer limit");
+      newKeys.add(key);
       if(g.visibility && (
         !g.geometry.instances || !g.instanceRadius ||
         g.visibility.length>g.geometry.instances.length/16
@@ -67,7 +78,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       if(g.material.texture)required.add(g.material.texture);
       bytes+=native.byteSize;
       if(bytes>MAX_PENDING_BYTES)throw Error("Original stage exceeds GPU budget");
-      entries.push({id:g.id,geometry:mesh});
+      entries.push({id:g.id,key,geometry:mesh});
     }
     const requiredPaths=[...required];
     world.protectPendingTextures(requiredPaths);
@@ -85,15 +96,15 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     try{
       while(n<maxGroups&&task.cursor<task.entries.length){
         const g=task.entries[task.cursor]!;
-        world.set(g.id,g.geometry);
+        world.set(g.key,g.geometry);
         task.cursor++;n++;
       }
       if(task.cursor===task.entries.length){
         // Atomic visible stage transition: old stage stays visible
         // throughout admission; publish new draw-order only on completion.
-        const nextIds=task.entries.map(g=>g.id);
+        const nextIds=task.entries.map(g=>g.key);
         for(const old of readyIds)if(!nextIds.includes(old))world.set(old,null);
-        readyIds=nextIds;sceneId=task.sceneId;activeGroups=task.groups;originRegion=task.originRegion;
+        readyIds=nextIds;readyEntries=task.entries;sceneId=task.sceneId;activeGroups=task.groups;originRegion=task.originRegion;
         activeEnvironment=task.environment;pending=null;
         world.protectPendingTextures([]);
       }
@@ -101,8 +112,8 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     }catch(e){
       error=String(e);
       for(let i=0;i<task.cursor;i++){
-        const id=task.entries[i]!.id;
-        if(!readyIds.includes(id))world.set(id,null);
+        const key=task.entries[i]!.key;
+        if(!readyIds.includes(key))world.set(key,null);
       }
       pending=null;
       world.protectPendingTextures([]);
@@ -113,8 +124,8 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     check();
     if(!pending)return;
     for(let i=0;i<pending.cursor;i++){
-      const id=pending.entries[i]!.id;
-      if(!readyIds.includes(id))world.set(id,null);
+      const key=pending.entries[i]!.key;
+      if(!readyIds.includes(key))world.set(key,null);
     }
     pending=null;
     world.protectPendingTextures([]);
@@ -128,13 +139,13 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     check();
     if(pending){
       for(let i=0;i<pending.cursor;i++){
-        const id=pending.entries[i]!.id;
-        if(!readyIds.includes(id))world.set(id,null);
+        const key=pending.entries[i]!.key;
+        if(!readyIds.includes(key))world.set(key,null);
       }
       pending=null;
     }
     for(const id of readyIds)world.set(id,null);
-    readyIds=[];activeGroups=[];sceneId=null;originRegion=null;
+    readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;
     activeEnvironment=undefined;error=null;
     world.protectPendingTextures([]);
   }
@@ -159,6 +170,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   return {
     adoptWorld,cancelWorldUpdate,clearWorld,neededWorldTextures,setWorldTexture,worldStats,step,
     drawIds:()=>{check();return [...readyIds];},
+    drawEntries:()=>{check();return readyEntries.map(({id,key})=>({id,key}));},
     activeGroups:()=>{check();return activeGroups;},
     originRegion:()=>{check();return originRegion;},
     activeEnvironment:()=>{check();return activeEnvironment;},
@@ -166,11 +178,11 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     dispose(){
       if(disposed)return;
       if(pending)for(let i=0;i<pending.cursor;i++){
-        const id=pending.entries[i]!.id;
-        if(!readyIds.includes(id))world.set(id,null);
+        const key=pending.entries[i]!.key;
+        if(!readyIds.includes(key))world.set(key,null);
       }
       for(const id of readyIds)world.set(id,null);
-      pending=null;readyIds=[];activeGroups=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
+      pending=null;readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
       world.protectPendingTextures([]);
     }
   };

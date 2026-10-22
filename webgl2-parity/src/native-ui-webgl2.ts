@@ -9,7 +9,7 @@ import {nativeLevelBytes,unpackNativeTexture} from "./native-texture";
 import { compileNativeUi } from "./native-ui-commands";
 type Image = ImageBitmap | ImageData | NativeTexture;
 interface Resident { texture:WebGLTexture;width:number;height:number;bytes:number;lastFrame:number; }
-export type UiGpuStats={residentMB:number;textureCount:number;drawCalls:number;frame:number;missingQuads:number};
+export type UiGpuStats={residentMB:number;textureCount:number;drawCalls:number;frame:number;missingQuads:number;evictions:number;failedUploads:number};
 const VERTEX = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aPosition;
@@ -62,9 +62,12 @@ export class NativeUiWebgl2Renderer {
   private frameNo=0;
   private calls=0;
   private missingQuads=0;
+  private evictions=0;
+  private failedUploads=0;
   private closed=false;
   private readonly budgetBytes:number;
   private readonly onLost=(event:Event)=>{event.preventDefault();this.lost=true;};
+  private readonly onRestored=()=>{this.lost=true;};
   private lost=false;
   constructor(private readonly canvas:HTMLCanvasElement, budgetMB?:number, sharedGl?:WebGL2RenderingContext) {
     const gl=sharedGl??canvas.getContext("webgl2",{alpha:true,antialias:false,stencil:false,
@@ -101,34 +104,61 @@ export class NativeUiWebgl2Renderer {
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     canvas.addEventListener("webglcontextlost",this.onLost,false);
-    canvas.addEventListener("webglcontextrestored",()=>{this.lost=true;}, {once:true});
+    canvas.addEventListener("webglcontextrestored",this.onRestored);
   }
-  /** Textures come only from the native OpenSRO asset owner. No browser URLs or fake art. */
+  /** UI/CIF artwork comes only from the original OpenSRO asset owner.
+   * Publish new GPU texels atomically, like the native world texture pool.
+   * An OOM, corrupt original mip or protected-HUD budget failure must not
+   * destroy the old visible Silkroad login/skill/inventory artwork.
+   */
   setTexture(id:string,image:Image|null){
     if(this.closed||this.lost)throw Error("Native UI WebGL2 renderer is closed/lost");
     if(!id)throw Error("Native UI texture key missing");
     const gl=this.gl;
     const prior=this.textures.get(id);
-    if(prior){gl.deleteTexture(prior.texture);this.used-=prior.bytes;this.textures.delete(id);}
-    if(!image)return;
+    if(!image){
+      if(prior){gl.deleteTexture(prior.texture);this.used-=prior.bytes;this.textures.delete(id);}
+      return;
+    }
     const width=image.width,height=image.height;
     if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<=0||height<=0||
-      width>gl.getParameter(gl.MAX_TEXTURE_SIZE)||height>gl.getParameter(gl.MAX_TEXTURE_SIZE))
+       width>gl.getParameter(gl.MAX_TEXTURE_SIZE)||height>gl.getParameter(gl.MAX_TEXTURE_SIZE)){
+      this.failedUploads++;
       throw Error("Native UI texture dimensions unsupported");
+    }
     const native="kind" in image&&image.kind==="native-texture";
     const rawLevel=native?image.levels[0]:undefined;
     const expected=native?nativeLevelBytes(image.format,width,height):0;
-    if(native&&(!rawLevel||rawLevel.byteLength!==expected))
+    if(native&&(!rawLevel||rawLevel.byteLength!==expected)){
+      this.failedUploads++;
       throw Error("Original native UI mip is truncated");
+    }
     const s3tc=native&&image.format!=="bgra8unorm"?
       gl.getExtension("WEBGL_compressed_texture_s3tc"):null;
     const compressed=!!s3tc;
     const bytes=compressed?expected:width*height*4;
-    if(bytes>this.budgetBytes)throw Error("Native UI single texture exceeds GPU budget");
-    const protectedIds=new Set(this.pinned);protectedIds.delete(id);
-    this.evict(bytes,protectedIds);
+    if(bytes>this.budgetBytes){
+      this.failedUploads++;
+      throw Error("Native UI single texture exceeds GPU budget");
+    }
+    // Plan the final-state residency, counting a replacement only once.
+    // Never evict current-frame CIF masks or quads *before* GL success.
+    let projected=this.used-(prior?.bytes??0)+bytes;
+    const victims:Array<readonly [string,Resident]>=[];
+    for(const [key,slot] of [...this.textures].sort((a,b)=>a[1].lastFrame-b[1].lastFrame)){
+      if(projected<=this.budgetBytes)break;
+      if(key===id||this.pinned.has(key))continue;
+      projected-=slot.bytes;victims.push([key,slot]);
+    }
+    if(projected>this.budgetBytes){
+      this.failedUploads++;
+      throw Error("Native UI memory pressure: cannot evict currently protected textures");
+    }
     const tex=gl.createTexture();
-    if(!tex)throw Error("GPU has no memory for native UI texture");
+    if(!tex){
+      this.failedUploads++;
+      throw Error("GPU has no memory for native UI texture");
+    }
     try{
       gl.bindTexture(gl.TEXTURE_2D,tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
@@ -154,19 +184,16 @@ export class NativeUiWebgl2Renderer {
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
       if(gl.getError()!==gl.NO_ERROR)throw Error("Native UI texture upload failed");
+      // This is the ONLY destructive section; all prior GPU state remains
+      // intact if a real Safari/WebGL2 allocation failed.
+      for(const [key,slot] of victims){
+        gl.deleteTexture(slot.texture);this.textures.delete(key);
+        this.used-=slot.bytes;this.evictions++;
+      }
+      if(prior){gl.deleteTexture(prior.texture);this.textures.delete(id);this.used-=prior.bytes;}
       this.textures.set(id,{texture:tex,width,height,bytes,lastFrame:this.frameNo});
       this.used+=bytes;
-    }catch(error){gl.deleteTexture(tex);throw error;}
-  }
-  private evict(required:number,protectedIds:Set<string>){
-    const gl=this.gl;
-    for(const [id,entry] of [...this.textures].sort((a,b)=>a[1].lastFrame-b[1].lastFrame)){
-      if(this.used+required<=this.budgetBytes)break;
-      if(protectedIds.has(id))continue;
-      gl.deleteTexture(entry.texture);this.textures.delete(id);this.used-=entry.bytes;
-    }
-    if(this.used+required>this.budgetBytes)
-      throw Error("Native UI memory pressure: cannot evict currently protected textures");
+    }catch(error){gl.deleteTexture(tex);this.failedUploads++;throw error;}
   }
   draw(scene:UiScene, clearBackground=true){
     if(this.closed||this.lost)throw Error("Native UI renderer unavailable; must be rebuilt after context loss");
@@ -227,10 +254,12 @@ export class NativeUiWebgl2Renderer {
     if(gl.getError()!==gl.NO_ERROR)throw Error("OpenSRO WebGL2 native UI frame failed");
   }
   stats():UiGpuStats{return {residentMB:this.used/1048576,textureCount:this.textures.size,
-    drawCalls:this.calls,frame:this.frameNo,missingQuads:this.missingQuads};}
+    drawCalls:this.calls,frame:this.frameNo,missingQuads:this.missingQuads,
+    evictions:this.evictions,failedUploads:this.failedUploads};}
   dispose(){
     if(this.closed)return;
     this.closed=true;this.canvas.removeEventListener("webglcontextlost",this.onLost);
+    this.canvas.removeEventListener("webglcontextrestored",this.onRestored);
     const gl=this.gl;
     for(const entry of this.textures.values())gl.deleteTexture(entry.texture);
     this.textures.clear();this.pinned.clear();this.used=0;

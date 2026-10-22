@@ -81,6 +81,16 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       if(!lastRenderedPickView)return null;
       return characters.pickRenderedActor(lastRenderedPickView,x,y,new Set(ids))?.gid??null;
     },
+    /** 692680 / 69282B source: exact native 3x3 ray fan with center
+     * priority, limited to solid meshes rendered and GPU-admitted here.
+     * Full game entity pick still also needs native gate/alpha/UI filters.
+     */
+    pickRenderedEntity(x:number,y:number,excluded:readonly number[]=[]){
+      assert();
+      if(!lastRenderedPickView)return null;
+      return characters.pickRenderedEntityFan(lastRenderedPickView,x,y,
+        canvas.width,canvas.height,new Set(excluded));
+    },
     setWorldCamera(camera:WorldCamera){assert();titleCamera=camera;},
     /** Processes a single authentic world lease, never fakes GameWorld success. */
     originalFrontendFrame(maxUploads=2,originalSeconds=0){

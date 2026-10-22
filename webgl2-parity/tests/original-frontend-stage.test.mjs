@@ -211,6 +211,30 @@ test("native original terrain groups are admitted at LOD0 and updated in place w
  stage.dispose();
  assert.equal(w.present.size,0);
 });
+test("authentic outdoor WorldTerrainPart groups join exact original scene origin, no map regeneration",()=>{
+ const world=renderer(),stage=createOriginalStageBridge(world);
+ const city=group("original-city"),terrain=group("original-outdoor-terrain-part");
+ const original=lease("outdoor-region",[city]);
+ const part={region:32,origin:0,groups:[terrain],bytes:1024};
+ stage.adoptWorld(original,"distance",[part]);
+ stage.step(2);
+ assert.equal(original.count(),1);
+ assert.deepEqual(stage.activeGroups(),[city,terrain],
+   "Native scene and terrain part groups retain original source references");
+ assert.equal(stage.worldStats().sceneId,"outdoor-region");
+ assert.deepEqual(stage.drawIds(),["original-city","original-outdoor-terrain-part"]);
+ assert.deepEqual(part.groups,[terrain],"TerrainPart input is not rewritten");
+ stage.dispose();
+ assert.equal(world.present.size,0);
+ const other=createOriginalStageBridge(renderer());
+ assert.throws(()=>other.adoptWorld(lease("wrong-origin",[]),"distance",[
+   {...part,origin:2}
+ ]),/origin mismatch/);
+ assert.throws(()=>other.adoptWorld(lease("duplicate-region",[]),"distance",[
+   part,part
+ ]),/WorldTerrainPart/);
+ other.dispose();
+});
 test("stage lease input bounds and double admissions fail without overwriting the original stage",()=>{
  const w=renderer(),bridge=createOriginalStageBridge(w);
  assert.throws(()=>bridge.adoptWorld(lease("large",[group("x")],200*1024*1024)),/budget/);

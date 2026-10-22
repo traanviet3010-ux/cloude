@@ -79,7 +79,10 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       // Never substitute a custom ambient/sun/clock for the original.
       const nativeEnvironment=worldEnvironment(
         stage.activeEnvironment(),titleCamera,aspect,originalSeconds);
-      world.setOriginalLighting(nativeEnvironment);
+      // Native OpenSRO source environment controls the zenith/horizon.
+      // Do not draw synthetic sky in a cleared/out-of-world scene.
+      world.setOriginalLighting(nativeEnvironment,false,
+        !!stage.activeEnvironment());
       const matrix=viewProjection(titleCamera,aspect);
       const origin=stage.originRegion();
       const groups=stage.activeGroups();

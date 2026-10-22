@@ -1,0 +1,50 @@
+name: Decode real Silkroad 3D scene using pinned original OpenSRO worker
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/tests/real-original-world-decode.integration.mjs"
+      - "webgl2-parity/src/original-terrain-selection.ts"
+      - "webgl2-parity/server/native-pack-reader.mjs"
+      - ".github/workflows/hieusro-real-original-world-decode.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: original-world-decoder-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  genuine-world:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        scene:
+          - /assets/world/constantinople/region-694e.json
+          - /assets/world/constantinople/region-6951.json
+          - /assets/world/constantinople/region-694f.json
+          - /assets/world/china/region-62a8.json
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Verify exact original OpenSRO commit
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
+          cd /tmp/opensro-original
+          git checkout --quiet 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          test "$(git rev-parse HEAD)" = "4f6919d6900d169b89e75647e56c99ca8ebd5cfb"
+      - name: Install esbuild for genuine native asset worker compilation
+        working-directory: webgl2-parity
+        run: npm install --no-audit --no-fund --no-save esbuild@0.28.2
+      - name: Decode actual v1.150 character-select world (no fixtures, no rewriting)
+        working-directory: webgl2-parity
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+          HIEUSRO_TEST_PACK_CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
+          HIEUSRO_NATIVE_SCENE: ${{ matrix.scene }}
+        run: node --max-old-space-size=4096 tests/real-original-world-decode.integration.mjs

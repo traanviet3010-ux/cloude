@@ -1,0 +1,68 @@
+name: HieuSRO Original WebGL2 pixel shader smoke
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/src/**"
+      - "webgl2-parity/tests/native-ui-pixels.mjs"
+      - "webgl2-parity/tests/native-compose-pixels.mjs"
+      - "webgl2-parity/tests/native-terrain-pixels.mjs"
+      - "webgl2-parity/tests/native-atmosphere-blend-pixels.mjs"
+      - "webgl2-parity/tests/native-original-sky-pixels.mjs"
+      - "webgl2-parity/tests/native-sun-cloud-pixels.mjs"
+      - "webgl2-parity/tests/native-star-moon-pixels.mjs"
+      - "webgl2-parity/tests/native-water-frames-pixels.mjs"
+      - "webgl2-parity/tests/native-gl-commands-pixels.mjs"
+      - "webgl2-parity/tests/original-gl-gpu-commands-pixels.mjs"
+      - "webgl2-parity/tests/native-gl-commands-browser-bridge.ts"
+      - "webgl2-parity/tests/native-water-source-bridge.ts"
+      - "webgl2-parity/tests/native-sky-source-bridge.ts"
+      - "webgl2-parity/tests/original-gl-owners-pixels.mjs"
+      - "webgl2-parity/tests/native-lighting-pixels.mjs"
+      - "webgl2-parity/tests/native-alpha-compare-pixels.mjs"
+      - "webgl2-parity/tests/native-residency-atomic-pixels.mjs"
+      - ".github/workflows/hieusro-original-webgl2-pixels.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: original-webgl2-pixels-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ui-actual-gl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '24'}
+      - name: Install browser and compile original UiScene GL shader
+        working-directory: webgl2-parity
+        run: |
+          npm install --no-audit --no-fund --no-save esbuild@0.28.2 playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Checkout exact original SRO camera source for shader readback
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
+          cd /tmp/opensro-original
+          git checkout --quiet 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+      - name: Run actual pixel draw readback, alpha/scissor and GPU cleanup
+        working-directory: webgl2-parity
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        run: |
+          node tests/native-ui-pixels.mjs
+          node tests/native-compose-pixels.mjs
+          node tests/native-terrain-pixels.mjs
+          node tests/native-atmosphere-blend-pixels.mjs
+          node tests/native-original-sky-pixels.mjs
+          node tests/native-sun-cloud-pixels.mjs
+          node tests/native-star-moon-pixels.mjs
+          node tests/native-water-frames-pixels.mjs
+          node tests/native-gl-commands-pixels.mjs
+          node tests/original-gl-gpu-commands-pixels.mjs
+          node tests/original-gl-owners-pixels.mjs
+          node tests/native-lighting-pixels.mjs
+          node tests/native-alpha-compare-pixels.mjs
+          node tests/native-residency-atomic-pixels.mjs

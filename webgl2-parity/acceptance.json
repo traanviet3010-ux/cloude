@@ -1,0 +1,123 @@
+{
+  "purpose": "Port the actual original HieuSRO GPU client to WebGL2 without rewriting UI/gameplay. Each item MUST have linked passing acceptance evidence before a full-game release.",
+  "upstreamCommit": "4f6919d6900d169b89e75647e56c99ca8ebd5cfb",
+  "baselineBranch": "hieusro-auto-skill-icons-20261019",
+  "branch": "hieusro-original-webgl2-parity",
+  "releaseEligible": false,
+  "components": [
+    {
+      "id": "original-title-ui",
+      "source": "apps/client-next/src/engine/runtime/ui/title/title.ts",
+      "status": "pending",
+      "criteria": "Original CIF login/server picker keyboard/touch interactions and original visual layout are identical"
+    },
+    {
+      "id": "character-dock",
+      "source": "apps/client-next/src/engine/runtime/frontend/frontend.ts",
+      "status": "pending",
+      "criteria": "3D EU/CH character preview, equipment, create/select/delete under native session"
+    },
+    {
+      "id": "original-hud",
+      "source": "apps/client-next/src/engine/runtime/ui/ui.ts",
+      "status": "pending",
+      "criteria": "Native original UI quads, masks, 3D dolls, text, minimap, inventory, F10, chat and dialogs pass screenshots+interaction"
+    },
+    {
+      "id": "webgl2-ui-quads",
+      "source": "webgl2-parity/src/native-ui-commands.ts",
+      "status": "partial",
+      "criteria": "Text/quad/color/clip/UV/masks/dolls/world labels original production renderer supported"
+    },
+    {
+      "id": "webgl2-ui-textures",
+      "source": "webgl2-parity/src/native-texture.ts",
+      "status": "partial",
+      "criteria": "All native texture formats, mips, atlases and GPU pressure in Safari verified"
+    },
+    {
+      "id": "terrain",
+      "source": "apps/client-next/src/engine/runtime/renderer/world/world.ts",
+      "status": "pending",
+      "criteria": "Original terrain association layers, splats, shadows and collision projection match"
+    },
+    {
+      "id": "scenery",
+      "source": "apps/client-next/src/engine/runtime/renderer/world/world.ts",
+      "status": "pending",
+      "criteria": "All original bsr scenery geometry and materials render and cull correctly"
+    },
+    {
+      "id": "actors-equipment",
+      "source": "apps/client-next/src/engine/runtime/renderer/characters/characters.ts",
+      "status": "pending",
+      "criteria": "Original mesh, sockets, equipment, pets, mobs, bosses and avatars match"
+    },
+    {
+      "id": "native-animation",
+      "source": "apps/client-next/src/engine/runtime/renderer/device/animation.ts",
+      "status": "pending",
+      "criteria": "WebGL2 CPU skeletal animation fallback passes all directions/skills while respecting iPhone budget"
+    },
+    {
+      "id": "effects-particles",
+      "source": "apps/client-next/src/engine/runtime/renderer/device/particles.ts",
+      "status": "pending",
+      "criteria": "All original effects/blends and skill particle emission with WebGL2 backend"
+    },
+    {
+      "id": "sky-shadows-water",
+      "source": "apps/client-next/src/engine/runtime/renderer/device/finish.ts",
+      "status": "pending",
+      "criteria": "Original lighting, water, HDR fallback, shadows, bloom parity"
+    },
+    {
+      "id": "picking",
+      "source": "apps/client-next/src/engine/runtime/renderer/renderer.ts",
+      "status": "pending",
+      "criteria": "Screen-to-ground/world entity picking including native UI exclusion"
+    },
+    {
+      "id": "realtime-network",
+      "source": "apps/client-next/src/engine/runtime/simulation/worker/network/network.ts",
+      "status": "pending",
+      "criteria": "Original GameWorld v2 persistent WSS, ping, token, resume; no side-channel mock"
+    },
+    {
+      "id": "authoritative-combat",
+      "source": "apps/client-next/src/engine/runtime/simulation/worker/session/world/gameplay/combat/combat.ts",
+      "status": "pending",
+      "criteria": "Original UI and command flow, target, damage, skill, loot server-authoritative"
+    },
+    {
+      "id": "inventory-f10",
+      "source": "apps/client-next/src/engine/runtime/ui/hud/item-mall.ts",
+      "status": "pending",
+      "criteria": "UI and real item/mall transactions fully functional"
+    },
+    {
+      "id": "auto-train",
+      "source": "server-build/hieusro-auto-train.ts",
+      "status": "pending",
+      "criteria": "Original customized Auto Train/Auto Skill picker with no gameplay modification"
+    },
+    {
+      "id": "social",
+      "source": "apps/client-next/src/engine/runtime/ui/hud/guild-manager-hud.ts",
+      "status": "pending",
+      "criteria": "Native guild/party/chat/PvP/quest/menu scenes compared"
+    },
+    {
+      "id": "ios-memory",
+      "source": "webgl2-parity/src/native-ui-webgl2.ts",
+      "status": "pending",
+      "criteria": "20+ minute iPhone 12 Pro Max play, no reload, memory ceiling and context recovery"
+    },
+    {
+      "id": "production-parity",
+      "source": "apps/client-next/src/engine/contracts/runtime.ts",
+      "status": "pending",
+      "criteria": "Human-signed feature audit and replay tests with original GPU baseline"
+    }
+  ]
+}

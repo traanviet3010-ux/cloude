@@ -1,0 +1,32 @@
+name: Audit genuine HieuSRO TEST intro and character assets
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/scripts/audit-original-test-stage.mjs"
+      - ".github/workflows/hieusro-original-test-stage-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit-test-native-scenes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '24'}
+      - name: Read authentic public scene manifests from isolated TEST only
+        working-directory: webgl2-parity
+        env:
+          HIEUSRO_TEST_ASSET_ORIGIN: https://hieusro-icons-preview-20261019.onrender.com
+        run: node scripts/audit-original-test-stage.mjs
+      - name: Keep grounded manifest audit output, including failure report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: original-title-character-test-manifest-audit
+          path: webgl2-parity/native-stage-manifest-audit.json
+          if-no-files-found: warn
+          retention-days: 7

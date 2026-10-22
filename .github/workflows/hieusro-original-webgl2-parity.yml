@@ -1,0 +1,112 @@
+name: HieuSRO Original GPU to WebGL2 parity gate
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/**"
+      - ".github/workflows/hieusro-original-webgl2-parity.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: webgl2-original-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  original-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout isolated original GPU parity branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Node.js for original OpenSRO
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Resolve pinned TypeScript dependencies for pure native UI parity tests
+        run: |
+          cd webgl2-parity
+          npm install --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.28.2
+          # The stage test imports the pinned original OpenSRO terrainLod().
+          # Run it only AFTER that exact source checkout exists.
+          node --test $(find tests -maxdepth 1 -name '*.test.mjs' ! -name 'original-frontend-stage.test.mjs' | sort)
+      - name: Lint read-only original asset recovery contract (never fetch or build proprietary files in CI)
+        run: |
+          bash -n webgl2-parity/scripts/rebuild-original-v150-assets-test.sh
+          node --check webgl2-parity/scripts/verify-native-stage-output.mjs
+          node --check webgl2-parity/scripts/audit-original-test-stage.mjs
+          node --check webgl2-parity/scripts/attach-original-runtime-renderer.mjs
+          node --check webgl2-parity/scripts/attach-original-graphics-backend.mjs
+          node --check webgl2-parity/scripts/audit-original-graphics-backend.mjs
+      - name: Checkout EXACT native HieuSRO GPU engine revision
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none https://github.com/opensro-dev/opensro.git /tmp/opensro-original
+          cd /tmp/opensro-original
+          git checkout --quiet 4f6919d6900d169b89e75647e56c99ca8ebd5cfb
+          test -f apps/client-next/src/engine/runtime/ui/ui.ts
+          test -f apps/client-next/src/engine/runtime/simulation/worker/session/world/world.ts
+          test -f apps/client-next/src/engine/runtime/renderer/renderer.ts
+          test -f apps/client-next/src/engine/contracts/ui.ts
+          test -f apps/client-next/src/engine/contracts/runtime.ts
+          echo 'PINNED_SRO_CLIENT=4f6919d6900d169b89e75647e56c99ca8ebd5cfb'
+      - name: Replay original native intro, login, dock and character creation state machine
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        working-directory: webgl2-parity
+        run: |
+          node --test tests/original-frontend-flow.integration.mjs
+          node --test tests/original-frontend-stage.test.mjs
+          node --test tests/original-frontend-asset-demand.integration.mjs
+      - name: Verify actual pinned OpenSRO CPU skeletal pose and materialized mesh
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        working-directory: webgl2-parity
+        run: |
+          node --test tests/original-character-cpu-skin.integration.mjs
+          node --test tests/original-character-bridge.integration.mjs
+          node --test tests/original-terrain-selection.integration.mjs
+          node --test tests/original-instance-selection.integration.mjs
+      - name: Type-check new WebGL2 owner in real original UI and renderer contracts
+        run: |
+          corepack enable
+          cd /tmp/opensro-original
+          # The pinned pnpm 12.6.0 binary is sometimes rate-limited by npm.
+          # Retry the exact lockfile tool, never silently substitute versions.
+          for attempt in 1 2 3; do
+            if corepack pnpm --version; then break; fi
+            if [ "$attempt" -eq 3 ]; then echo 'PINNED_PNPM_FETCH_FAILED'; exit 1; fi
+            sleep 8
+          done
+          for attempt in 1 2 3; do
+            if corepack pnpm install --frozen-lockfile; then break; fi
+            if [ "$attempt" -eq 3 ]; then echo 'NATIVE_INSTALL_FAILED'; exit 1; fi
+            sleep 8
+          done
+          node "$GITHUB_WORKSPACE/webgl2-parity/scripts/attach-original-runtime-renderer.mjs" /tmp/opensro-original
+          # Original renderer keeps every original gameplay/UI/character/picking
+          # method; only its WebGPU-only device/surface/frame factories vary.
+          node "$GITHUB_WORKSPACE/webgl2-parity/scripts/attach-original-graphics-backend.mjs" /tmp/opensro-original
+          node "$GITHUB_WORKSPACE/webgl2-parity/scripts/audit-original-graphics-backend.mjs" /tmp/opensro-original
+          mkdir -p apps/client-next/src/engine/runtime/renderer/webgl2
+          cp "$GITHUB_WORKSPACE"/webgl2-parity/src/*.ts apps/client-next/src/engine/runtime/renderer/webgl2/
+          corepack pnpm --filter @sro/client-next typecheck
+          echo 'ORIGINAL_UI_WEBGL2_TYPECHECK=PASS'
+      - name: Build the REAL original client with graphics factory seams (TEST compile only)
+        run: |
+          cd /tmp/opensro-original
+          corepack pnpm --filter @sro/client-next build
+          echo 'ORIGINAL_GAME_CLIENT_WITH_GRAPHICS_SEAM_BUILD=PASS'
+      - name: Audit EXACT original renderer methods before declaring game playable
+        working-directory: webgl2-parity
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        run: |
+          node scripts/audit-original-renderer-contract.mjs
+          echo 'NOTE: WebGL2 acceptance remains BLOCKED until Renderer signature, login/world and real iPhone checks pass'
+
+      - name: Verify original gameplay and HUD source were NOT modified
+        run: |
+          cd /tmp/opensro-original
+          git diff --exit-code --             apps/client-next/src/engine/runtime/simulation             apps/client-next/src/engine/runtime/ui             apps/client-next/src/engine/contracts             apps/client-next/src/engine/runtime/frontend             apps/client-next/src/engine/runtime/input
+          echo 'GAMEPLAY_AND_ORIGINAL_UI_UNMODIFIED=PASS'

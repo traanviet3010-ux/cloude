@@ -1,0 +1,34 @@
+name: Inspect HieuSRO genuine TEST SROPACK2 intro assets
+on:
+  push:
+    branches: [hieusro-original-webgl2-parity]
+    paths:
+      - "webgl2-parity/scripts/audit-original-sropack2-test.mjs"
+      - "webgl2-parity/scripts/verify-native-stage-pack-bytes.mjs"
+      - "webgl2-parity/scripts/verify-native-asset-gateway-http.mjs"
+      - "webgl2-parity/scripts/audit-original-stage-bundle.mjs"
+      - "webgl2-parity/scripts/audit-native-silkroad-regions.mjs"
+      - "webgl2-parity/server/**"
+      - ".github/workflows/hieusro-original-pack-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '24'}
+      - name: Read-only check existing TEST asset pack index, no licensed-file downloads
+        env:
+          HIEUSRO_TEST_PACK_CDN: https://hieusro-assets-cdn-test-20261020.onrender.com
+        working-directory: webgl2-parity
+        run: |
+          node scripts/audit-original-sropack2-test.mjs
+          node scripts/verify-native-stage-pack-bytes.mjs
+          node scripts/verify-native-asset-gateway-http.mjs
+          node scripts/audit-native-silkroad-regions.mjs
+          node scripts/audit-original-stage-bundle.mjs

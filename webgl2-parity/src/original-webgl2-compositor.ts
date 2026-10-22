@@ -17,6 +17,7 @@ import {leaseOriginalWorldScene} from "./original-scene-lease";
 import { createOriginalUiBridge } from "./original-ui-runtime-bridge";
 import {createOriginalWebgl2Characters} from "./original-characters-webgl2";
 import {createOriginalInstanceSelection} from "./original-instance-selection";
+import {orderOriginalGpuStageEntries} from "./original-draw-order";
 import {viewProjection} from "@/engine/foundation/rendering/world-math";
 import {worldEnvironment} from "@/engine/foundation/rendering/world-environment";
 import type {WorldCamera} from "@/engine/contracts/scene";
@@ -42,6 +43,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   let visibleGroupSet:ReturnType<typeof createOriginalInstanceSelection>|null=null;
   let selectedSceneGroups:ReturnType<typeof stage.activeGroups>|null=null;
   let stageGroupById=new Map<string,ReturnType<typeof stage.activeGroups>[number]>();
+  let sortedStageEntries:ReturnType<typeof stage.drawEntries>=[];
   let nativeFrameIndex=0,nativeLastSeconds:number|null=null;
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
@@ -91,6 +93,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
         visibleGroupSet=createOriginalInstanceSelection(groups);
         selectedSceneGroups=groups;
         stageGroupById=new Map(groups.map(g=>[g.id,g]));
+        sortedStageEntries=orderOriginalGpuStageEntries(groups,stage.drawEntries());
       }
       const dx=titleCamera.originRegion && origin!==null ?
         ((titleCamera.originRegion&255)-(origin&255))*1920:0;
@@ -108,7 +111,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
       nativeLastSeconds=originalSeconds;
       const selection=visibleGroupSet!.select(localCamera,dt,++nativeFrameIndex);
       const nativeSelected=new Map(selection.map(row=>[row.id,row]));
-      const stageIds=stage.drawEntries().filter(({id,key})=>{
+      const stageIds=sortedStageEntries.filter(({id,key})=>{
         const original=stageGroupById.get(id);
         if(!original || original.instanceRadius===undefined ||
            !!original.ranges || !!original.material.sky)return true;

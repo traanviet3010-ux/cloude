@@ -63,7 +63,8 @@ try{
    const noSky=read(32,60);
    const ground={
      positions:new Float32Array([-.95,-.95,.6,.95,-.95,.6,0,.95,.6]),
-     indices:new Uint32Array([0,1,2]),transform:identity
+     indices:new Uint32Array([0,1,2]),transform:identity,
+     uvs:new Float32Array([0,0,1,0,.5,1])
    };
    renderer.set("original-red-base",{...ground,
      material:{color:[1,0,0,1],unlit:true,doubleSided:true,

@@ -45,6 +45,20 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   let disposed=false;
   let error:string|null=null;
   const check=()=>{if(disposed)throw Error("Original Silkroad WebGL2 stage disposed");};
+  /** All stage-owned sources have arrived through setWorldTexture; the native
+   * world material decoder owns unique asset paths, while character texture
+   * keys use their own "character:" namespace. Only destroy uploads that
+   * became unreachable after a successful stage swap/cancel/world exit.
+   * This runs AFTER retiring old mesh handles, never while they are drawn.
+   */
+  const activeTexturePaths=()=>new Set(readyEntries.flatMap(entry=>entry.textures));
+  function retireTextures(paths:readonly string[],keep:ReadonlySet<string>){
+    for(const path of paths){
+      if(keep.has(path))continue;
+      if(world.hasTexture(path))world.setTexture(path,null);
+    }
+  }
+
   const adoptWorld:Renderer["adoptWorld"]=(lease,detail,terrain)=>{
     check();
     if(pending)throw Error("Cannot replace native stage while GPU admission is pending");
@@ -160,6 +174,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         // Atomic visible stage transition: old stage stays visible
         // throughout admission; publish new draw-order only on completion.
         const nextIds=task.entries.map(g=>g.key);
+        const retiringTexturePaths=[...activeTexturePaths()];
         for(const old of readyIds)if(!nextIds.includes(old))world.set(old,null);
         readyIds=nextIds;readyEntries=task.entries;sceneId=task.sceneId;activeGroups=task.groups;originRegion=task.originRegion;activeDetail=task.detail;
         renderedVisible=0;renderedTriangles=0;
@@ -167,6 +182,10 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         world.protectStageGroups(readyIds);
         activeEnvironment=task.environment;pending=null;
         world.protectPendingTextures([]);
+        // The new complete scene is already published. A texture shared by
+        // both stages retains its handle; original old-only intro/dock art
+        // is retired before entering the authoritative GameWorld.
+        retireTextures(retiringTexturePaths,activeTexturePaths());
       }
       return n;
     }catch(e){
@@ -175,9 +194,12 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         const key=task.entries[i]!.key;
         if(!readyIds.includes(key))world.set(key,null);
       }
+      // Failed stage admission can have streamed texture images that the
+      // original old complete scene never referenced. Drop only those.
       pending=null;
       world.protectPendingTextures([]);
       world.protectStageGroups(readyIds);
+      retireTextures(task.texturePaths,activeTexturePaths());
       throw e;
     }
   }
@@ -188,9 +210,11 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       const key=pending.entries[i]!.key;
       if(!readyIds.includes(key))world.set(key,null);
     }
+    const canceledPaths=pending.texturePaths;
     pending=null;
     world.protectPendingTextures([]);
     world.protectStageGroups(readyIds);
+    retireTextures(canceledPaths,activeTexturePaths());
   };
   /**
    * Native createFrontend() calls renderer.setWorld(null) when leaving the
@@ -199,6 +223,9 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
    */
   function clearWorld(){
     check();
+    const abandonedPaths=[...new Set([
+      ...activeTexturePaths(),...(pending?.texturePaths??[])
+    ])];
     if(pending){
       for(let i=0;i<pending.cursor;i++){
         const key=pending.entries[i]!.key;
@@ -212,6 +239,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     activeEnvironment=undefined;error=null;
     world.protectPendingTextures([]);
     world.protectStageGroups([]);
+    retireTextures(abandonedPaths,new Set());
   }
   const neededWorldTextures:Renderer["neededWorldTextures"]=()=>{
     check();
@@ -278,6 +306,9 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     error:()=>error,
     dispose(){
       if(disposed)return;
+      const abandonedPaths=[...new Set([
+        ...activeTexturePaths(),...(pending?.texturePaths??[])
+      ])];
       if(pending)for(let i=0;i<pending.cursor;i++){
         const key=pending.entries[i]!.key;
         if(!readyIds.includes(key))world.set(key,null);
@@ -287,6 +318,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       terrainCells.clear();
       world.protectPendingTextures([]);
       world.protectStageGroups([]);
+      retireTextures(abandonedPaths,new Set());
     }
   };
 }

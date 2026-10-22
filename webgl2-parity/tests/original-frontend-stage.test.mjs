@@ -24,15 +24,32 @@ function lease(id, groups,bytes=512){
 function group(id,overrides={}){
  return {id,geometry:mesh(),material:material(),center:[0,0,0],radius:1,...overrides};
 }
-function renderer(){
+function renderer(maxSlots=Infinity){
  const present=new Map(),updates=[],textures=new Map();
- let pinned=[];
+ let pinned=[],stageProtected=new Set();
  return {
-   set(id,geom){updates.push([id,geom]);if(geom)present.set(id,geom);else present.delete(id);},
+   set(id,geom){
+     updates.push([id,geom]);
+     if(geom){
+       if(!present.has(id)&&present.size>=maxSlots){
+         const evict=[...present.keys()].find(key=>!stageProtected.has(key));
+         if(evict)present.delete(evict);
+         else throw Error("Native GPU residency limit");
+       }
+       present.set(id,geom);
+     }else present.delete(id);
+   },
    setTexture(path,image){if(image)textures.set(path,image);else textures.delete(path);},
    hasTexture:path=>textures.has(path),
    protectPendingTextures(paths){pinned=[...paths];},
-   getPinned:()=>[...pinned],present,updates,textures
+   protectStageGroups(ids){stageProtected=new Set(ids);},
+   protectStageGroup(id){
+     assert.ok(present.has(id),"Only admitted native meshes can be pinned");
+     stageProtected.add(id);
+   },
+   getPinned:()=>[...pinned],
+   getStageProtected:()=>[...stageProtected],
+   present,updates,textures
  };
 }
 test("genuine OpenSRO one-use scene lease, bounded frame uploads and honest renderer readiness",()=>{
@@ -129,6 +146,23 @@ test("original GPU group ID reused across stages remains atomic during loading a
    "retired GPU stage has no leaked geometry");
  bridge.dispose();
  assert.equal(w.present.size,0);
+});
+test("low GPU budget fails closed without evicting original visible or culled meshes",()=>{
+ const w=renderer(1),bridge=createOriginalStageBridge(w);
+ bridge.adoptWorld(lease("native-intro",[group("shared-native-mesh")]));
+ bridge.step();
+ assert.deepEqual(w.getStageProtected(),["shared-native-mesh"]);
+ bridge.adoptWorld(lease("native-dock",[group("shared-native-mesh")]));
+ assert.throws(()=>bridge.step(),/GPU residency limit/);
+ assert.equal(bridge.worldStats().sceneId,"native-intro");
+ assert.equal(bridge.worldStats().pendingGroups,0);
+ assert.deepEqual(bridge.drawIds(),["shared-native-mesh"]);
+ assert.ok(w.present.has("shared-native-mesh"),
+   "Never evict real title mesh because a new authentic scene uses the same ID");
+ assert.deepEqual(w.getStageProtected(),["shared-native-mesh"]);
+ bridge.clearWorld();
+ assert.deepEqual(w.getStageProtected(),[]);
+ bridge.dispose();
 });
 test("stage lease input bounds and double admissions fail without overwriting the original stage",()=>{
  const w=renderer(),bridge=createOriginalStageBridge(w);

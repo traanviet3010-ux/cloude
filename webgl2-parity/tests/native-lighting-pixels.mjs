@@ -7,7 +7,8 @@ import {build} from "esbuild";
 import {chromium} from "playwright";
 const dir=dirname(fileURLToPath(import.meta.url)),out=join(dir,"lighting-bundle.js");
 await build({entryPoints:[join(dir,"../src/native-world-webgl2.ts")],
-  bundle:true,format:"esm",platform:"browser",target:"es2022",outfile:out});
+  bundle:true,format:"esm",platform:"browser",target:"es2022",outfile:out,
+  alias:{"@":process.env.SRO_SOURCE_ROOT+"/apps/client-next/src"}});
 const server=http.createServer((req,res)=>{
  if(req.url==="/lighting-bundle.js"){
    res.writeHead(200,{"Content-Type":"text/javascript"});

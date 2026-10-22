@@ -125,3 +125,28 @@ test("original actor picking uses most recently rendered skinned model and uncha
  assert.equal(port.pickRenderedActor(matrix,.5,.5),null);
  port.dispose();
 });
+
+
+test("Safari GPU VBO rejection cannot publish pick surfaces from a character animation never drawn",()=>{
+ const world=fakeWorld(),port=createOriginalWebgl2Characters(world);
+ port.retainModel("original-avatar",model(),[{
+   kind:"native-texture",width:1,height:1,format:"bgra8unorm",
+   levels:[new Uint8Array([0,0,0,255])]
+ }]);
+ const camera={eye:[3.2,.2,0],target:[3.2,.2,8],
+   near:.1,far:20,fov:Math.PI/2,up:[0,1,0]};
+ const matrix=viewProjection(camera,1);
+ port.setActors([actor(0)]);port.update(0);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5)?.gid,101);
+ const update=world.updateAnimatedGeometry;
+ world.updateAnimatedGeometry=()=>{throw Error("Safari GPU buffer allocation failed");};
+ port.setActors([actor(1)]);
+ assert.throws(()=>port.update(0),/GPU buffer allocation failed/);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5)?.gid,101,
+   "Failed new character pose must not replace last valid native GPU-pick geometry");
+ world.updateAnimatedGeometry=update;
+ port.update(0);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5),null,
+   "After actual successful GPU pose update native pick moves with animated model");
+ port.dispose();
+});

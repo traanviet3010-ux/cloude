@@ -40,6 +40,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   let namespace=0;
   let activeGroups:readonly import("@/engine/contracts/scene").WorldGroup[]=[];
   let activeDetail:"full"|"distance"="full";
+  let renderedVisible=0,renderedTriangles=0;
   const terrainCells=new Map<string,string>();
   let disposed=false;
   let error:string|null=null;
@@ -161,6 +162,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         const nextIds=task.entries.map(g=>g.key);
         for(const old of readyIds)if(!nextIds.includes(old))world.set(old,null);
         readyIds=nextIds;readyEntries=task.entries;sceneId=task.sceneId;activeGroups=task.groups;originRegion=task.originRegion;activeDetail=task.detail;
+        renderedVisible=0;renderedTriangles=0;
         terrainCells.clear();
         world.protectStageGroups(readyIds);
         activeEnvironment=task.environment;pending=null;
@@ -206,7 +208,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     }
     for(const id of readyIds)world.set(id,null);
     readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;
-    terrainCells.clear();
+    terrainCells.clear();renderedVisible=0;renderedTriangles=0;
     activeEnvironment=undefined;error=null;
     world.protectPendingTextures([]);
     world.protectStageGroups([]);
@@ -230,13 +232,23 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     check();
     const remaining=pending?pending.entries.length-pending.cursor:0;
     return {pendingGroups:remaining,sceneId:pending?null:sceneId,
-      residentGroups:readyIds.length,visibleGroups:0,triangles:0,
+      residentGroups:readyIds.length,visibleGroups:renderedVisible,triangles:renderedTriangles,
       pendingTextures:pending?.texturePaths.filter(path=>!world.hasTexture(path)).length??0,
       bundleRebuilds:0};
   };
   return {
     adoptWorld,cancelWorldUpdate,clearWorld,neededWorldTextures,setWorldTexture,worldStats,step,
-    drawIds:()=>{check();return [...readyIds];},
+    /** Called only AFTER a successful native WebGL2 frame with real authored
+     * stage draw IDs. Old ready stats cannot masquerade as next-scene success.
+     */
+    recordFrame(visible:number,triangles:number){
+      check();
+      if(!Number.isSafeInteger(visible)||visible<0||visible>readyIds.length||
+         !Number.isSafeInteger(triangles)||triangles<0)
+        throw Error("Invalid native renderer world frame evidence");
+      renderedVisible=visible;renderedTriangles=triangles;
+    },
+    drawIds:()=>{check();return [...readyIds];
     drawEntries:()=>{check();return readyEntries.map(({id,key})=>({id,key}));},
     /** Native terrainLod() updates GPU buffers only on a new eye cell.
      * Neither meshes nor their textures are rebuilt as the camera moves.
@@ -271,7 +283,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         if(!readyIds.includes(key))world.set(key,null);
       }
       for(const id of readyIds)world.set(id,null);
-      pending=null;readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
+      pending=null;readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;activeEnvironment=undefined;renderedVisible=0;renderedTriangles=0;disposed=true;
       terrainCells.clear();
       world.protectPendingTextures([]);
       world.protectStageGroups([]);

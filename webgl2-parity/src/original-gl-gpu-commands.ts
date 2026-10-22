@@ -58,6 +58,19 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
  let disposed=false,commandIndex=0,submissions=0,drawCalls=0;
  const assert=()=>{device.assert();if(disposed)throw Error("Original GL command owner disposed");};
  const maximum=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number;
+ const sourceFactors=new Set<number>([
+   gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,
+   gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,gl.ONE_MINUS_DST_ALPHA,
+   gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,gl.SRC_ALPHA_SATURATE,
+   gl.CONSTANT_COLOR,gl.ONE_MINUS_CONSTANT_COLOR,gl.CONSTANT_ALPHA,
+   gl.ONE_MINUS_CONSTANT_ALPHA
+ ]);
+ const destinationFactors=new Set<number>([
+   gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,
+   gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,gl.ONE_MINUS_DST_ALPHA,
+   gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,gl.CONSTANT_COLOR,
+   gl.ONE_MINUS_CONSTANT_COLOR,gl.CONSTANT_ALPHA,gl.ONE_MINUS_CONSTANT_ALPHA
+ ]);
  function createRenderBundleEncoder(){
    assert();
    let closed=false;
@@ -106,17 +119,8 @@ export function createOriginalGlGpuCommands(device:OriginalGlDevice){
              !Number.isSafeInteger(draw.instances)||draw.instances<0||
              !Number.isSafeInteger(draw.firstIndex??0)||(draw.firstIndex??0)<0||
              draw.blend && (
-               ![gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,
-                 gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,
-                 gl.ONE_MINUS_DST_ALPHA,gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,
-                 gl.SRC_ALPHA_SATURATE,gl.CONSTANT_COLOR,
-                 gl.ONE_MINUS_CONSTANT_COLOR,gl.CONSTANT_ALPHA,
-                 gl.ONE_MINUS_CONSTANT_ALPHA].includes(draw.blend.source)||
-               ![gl.ZERO,gl.ONE,gl.SRC_COLOR,gl.ONE_MINUS_SRC_COLOR,
-                 gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.DST_ALPHA,
-                 gl.ONE_MINUS_DST_ALPHA,gl.DST_COLOR,gl.ONE_MINUS_DST_COLOR,
-                 gl.CONSTANT_COLOR,gl.ONE_MINUS_CONSTANT_COLOR,
-                 gl.CONSTANT_ALPHA,gl.ONE_MINUS_CONSTANT_ALPHA].includes(draw.blend.destination)||
+               !sourceFactors.has(draw.blend.source)||
+               !destinationFactors.has(draw.blend.destination)||
                draw.blend.constant && (
                  draw.blend.constant.length!==4||!finite(draw.blend.constant)||
                  draw.blend.constant.some(v=>v<0||v>1)

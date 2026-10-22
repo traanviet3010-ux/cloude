@@ -82,6 +82,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     }
     const requiredPaths=[...required];
     world.protectPendingTextures(requiredPaths);
+    world.protectStageGroups(readyIds);
     pending={sceneId:prepared.scene.id,groups:prepared.scene.groups,entries,cursor:0,texturePaths:requiredPaths,originRegion:prepared.scene.originRegion,environment:prepared.scene.environment};
     error=null;
   };
@@ -97,6 +98,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       while(n<maxGroups&&task.cursor<task.entries.length){
         const g=task.entries[task.cursor]!;
         world.set(g.key,g.geometry);
+        world.protectStageGroup(g.key);
         task.cursor++;n++;
       }
       if(task.cursor===task.entries.length){
@@ -105,6 +107,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         const nextIds=task.entries.map(g=>g.key);
         for(const old of readyIds)if(!nextIds.includes(old))world.set(old,null);
         readyIds=nextIds;readyEntries=task.entries;sceneId=task.sceneId;activeGroups=task.groups;originRegion=task.originRegion;
+        world.protectStageGroups(readyIds);
         activeEnvironment=task.environment;pending=null;
         world.protectPendingTextures([]);
       }
@@ -117,6 +120,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       }
       pending=null;
       world.protectPendingTextures([]);
+      world.protectStageGroups(readyIds);
       throw e;
     }
   }
@@ -129,6 +133,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     }
     pending=null;
     world.protectPendingTextures([]);
+    world.protectStageGroups(readyIds);
   };
   /**
    * Native createFrontend() calls renderer.setWorld(null) when leaving the
@@ -148,6 +153,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;
     activeEnvironment=undefined;error=null;
     world.protectPendingTextures([]);
+    world.protectStageGroups([]);
   }
   const neededWorldTextures:Renderer["neededWorldTextures"]=()=>{
     check();
@@ -184,6 +190,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
       for(const id of readyIds)world.set(id,null);
       pending=null;readyIds=[];readyEntries=[];activeGroups=[];sceneId=null;originRegion=null;activeEnvironment=undefined;disposed=true;
       world.protectPendingTextures([]);
+      world.protectStageGroups([]);
     }
   };
 }

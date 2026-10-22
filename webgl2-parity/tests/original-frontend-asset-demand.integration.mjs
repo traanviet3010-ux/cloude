@@ -64,7 +64,7 @@ function makeAssets(bridge){
        };}};
        result={kind:"world",world:lease,images:[]};
      }else if(path.endsWith(".png")){
-       const n=Number(/native-(\\d+)\\.png$/.exec(path)?.[1]);
+       const n=Number(/native-(\d+)\.png$/.exec(path)?.[1]);
        assert.ok(Number.isSafeInteger(n)&&n>=0&&n<groups.length,
          "Only actual original scene material URLs can be requested");
        const cursor=groups.length-bridge.worldStats().pendingGroups;

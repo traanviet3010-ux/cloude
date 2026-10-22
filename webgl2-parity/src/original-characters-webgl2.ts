@@ -10,6 +10,7 @@ import type {WorldTexture} from "@/engine/contracts/texture";
 import type {Geometry} from "@/engine/contracts/geometry";
 import {placement} from "@/engine/foundation/rendering/world-math";
 import {multiply} from "@/engine/foundation/math/pose-math";
+import {pickRay,pickGeometry} from "@/engine/foundation/rendering/picking";
 import {createOriginalCpuCharacterSkin} from "./original-character-cpu-skin";
 import {OriginalWorldWebgl2} from "./native-world-webgl2";
 
@@ -17,7 +18,10 @@ const MOBILE=typeof navigator!=="undefined" && /iPhone|iPad/.test(navigator.user
 const ACTOR_LIMIT=MOBILE?8:32, PRIMITIVE_LIMIT=32;
 const VERTICES_PER_FRAME=MOBILE?180_000:600_000;
 type ModelRecord={source:CharacterModel;imagePaths:string[]};
-type ActorRecord={model:string;ids:string[];skin:ReturnType<typeof createOriginalCpuCharacterSkin>};
+type ActorRecord={model:string;ids:string[];skin:ReturnType<typeof createOriginalCpuCharacterSkin>;
+  // Last completed CPU-skin pose + exact native placement matrix, identical
+  // to the geometry uploaded for the latest GPU frame. Never pick T-pose.
+  drawn:Geometry[];pickable:boolean};
 export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
  const models=new Map<string,ModelRecord>(),residents=new Map<number,ActorRecord>();
  let actors:readonly CharacterActor[]=[];
@@ -86,7 +90,8 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
        residents.delete(actor.gid);state=undefined;
      }
      if(!state){
-       state={model:actor.model,ids:[],skin:createOriginalCpuCharacterSkin(entry.source)};
+       state={model:actor.model,ids:[],skin:createOriginalCpuCharacterSkin(entry.source),
+         drawn:[],pickable:actor.pickable!==false};
        residents.set(actor.gid,state);
      }
      const placementMatrix=placement(actor.pose.regionId,originRegion,
@@ -103,11 +108,14 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
        multiply(placementMatrix,skinned.geometry.transform,root);
        const material={...p.geometry.material!,texture:imagePath};
        const geometry:Geometry={...skinned.geometry,material,transform:root};
+       state.drawn[i]=geometry;
        const id="original-character:"+actor.gid+":"+i;
        if(i>=state.ids.length){world.set(id,geometry);state.ids.push(id);}
        else world.updateAnimatedGeometry(id,geometry);
        drawIds.push(id);
      }
+     state.drawn.length=entry.source.primitives.length;
+     state.pickable=actor.pickable!==false;
      active.add(actor.gid);
    }
    for(const [gid,state] of residents)if(!active.has(gid)){
@@ -116,8 +124,31 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
    }
    return drawIds;
  }
+ function pickRenderedActor(viewProjection:Float32Array,x:number,y:number,
+   eligible?:ReadonlySet<number>):{gid:number;depth:number}|null{
+   check();
+   // The ORIGINAL pickRay() uses WebGPU's 0..1 camera depth. Reuse that
+   // exact math, not a hand-authored OpenGL inverse-projection heuristic.
+   const ray=pickRay(viewProjection,x,y);
+   if(!ray)return null;
+   let best:{gid:number;depth:number}|null=null;
+   for(const [gid,state] of residents){
+     if(!state.pickable||(eligible&&!eligible.has(gid)))continue;
+     for(const geometry of state.drawn){
+       // The original pickGeometry() supports the CPU-skinned geometry
+       // directly; joint weights were already applied during the actual
+       // GL upload. A partially transparent mesh needs the retail per-texel
+       // pick-alpha mask, not yet available through the WebGL2 asset owner.
+       if((geometry.material?.alphaCutoff??0)>0||
+          (geometry.material?.color?.[3]??1)<1)continue;
+       const depth=pickGeometry(ray,geometry,geometry.transform,undefined,{});
+       if(depth!==null&&(!best||depth<best.depth))best={gid,depth};
+     }
+   }
+   return best;
+ }
  return {
-   retainModel,setActors,update,
+   retainModel,setActors,update,pickRenderedActor,
    stats:()=>({models:models.size,actors:residents.size,
      primitives:[...residents.values()].reduce((n,s)=>n+s.ids.length,0)}),
    dispose(){

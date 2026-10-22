@@ -254,7 +254,19 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     check();
     if(!pending||!pending.texturePaths.includes(path))
       throw Error("Unrequested native scene texture upload: "+path);
-    world.setTexture(path,image);
+    // The actual createFrontendStage() transfers each decoded Bitmap to
+    // Renderer.setWorldTexture(). WebGL2 has synchronously copied its texels
+    // by the end of world.setTexture; keeping another decoded ImageBitmap
+    // alive leaks large CPU/native resources on mobile Safari. Unlike the
+    // original WebGPU world's recoverable CPU cache, this bounded TEST-only
+    // GL stage explicitly consumes each one-shot source. NativeTexture bytes
+    // are managed by the original asset owner and must not be mutated.
+    try{
+      world.setTexture(path,image);
+    }finally{
+      if(image && "close" in image && typeof image.close==="function")
+        image.close();
+    }
   };
   const worldStats:Renderer["worldStats"]=():WorldRenderStats=>{
     check();

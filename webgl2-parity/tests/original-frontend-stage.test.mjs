@@ -325,3 +325,30 @@ test("Pandora-inspired four-group original texture demand window advances withou
  bridge.dispose();
  assert.equal(world.present.size,0);
 });
+
+
+test("world readiness counters become positive only after an actual successful native GL scene frame",()=>{
+ const world=renderer(),bridge=createOriginalStageBridge(world);
+ bridge.adoptWorld(lease("actual-original-title-scene",[group("authentic-building")]));
+ bridge.step();
+ assert.equal(bridge.worldStats().residentGroups,1);
+ assert.equal(bridge.worldStats().visibleGroups,0,
+   "Admitted geometry is not proof a real GL frame painted");
+ bridge.recordFrame(1,1);
+ assert.equal(bridge.worldStats().visibleGroups,1);
+ assert.equal(bridge.worldStats().triangles,1);
+ bridge.adoptWorld(lease("next-scene",[group("authentic-new-building")]));
+ assert.equal(bridge.worldStats().sceneId,null,
+   "New scene admission still blocks frontend-ready even if prior scene was drawn");
+ bridge.step();
+ assert.equal(bridge.worldStats().sceneId,"next-scene");
+ assert.equal(bridge.worldStats().visibleGroups,0,
+   "Prior WebGL2 frame evidence cannot mark a different scene ready");
+ bridge.recordFrame(1,1);
+ assert.equal(bridge.worldStats().visibleGroups,1);
+ assert.throws(()=>bridge.recordFrame(2,1),/frame evidence/);
+ bridge.clearWorld();
+ assert.equal(bridge.worldStats().visibleGroups,0);
+ assert.equal(bridge.worldStats().triangles,0);
+ bridge.dispose();
+});

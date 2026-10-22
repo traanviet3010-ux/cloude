@@ -5,7 +5,14 @@
  */
 import type {OriginalGlDevice} from "./original-gl-device";
 
-export function createOriginalGlSurface(device:OriginalGlDevice){
+export function createOriginalGlSurface(
+ device:OriginalGlDevice,options:{readonly directToCanvas?:boolean}={}
+){
+ // iOS/WebKit has a tight GPU process budget. When no intermediate effect
+ // is needed, never allocate a second full-resolution color + depth target.
+ // The original world and retail UI share one default framebuffer.
+ const directToCanvas=options.directToCanvas??
+   /iPhone|iPad|Android/.test(navigator.userAgent);
  const {gl}=device;
  let width=0,height=0,disposed=false,active=false;
  let color:WebGLTexture|null=null,depth:WebGLRenderbuffer|null=null;
@@ -23,7 +30,7 @@ export function createOriginalGlSurface(device:OriginalGlDevice){
    if(!Number.isSafeInteger(nextWidth)||!Number.isSafeInteger(nextHeight)||
       nextWidth<1||nextHeight<1||nextWidth>max||nextHeight>max)
      throw Error("Native Silkroad surface dimensions invalid");
-   if(width===nextWidth&&height===nextHeight&&framebuffer)return;
+   if(width===nextWidth&&height===nextHeight&&(directToCanvas||framebuffer))return;
    if(active)throw Error("Cannot resize Silkroad GL surface during frame");
    releaseAttachments();
    width=nextWidth;height=nextHeight;
@@ -32,6 +39,7 @@ export function createOriginalGlSurface(device:OriginalGlDevice){
    if(gl.canvas instanceof HTMLCanvasElement){
      gl.canvas.width=width;gl.canvas.height=height;
    }
+   if(directToCanvas)return;
    try{
      color=device.allocateTexture2D(width,height);
      depth=device.own("renderbuffer",gl.createRenderbuffer(),width*height*4);
@@ -57,9 +65,10 @@ export function createOriginalGlSurface(device:OriginalGlDevice){
  function beginScene(){
    assert();
    if(active)throw Error("Original GL scene frame already active");
-   if(!framebuffer)throw Error("Original Silkroad GL surface not allocated");
+   if(!directToCanvas&&!framebuffer)
+     throw Error("Original Silkroad GL surface not allocated");
    active=true;
-   gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+   gl.bindFramebuffer(gl.FRAMEBUFFER,directToCanvas?null:framebuffer);
    gl.viewport(0,0,width,height);
    gl.enable(gl.DEPTH_TEST);
    gl.depthMask(true);
@@ -67,14 +76,17 @@ export function createOriginalGlSurface(device:OriginalGlDevice){
  }
  function presentScene(){
    assert();
-   if(!active||!framebuffer)throw Error("Original GL scene frame not active");
+   if(!active||(!directToCanvas&&!framebuffer))
+     throw Error("Original GL scene frame not active");
    // Resolve the original world first, then draw original UiScene at full
    // canvas resolution. No WebGPU swapchain is created.
    gl.disable(gl.SCISSOR_TEST);
-   gl.bindFramebuffer(gl.READ_FRAMEBUFFER,framebuffer);
-   gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
-   gl.blitFramebuffer(0,0,width,height,0,0,width,height,
-     gl.COLOR_BUFFER_BIT,gl.NEAREST);
+   if(!directToCanvas){
+     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,framebuffer);
+     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+     gl.blitFramebuffer(0,0,width,height,0,0,width,height,
+       gl.COLOR_BUFFER_BIT,gl.NEAREST);
+   }
    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
    gl.viewport(0,0,width,height);
    active=false;
@@ -92,6 +104,6 @@ export function createOriginalGlSurface(device:OriginalGlDevice){
    releaseAttachments();disposed=true;width=height=0;
  }
  return {resize,beginScene,presentScene,abortScene,dispose,
-   stats:()=>({width,height,allocated:!!framebuffer,active,disposed})};
+   stats:()=>({width,height,allocated:!!framebuffer,directToCanvas,active,disposed})};
 }
 export type OriginalGlSurface=ReturnType<typeof createOriginalGlSurface>;

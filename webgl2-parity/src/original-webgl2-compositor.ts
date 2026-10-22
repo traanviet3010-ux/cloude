@@ -49,6 +49,12 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
   // presented original GL frame. Never pick actors in an unpainted scene.
   let lastRenderedPickView:Float32Array|null=null;
   let lastRenderedStageIds=new Set<string>();
+  const clearPickGeneration=()=>{
+    // WebKit can lose the drawing buffer without a normal frame ending.
+    // Never answer taps with the actor or scenery of a destroyed GL generation.
+    lastRenderedPickView=null;lastRenderedStageIds.clear();
+  };
+  canvas.addEventListener("webglcontextlost",clearPickGeneration);
   let disposed=false;
   function assert(){if(disposed)throw Error("Original client WebGL2 compositor disposed");}
   return {
@@ -200,6 +206,7 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     },
     dispose(){
       if(disposed)return;disposed=true;
+      canvas.removeEventListener("webglcontextlost",clearPickGeneration);
       lastRenderedPickView=null;lastRenderedStageIds.clear();
       visibleGroupSet?.dispose();bridge.dispose();characters.dispose();stage.dispose();
       ui.dispose();glFrame.dispose();glSurface.dispose();glDevice.dispose();world.dispose();

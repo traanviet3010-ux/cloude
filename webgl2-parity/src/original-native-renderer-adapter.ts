@@ -27,12 +27,24 @@ export interface OriginalGraphicsBackendFactories {
  * Calling startRuntime still creates the original assets, simulation worker,
  * UI, frontend, input, presentation and authoritative game session owners.
  */
+export type OriginalGraphicsBackendProvider=
+  (canvas:HTMLCanvasElement)=>OriginalGraphicsBackendFactories;
+
+/**
+ * Per-canvas backend provision avoids accidentally attaching an iPhone's
+ * GL context to a stale canvas after a WebKit renderer generation restarts.
+ * No GL implementation is considered complete merely by this typed seam.
+ */
 export function bindOriginalGraphicsBackend(
-  backend:OriginalGraphicsBackendFactories
+  provide:OriginalGraphicsBackendProvider
 ):typeof createRenderer {
-  if(!backend?.device||!backend?.surface||!backend?.frame)
-    throw Error("Native WebGL2 device, surface and frame must be complete");
-  return (canvas,random,sound,diagnostics)=>
-    createRenderer(canvas,random,sound,diagnostics,
+  if(typeof provide!=="function")
+    throw Error("Native Silkroad graphics backend provider missing");
+  return (canvas,random,sound,diagnostics)=>{
+    const backend=provide(canvas);
+    if(!backend?.device||!backend?.surface||!backend?.frame)
+      throw Error("Native WebGL2 device, surface and frame must be complete");
+    return createRenderer(canvas,random,sound,diagnostics,
       backend.device,backend.surface,backend.frame);
+  };
 }

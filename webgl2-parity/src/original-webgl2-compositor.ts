@@ -13,6 +13,7 @@ import {createOriginalGlSurface} from "./original-gl-surface";
 import {createOriginalGlFrame} from "./original-gl-frame";
 import { NativeUiWebgl2Renderer } from "./native-ui-webgl2";
 import { createOriginalStageBridge } from "./original-frontend-stage";
+import {leaseOriginalWorldScene} from "./original-scene-lease";
 import { createOriginalUiBridge } from "./original-ui-runtime-bridge";
 import {createOriginalWebgl2Characters} from "./original-characters-webgl2";
 import {createOriginalInstanceSelection} from "./original-instance-selection";
@@ -51,8 +52,11 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
     cancelWorldUpdate:stage.cancelWorldUpdate,
     setWorld(scene:import("@/engine/contracts/scene").WorldScene|null){
       assert();
-      if(scene!==null)throw Error("Original GameWorld direct WebGL2 scene publishing is not yet ported");
-      stage.clearWorld();
+      if(scene===null){stage.clearWorld();return;}
+      // The original session publishes a real WorldScene here, not a new
+      // login/scene implementation. Feed the exact source arrays into the
+      // already validated one-use GPU admission path.
+      stage.adoptWorld(leaseOriginalWorldScene(scene),scene.terrainDetail);
     },
     worldStats:stage.worldStats,
     neededWorldTextures:stage.neededWorldTextures,

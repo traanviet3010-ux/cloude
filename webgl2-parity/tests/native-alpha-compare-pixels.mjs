@@ -8,7 +8,8 @@ import {chromium} from "playwright";
 
 const dir=dirname(fileURLToPath(import.meta.url)),output=join(dir,"alpha-compare-bundle.js");
 await build({entryPoints:[join(dir,"../src/native-world-webgl2.ts")],
-  bundle:true,format:"esm",platform:"browser",target:"es2022",outfile:output});
+  bundle:true,format:"esm",platform:"browser",target:"es2022",outfile:output,
+  alias:{"@":process.env.SRO_SOURCE_ROOT+"/apps/client-next/src"}});
 const server=http.createServer((req,res)=>{
  if(req.url==="/alpha-compare-bundle.js"){
    res.writeHead(200,{"Content-Type":"text/javascript"});res.end(readFileSync(output));return;

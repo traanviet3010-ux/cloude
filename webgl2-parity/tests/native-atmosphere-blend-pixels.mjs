@@ -83,8 +83,18 @@ try{
        alphaCutoff:0,blend:true,blendPair:{source:7,destination:1}}});
    renderer.render(identity,["original-red-base","original-blue-additive"]);
    const destAlpha=read(32,32);
+   // Original lightmap pipeline uses ZERO / SRCCOLOR. Its blending factor
+   // must be correct before enabling its separate texture/fog lightmap shader.
+   renderer.set("original-red-base",{...ground,
+     material:{color:[.8,.8,.8,1],unlit:true,doubleSided:true,
+       alphaCutoff:0,blend:false}});
+   renderer.set("original-blue-additive",{...ground,
+     material:{color:[.25,.5,1,1],unlit:true,doubleSided:true,
+       alphaCutoff:0,blend:true,blendPair:{source:1,destination:3}}});
+   renderer.render(identity,["original-red-base","original-blue-additive"]);
+   const lightmapMultiply=read(32,32);
    renderer.dispose();
-   return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha};
+   return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha,lightmapMultiply};
  });
  console.log("ORIGINAL_SKY_BLEND_PIXELS_DIAGNOSTIC",JSON.stringify(result));
  assert.ok(result.skyTop[1]>135&&result.skyTop[0]<125,
@@ -100,6 +110,10 @@ try{
    "Retail default SRCALPHA/INVSRCALPHA should differ from additive");
  assert.ok(result.destAlpha[2]>230&&result.destAlpha[0]<30,
    "D3D9 X8R8G8B8 DESTALPHA reads ONE, regardless of WebGL alpha plane");
+ assert.ok(result.lightmapMultiply[0]>40&&result.lightmapMultiply[0]<70&&
+   result.lightmapMultiply[1]>90&&result.lightmapMultiply[1]<120&&
+   result.lightmapMultiply[2]>180&&result.lightmapMultiply[2]<220,
+   "OpenSRO lightmap ZERO/SRCCOLOR factor must multiply existing RGB");
  console.log("ORIGINAL_OPEN_SRO_ATMOSPHERE_D3D_BLEND_PIXELS_PASS",JSON.stringify(result));
 }finally{
  await browser.close();await new Promise(r=>server.close(r));

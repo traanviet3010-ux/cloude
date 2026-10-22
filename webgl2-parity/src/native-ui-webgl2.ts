@@ -59,6 +59,7 @@ export class NativeUiWebgl2Renderer {
   private readonly textures=new Map<string,Resident>();
   private used=0;
   private pinned=new Set<string>();
+  private nextSceneTextures=new Set<string>();
   private frameNo=0;
   private calls=0;
   private missingQuads=0;
@@ -106,6 +107,22 @@ export class NativeUiWebgl2Renderer {
     canvas.addEventListener("webglcontextlost",this.onLost,false);
     canvas.addEventListener("webglcontextrestored",this.onRestored);
   }
+  /** Pin authentic images as soon as ORIGINAL createUi() publishes a scene,
+   * BEFORE asynchronous native texture uploads have finished. The current
+   * last-drawn frame remains pinned independently until it is replaced.
+   * Read-only walk: avoid compiling thousands of glyph vertices twice/frame.
+   */
+  protectUiScene(scene:UiScene|null){
+    if(this.closed||this.lost)throw Error("Native UI WebGL2 renderer is closed/lost");
+    const required=new Set<string>();
+    if(scene)for(const quad of scene.quads){
+      if(quad.rect[2]<=0||quad.rect[3]<=0||
+         quad.clip[2]<=0||quad.clip[3]<=0)continue;
+      if(quad.texture)required.add(quad.texture);
+      if(quad.mask?.texture)required.add(quad.mask.texture);
+    }
+    this.nextSceneTextures=required;
+  }
   /** UI/CIF artwork comes only from the original OpenSRO asset owner.
    * Publish new GPU texels atomically, like the native world texture pool.
    * An OOM, corrupt original mip or protected-HUD budget failure must not
@@ -147,7 +164,7 @@ export class NativeUiWebgl2Renderer {
     const victims:Array<readonly [string,Resident]>=[];
     for(const [key,slot] of [...this.textures].sort((a,b)=>a[1].lastFrame-b[1].lastFrame)){
       if(projected<=this.budgetBytes)break;
-      if(key===id||this.pinned.has(key))continue;
+      if(key===id||this.pinned.has(key)||this.nextSceneTextures.has(key))continue;
       projected-=slot.bytes;victims.push([key,slot]);
     }
     if(projected>this.budgetBytes){
@@ -262,7 +279,7 @@ export class NativeUiWebgl2Renderer {
     this.canvas.removeEventListener("webglcontextrestored",this.onRestored);
     const gl=this.gl;
     for(const entry of this.textures.values())gl.deleteTexture(entry.texture);
-    this.textures.clear();this.pinned.clear();this.used=0;
+    this.textures.clear();this.pinned.clear();this.nextSceneTextures.clear();this.used=0;
     gl.deleteTexture(this.placeholder);gl.deleteBuffer(this.buffer);
     gl.deleteVertexArray(this.vao);gl.deleteProgram(this.program);
   }

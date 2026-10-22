@@ -93,8 +93,42 @@ test("cancellation removes unfinished uploads but preserves original active stag
  assert.equal(bridge.worldStats().sceneId,"original-intro");
  assert.ok(!w.present.has("new-a"));
  assert.deepEqual(bridge.drawIds(),["old"]);
- assert.throws(()=>bridge.adoptWorld(lease("other",[group("old")])),/safe atomic replacement/);
+ // Real scene leases may use the exact same WorldGroup ID. GPU keys must
+ // remain separate and the active stage may only change after admission.
+ bridge.adoptWorld(lease("other",[group("old")]));
+ bridge.step();
+ assert.equal(bridge.worldStats().sceneId,"other");
+ assert.equal(bridge.drawEntries()[0].id,"old");
+ assert.notEqual(bridge.drawEntries()[0].key,"old");
+ assert.ok(!w.present.has("old"),"retired native GPU slot is released");
  bridge.dispose();
+});
+test("original GPU group ID reused across stages remains atomic during loading and rollback",()=>{
+ const w=renderer(),bridge=createOriginalStageBridge(w);
+ bridge.adoptWorld(lease("real-intro",[group("shared"),group("intro-only")]));
+ bridge.step(2);
+ const previous=bridge.drawIds();
+ bridge.adoptWorld(lease("real-dock",[group("shared"),group("dock-only")]));
+ assert.equal(bridge.step(1),1);
+ assert.deepEqual(bridge.drawIds(),previous,"old scene still owns presentation keys");
+ const staged=[...w.present.keys()].filter(k=>!previous.includes(k));
+ assert.equal(staged.length,1,"overlapping scene group must have its own GPU slot");
+ assert.equal(w.present.has("shared"),true);
+ bridge.cancelWorldUpdate();
+ assert.deepEqual([...w.present.keys()].sort(),previous.slice().sort(),
+   "rollback releases the temporary GPU slot, not the original mesh");
+ bridge.adoptWorld(lease("real-dock-2",[group("shared"),group("dock-only")]));
+ bridge.step(1);
+ assert.deepEqual(bridge.drawIds(),previous,"partial next scene never published");
+ bridge.step(1);
+ assert.equal(bridge.worldStats().sceneId,"real-dock-2");
+ const active=bridge.drawEntries();
+ assert.deepEqual(active.map(row=>row.id),["shared","dock-only"]);
+ assert.notEqual(active[0].key,"shared");
+ assert.deepEqual([...w.present.keys()].sort(),active.map(row=>row.key).sort(),
+   "retired GPU stage has no leaked geometry");
+ bridge.dispose();
+ assert.equal(w.present.size,0);
 });
 test("stage lease input bounds and double admissions fail without overwriting the original stage",()=>{
  const w=renderer(),bridge=createOriginalStageBridge(w);

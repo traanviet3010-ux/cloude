@@ -49,19 +49,28 @@ uniform vec4 uSkyScatter;
 uniform vec4 uSkySun;
 uniform vec3 uSkyFog;
 uniform float uSkyTime;
+uniform float uSkyCloudScroll;
 void main(){
  mat4 instance=uModel*aInstanceModel;
  gl_Position=uViewProjection*instance*vec4(aPos,1.0);
  vViewZ=gl_Position.w;
  vColor=aColor;vUv=aUv;vInstanceOpacity=aInstanceOpacity;
  vSkyColor=vec3(0.0);
- if(uSkyKind==1||uSkyKind==6){
+ if(uSkyKind==1||uSkyKind==3||uSkyKind==5||uSkyKind==6){
    // OpenSRO sky geometry has observer-relative world coordinates.
-   float z=dot(aPos,uSkyForward);
-   gl_Position=vec4(dot(aPos,uSkyRight)/dot(uSkyRight,uSkyRight),
-     dot(aPos,uSkyUp)/dot(uSkyUp,uSkyUp),z,z);
+   vec3 skyPosition=aPos;
+   float angle=(uSkyTime-0.25)*6.28318530718;
+   if(uSkyKind==3){
+     vec3 center=vec3(cos(angle),sin(angle),0.0)*20000.0;
+     skyPosition=center+vec3(-aPos.y*sin(angle),
+       aPos.y*cos(angle),aPos.z)*666.666687;
+   }
+   float z=dot(skyPosition,uSkyForward);
+   gl_Position=vec4(dot(skyPosition,uSkyRight)/dot(uSkyRight,uSkyRight),
+     dot(skyPosition,uSkyUp)/dot(uSkyUp,uSkyUp),z,z);
+   vViewZ=z;
+   if(uSkyKind==5)vUv=aUv+vec2(uSkyCloudScroll);
    if(uSkyKind==1){
-     float angle=(uSkyTime-0.25)*6.28318530718;
      vec3 sunPosition=vec3(cos(angle),sin(angle),0.0)*20000.0;
      vec3 base=mix(uSkyHorizon,uSkyZenith.rgb,
        clamp(aPos.y/5000.0*uSkySun.w,0.0,1.0));
@@ -104,6 +113,11 @@ uniform int uSurfaceAlpha;
 uniform float uStageFactor;
 uniform int uLightmap;
 uniform int uSkyKind;
+uniform vec4 uSkySun;
+uniform vec3 uSkyFog;
+uniform vec4 uSkyScatter;
+uniform float uSkyTime;
+uniform float uSkyCloudAlpha;
 uniform vec3 uLightmapShadow;
 uniform int uLightmapFogEnabled;
 uniform vec3 uLightmapFogColor;
@@ -131,6 +145,19 @@ bool originalAlphaAccept(float pixelAlpha,float reference){
 void main(){
  if(uSkyKind==1){fragColor=vec4(vSkyColor,1.0);return;}
  if(uSkyKind==6){fragColor=vec4(vSkyColor,vColor.a);return;}
+ if(uSkyKind==3){
+   vec4 sunTexel=texture(uTexture,vUv);
+   bool daytime=uSkyTime>=0.25&&uSkyTime<=0.875;
+   fragColor=vec4(clamp(uSkySun.rgb,0.0,1.0),sunTexel.a*(daytime?1.0:0.0));
+   return;
+ }
+ if(uSkyKind==5){
+   vec4 cloudTexel=texture(uTexture,vUv);
+   vec3 cloudColor=mix(clamp(uSkyScatter.rgb,0.0,1.0)*cloudTexel.rgb,
+     uSkyFog,clamp((vViewZ-90000.0)/110000.0,0.0,1.0));
+   fragColor=vec4(cloudColor,cloudTexel.a*clamp(uSkyCloudAlpha,0.0,1.0));
+   return;
+ }
  vec4 texel=uUseTexture==1?texture(uTexture,vUv):vec4(1.0);
  // Pinned OpenSRO geometry shader: baked lightmap branch produces
  // clamp(light.rgb + env.shadow.rgb). The pipeline then multiplies the
@@ -489,6 +516,8 @@ export class OriginalWorldWebgl2 {
      gl.uniform4fv(gl.getUniformLocation(this.program,"uSkySun"),sky.subarray(52,56));
      gl.uniform3fv(gl.getUniformLocation(this.program,"uSkyFog"),sky.subarray(28,31));
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTime"),sky[48]!);
+     gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudScroll"),sky[49]!);
+     gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudAlpha"),sky[50]!);
    }
    gl.activeTexture(gl.TEXTURE0);
    gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uViewProjection"),false,camera);

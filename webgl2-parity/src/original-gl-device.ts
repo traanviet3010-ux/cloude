@@ -46,15 +46,7 @@ export function createOriginalGlDevice(canvas:HTMLCanvasElement,options:Original
      case "shader":gl.deleteShader(entry.object as WebGLShader);break;
    }
  }
- function retireOne(resource:GlResource){
-   const entry=live.get(resource);if(!entry)return;
-   live.delete(resource);
-   // A draw submitted in this frame may still reference this resource.
-   // Its lifetime ends only after the frame has completed.
-   if(inFrame){retired.add(resource);return;}
-   bytes-=entry.bytes;destroy(entry);
- }
- // Retired resources remain counted until flush. Entries are removed from
+// Retired resources remain counted until flush. Entries are removed from
  // public ownership immediately and stored separately for deferred destroy.
  const retiredEntries=new Map<GlResource,RecordEntry>();
  function release(resource:GlResource){

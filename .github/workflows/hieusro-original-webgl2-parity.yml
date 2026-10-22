@@ -71,6 +71,14 @@ jobs:
           cp "$GITHUB_WORKSPACE"/webgl2-parity/src/*.ts apps/client-next/src/engine/runtime/renderer/webgl2/
           corepack pnpm --filter @sro/client-next typecheck
           echo 'ORIGINAL_UI_WEBGL2_TYPECHECK=PASS'
+      - name: Audit EXACT original renderer methods before declaring game playable
+        working-directory: webgl2-parity
+        env:
+          SRO_SOURCE_ROOT: /tmp/opensro-original
+        run: |
+          node scripts/audit-original-renderer-contract.mjs
+          echo 'NOTE: WebGL2 acceptance remains BLOCKED until Renderer signature, login/world and real iPhone checks pass'
+
       - name: Verify original gameplay and HUD source were NOT modified
         run: |
           cd /tmp/opensro-original

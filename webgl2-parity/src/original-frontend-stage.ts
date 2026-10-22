@@ -17,7 +17,7 @@ import type {WorldCamera,WorldGroup} from "@/engine/contracts/scene";
 type Stage = {
   readonly sceneId:string;
   readonly groups:readonly import("@/engine/contracts/scene").WorldGroup[];
-  readonly entries:readonly {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry;terrain?:WorldGroup}[];
+  readonly entries:readonly {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry;terrain?:WorldGroup;textures:readonly string[]}[];
   readonly detail:"full"|"distance";
   cursor:number;
   texturePaths:readonly string[];
@@ -26,6 +26,9 @@ type Stage = {
 };
 const MAX_PENDING_BYTES=128*1024*1024;
 const MAX_GROUPS=12_000;
+// The pinned OpenSRO frontend stage requests at most three asset jobs/frame.
+// Demand only four next real WorldGroups instead of all stage textures at once.
+const TEXTURE_WINDOW_GROUPS=4;
 
 export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   let pending:Stage|null=null;
@@ -76,7 +79,7 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     if(!Number.isSafeInteger(sceneBytes)||sceneBytes<0||
        sceneBytes>MAX_PENDING_BYTES||scene.groups.length>MAX_GROUPS)
       throw Error("Original stage asset payload exceeds admission budget");
-    const entries: {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry;terrain?:WorldGroup}[]=[];
+    const entries: {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry;terrain?:WorldGroup;textures:readonly string[]}[]=[];
     const existingKeys=new Set(readyIds),newKeys=new Set<string>();
     const seen=new Set<string>(), required=new Set<string>();
     let bytes=0;
@@ -109,14 +112,16 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
         ...mesh,...selectOriginalTerrain(g,{eye:[0,0,0]},"full").geometry,
         material:g.material
       }:mesh);
-      if(g.material.texture)required.add(g.material.texture);
-      // All lunar phases remain original authored DDS frames. Admission
-      // cannot publish until every image used by the native sky:4 path is
-      // uploaded; never substitute the first image for missing phases.
-      for(const frame of g.material.frames??[])required.add(frame);
+      const textures=[...new Set([
+        ...(g.material.texture?[g.material.texture]:[]),
+        ...(g.material.frames??[])
+      ])];
+      for(const path of textures)required.add(path);
+      // Lunar phases remain original authored DDS frames. The four-group
+      // demand window must include ALL textures of a selected native group.
       bytes+=native.byteSize;
       if(bytes>MAX_PENDING_BYTES)throw Error("Original stage exceeds GPU budget");
-      entries.push({id:g.id,key,geometry:mesh,terrain:g.ranges?g:undefined});
+      entries.push({id:g.id,key,geometry:mesh,terrain:g.ranges?g:undefined,textures});
     }
     const requiredPaths=[...required];
     world.protectPendingTextures(requiredPaths);
@@ -130,12 +135,16 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     if(!Number.isInteger(maxGroups)||maxGroups<1||maxGroups>16)
       throw Error("Original stage per-frame upload budget invalid");
     const task=pending;if(!task)return 0;
-    // Only paint the original scene when its real bitmap dependencies exist.
-    if(task.texturePaths.some(path=>!world.hasTexture(path)))return 0;
+    // Never block admission of already-decoded groups on textures owned by
+    // distant groups. The original frontend polls neededWorldTextures()
+    // every frame and caps its own concurrent asset requests at three.
     let n=0;
     try{
       while(n<maxGroups&&task.cursor<task.entries.length){
         const g=task.entries[task.cursor]!;
+        // The current group must be fully textured before uploading its
+        // authentic geometry. Missing original textures are not substituted.
+        if(g.textures.some(path=>!world.hasTexture(path)))break;
         if(g.terrain){
           // Admit only the authored LOD0 triangles. The real camera-dependent
           // terrainLod() selection is applied to resident buffers each frame
@@ -204,7 +213,12 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   }
   const neededWorldTextures:Renderer["neededWorldTextures"]=()=>{
     check();
-    return pending?.texturePaths.filter(path=>!world.hasTexture(path))??[];
+    if(!pending)return [];
+    const wanted=new Set<string>();
+    for(const entry of pending.entries.slice(pending.cursor,pending.cursor+TEXTURE_WINDOW_GROUPS)){
+      for(const path of entry.textures)if(!world.hasTexture(path))wanted.add(path);
+    }
+    return [...wanted];
   };
   const setWorldTexture:Renderer["setWorldTexture"]=(path,image)=>{
     check();

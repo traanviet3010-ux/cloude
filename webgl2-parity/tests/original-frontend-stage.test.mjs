@@ -288,3 +288,40 @@ test("original frontend world-entry setWorld(null) releases all completed and pe
  assert.equal(stage.worldStats().sceneId,"next-actual-stage");
  stage.dispose();
 });
+
+test("Pandora-inspired four-group original texture demand window advances without blocking on distant groups",()=>{
+ const world=renderer(),bridge=createOriginalStageBridge(world);
+ const groups=Array.from({length:7},(_,i)=>group("native-group-"+i,{
+   material:{...material(),texture:"/assets/sro/authored-"+i+".texture"}
+ }));
+ bridge.adoptWorld(lease("original-large-constantinople-stage",groups));
+ const path=i=>"/assets/sro/authored-"+i+".texture";
+ assert.deepEqual(bridge.neededWorldTextures(),[0,1,2,3].map(path),
+   "The unmodified OpenSRO frontend must request no more than four upcoming native groups");
+ assert.equal(bridge.worldStats().pendingTextures,7,
+   "Overall admission progress must retain all real texture dependencies");
+ assert.equal(bridge.step(2),0,"Never draw a mesh without its real Silkroad material texture");
+ const original={kind:"native-texture",format:"bgra8unorm",
+   width:1,height:1,levels:[new Uint8Array([1,2,3,255])]};
+ bridge.setWorldTexture(path(0),original);
+ bridge.setWorldTexture(path(1),original);
+ assert.equal(bridge.step(2),2,"Admit ready authentic groups even if distant textures still load");
+ assert.deepEqual(bridge.drawIds(),[],"A partial next native stage never becomes the active scene");
+ assert.deepEqual(bridge.neededWorldTextures(),[2,3,4,5].map(path));
+ assert.equal(bridge.worldStats().pendingGroups,5);
+ assert.equal(bridge.worldStats().pendingTextures,5);
+ for(let i=2;i<6;i++)bridge.setWorldTexture(path(i),original);
+ assert.equal(bridge.step(2),2);
+ assert.equal(bridge.step(2),2);
+ assert.deepEqual(bridge.neededWorldTextures(),[path(6)]);
+ assert.equal(bridge.step(2),0,"Missing last original texture still gates whole-scene publication");
+ bridge.setWorldTexture(path(6),original);
+ assert.equal(bridge.step(2),1);
+ assert.equal(bridge.worldStats().sceneId,"original-large-constantinople-stage");
+ assert.equal(bridge.worldStats().residentGroups,7);
+ assert.equal(bridge.worldStats().pendingTextures,0);
+ assert.equal(bridge.neededWorldTextures().length,0);
+ assert.deepEqual(bridge.drawIds(),groups.map(g=>g.id));
+ bridge.dispose();
+ assert.equal(world.present.size,0);
+});

@@ -11,6 +11,11 @@ await build({entryPoints:[join(dir,"../src/original-characters-webgl2.ts")],
  bundle:true,platform:"node",format:"esm",target:"es2022",outfile:file,
  alias:{"@":root+"/apps/client-next/src"}});
 const {createOriginalWebgl2Characters}=await import(pathToFileURL(file).href);
+const originalWorldMath=join(dir,"original-character-pick-camera-bundle.mjs");
+await build({entryPoints:[join(root,"apps/client-next/src/engine/foundation/rendering/world-math.ts")],
+ bundle:true,platform:"node",format:"esm",target:"es2022",outfile:originalWorldMath,
+ alias:{"@":root+"/apps/client-next/src"}});
+const {viewProjection}=await import(pathToFileURL(originalWorldMath).href);
 const identity=()=>new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
 const primitive=()=>({
  name:"actual-original-Silkroad-mesh",node:0,joints:[0],inverseBind:identity(),image:0,
@@ -78,5 +83,45 @@ test("original actor with missing real models and unsupported branches cannot be
  assert.throws(()=>port.setActors([{...actor(0),attachment:{gid:10,bone:"hand",offset:[0,0,0]}}]),/dedicated/);
  assert.throws(()=>port.setActors([{...actor(0),scale:NaN}]),/pose invalid/);
  assert.throws(()=>port.retainModel("original-avatar",m,[]),/duplicate/);
+ port.dispose();
+});
+
+
+test("original actor picking uses most recently rendered skinned model and unchanged native ray math",()=>{
+ const world=fakeWorld(),port=createOriginalWebgl2Characters(world);
+ port.retainModel("original-avatar",model(),[{
+   kind:"native-texture",width:1,height:1,format:"bgra8unorm",
+   levels:[new Uint8Array([20,40,60,255])]
+ }]);
+ // Actor's first (original retail) clip translates the triangle on X by
+ // 0, then +2. Picking must follow those actual CPU-skinned pixels.
+ const camera={eye:[3.2,.2,0],target:[3.2,.2,8],
+   near:.1,far:20,fov:Math.PI/2,up:[0,1,0]};
+ const matrix=viewProjection(camera,1);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5),null,
+   "No model should be pickable before original renderer uploaded its first frame");
+ port.setActors([actor(0)]);
+ port.update(0);
+ const first=port.pickRenderedActor(matrix,.5,.5);
+ assert.equal(first?.gid,101);
+ assert.ok(first.depth>=0&&first.depth<=1);
+ assert.equal(port.pickRenderedActor(matrix,0,0),null,
+   "Original scene ray outside skinned actor must miss");
+ assert.equal(port.pickRenderedActor(matrix,.5,.5,new Set([999])),null,
+   "Frontend character roster eligibility must filter unrelated real GIDs");
+ port.setActors([actor(1)]);
+ port.update(0);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5),null,
+   "Original actor must no longer hit its old pose after actual animation moved it");
+ port.setActors([actor(0)]);
+ port.update(0);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5)?.gid,101,
+   "Returning original clip to frame zero must restore its true hit surface");
+ port.setActors([{...actor(0),pickable:false}]);
+ port.update(0);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5),null,
+   "The original CharacterActor.pickable flag cannot be ignored");
+ port.setActors([]);port.update(0);
+ assert.equal(port.pickRenderedActor(matrix,.5,.5),null);
  port.dispose();
 });

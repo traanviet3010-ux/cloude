@@ -133,6 +133,10 @@ export function createOriginalSilkroadWebgl2(canvas:HTMLCanvasElement){
         world:()=>world.render(matrix,[...stageIds,...actorIds]),
         hud:()=>bridge.draw()
       });
+      // Only a successfully presented native GL frame can advance original
+      // WorldRenderStats.visibleGroups. Runtime must not infer readiness
+      // from prepared-but-never-drawn title or GameWorld mesh uploads.
+      stage.recordFrame(stageIds.length,world.authoredTriangles(stageIds));
       return {...scene,ui:bridge.stats(),visible,stage:stage.worldStats(),
         characters:characters.stats(),gpuResidency:world.residencyStats()};
     },

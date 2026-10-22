@@ -44,20 +44,43 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
   const adoptWorld:Renderer["adoptWorld"]=(lease,detail,terrain)=>{
     check();
     if(pending)throw Error("Cannot replace native stage while GPU admission is pending");
-    if(terrain?.length)throw Error("Native multi-region stage terrain composition is not ported");
+    // Keep the EXACT original world.adopt() outdoor-region composition:
+    // every part is already decoded in the scene's origin coordinates.
+    // Do not shift, rebuild, or duplicate any original map vertices.
+    const regions=new Set<number>();
+    let terrainBytes=0;
+    for(const part of terrain??[]){
+      if(!Number.isSafeInteger(part.bytes)||part.bytes<0||
+         !Number.isInteger(part.region)||!Array.isArray(part.groups)||
+         regions.has(part.region))
+        throw Error("Invalid native WorldTerrainPart");
+      regions.add(part.region);
+      terrainBytes+=part.bytes;
+      if(terrainBytes>MAX_PENDING_BYTES)
+        throw Error("Original outdoor terrain residency budget exceeded");
+    }
     if(detail && detail!=="full"&&detail!=="distance")throw Error("Invalid original stage detail");
     // WorldSceneLease.takeWorld() is called exactly once. Never copy a second
     // encoded scene or alter frontend camera/GDR state.
     const prepared=lease.takeWorld();
     if(prepared.scene.id!==lease.sceneId)throw Error("Original stage lease identity mismatch");
-    if(!Number.isSafeInteger(prepared.bytes)||prepared.bytes<0||
-       prepared.bytes>MAX_PENDING_BYTES||prepared.scene.groups.length>MAX_GROUPS)
+    if((terrain?.length??0)>0 && prepared.scene.residency==="frontend")
+      throw Error("Frontend scenes cannot have outdoor terrain parts");
+    if((terrain??[]).some(part=>part.origin!==prepared.scene.originRegion))
+      throw Error("Original outdoor region terrain origin mismatch");
+    const scene=(terrain?.length??0)>0?{
+      ...prepared.scene,
+      groups:[...prepared.scene.groups,...terrain!.flatMap(part=>part.groups)]
+    }:prepared.scene;
+    const sceneBytes=prepared.bytes+terrainBytes;
+    if(!Number.isSafeInteger(sceneBytes)||sceneBytes<0||
+       sceneBytes>MAX_PENDING_BYTES||scene.groups.length>MAX_GROUPS)
       throw Error("Original stage asset payload exceeds admission budget");
     const entries: {id:string;key:string;geometry:import("@/engine/contracts/geometry").Geometry;terrain?:WorldGroup}[]=[];
     const existingKeys=new Set(readyIds),newKeys=new Set<string>();
     const seen=new Set<string>(), required=new Set<string>();
     let bytes=0;
-    for(const g of prepared.scene.groups){
+    for(const g of scene.groups){
       if(!g.id||seen.has(g.id))throw Error("Original scene has duplicate/empty group ID");
       seen.add(g.id);
       // A new authentic scene may reuse old WorldGroup IDs. Do not replace
@@ -93,8 +116,8 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
     const requiredPaths=[...required];
     world.protectPendingTextures(requiredPaths);
     world.protectStageGroups(readyIds);
-    pending={sceneId:prepared.scene.id,groups:prepared.scene.groups,entries,cursor:0,texturePaths:requiredPaths,originRegion:prepared.scene.originRegion,environment:prepared.scene.environment,
-      detail:detail??prepared.scene.terrainDetail??"full"};
+    pending={sceneId:scene.id,groups:scene.groups,entries,cursor:0,texturePaths:requiredPaths,originRegion:scene.originRegion,environment:scene.environment,
+      detail:detail??scene.terrainDetail??"full"};
     error=null;
   };
   function step(maxGroups=2):number{

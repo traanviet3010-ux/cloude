@@ -10,7 +10,8 @@ import type {WorldTexture} from "@/engine/contracts/texture";
 import type {Geometry} from "@/engine/contracts/geometry";
 import {placement} from "@/engine/foundation/rendering/world-math";
 import {multiply} from "@/engine/foundation/math/pose-math";
-import {pickRay,pickGeometry} from "@/engine/foundation/rendering/picking";
+import {pickRay,pickRayProjector,pickGeometry} from "@/engine/foundation/rendering/picking";
+import {selectPickCandidate,type PickCandidate} from "@/engine/foundation/animation/character-pick";
 import {createOriginalCpuCharacterSkin} from "./original-character-cpu-skin";
 import {OriginalWorldWebgl2} from "./native-world-webgl2";
 
@@ -21,7 +22,7 @@ type ModelRecord={source:CharacterModel;imagePaths:string[]};
 type ActorRecord={model:string;ids:string[];skin:ReturnType<typeof createOriginalCpuCharacterSkin>;
   // Last completed CPU-skin pose + exact native placement matrix, identical
   // to the geometry uploaded for the latest GPU frame. Never pick T-pose.
-  drawn:Geometry[];pickable:boolean};
+  drawn:Geometry[];pickable:boolean;actor:CharacterActor};
 export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
  const models=new Map<string,ModelRecord>(),residents=new Map<number,ActorRecord>();
  let actors:readonly CharacterActor[]=[];
@@ -91,7 +92,7 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
      }
      if(!state){
        state={model:actor.model,ids:[],skin:createOriginalCpuCharacterSkin(entry.source),
-         drawn:[],pickable:actor.pickable!==false};
+         drawn:[],pickable:actor.pickable!==false,actor};
        residents.set(actor.gid,state);
      }
      const placementMatrix=placement(actor.pose.regionId,originRegion,
@@ -116,6 +117,7 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
      }
      state.drawn.length=entry.source.primitives.length;
      state.pickable=actor.pickable!==false;
+     state.actor=actor;
      active.add(actor.gid);
    }
    for(const [gid,state] of residents)if(!active.has(gid)){
@@ -147,8 +149,47 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
    }
    return best;
  }
+ function pickRenderedEntityFan(matrix:Float32Array,x:number,y:number,
+    width:number,height:number,excluded:ReadonlySet<number>=new Set()):number|null{
+   check();
+   if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||
+      width<1||height<1)return null;
+   const project=pickRayProjector(matrix);
+   if(!project)return null;
+   const rays=[];
+   for(let row=0;row<3;row++)for(let col=0;col<3;col++){
+     const rx=Math.trunc(x*width+(col-1)*width*.016)/width;
+     const ry=Math.trunc(y*height+(row-1)*height*.016)/height;
+     const ray=project(rx,ry);
+     if(!ray)return null;
+     rays.push(ray);
+   }
+   const candidates:PickCandidate[]=[];
+   for(const [gid,state] of residents){
+     if(excluded.has(gid)||!state.pickable)continue;
+     const model=models.get(state.model)?.source;
+     if(!model)continue;
+     const hits=[];
+     for(let i=0;i<rays.length;i++){
+       let closest=Infinity;
+       for(const geo of state.drawn){
+         if((geo.material?.alphaCutoff??0)>0||
+            (geo.material?.color?.[3]??1)<1)continue;
+         const depth=pickGeometry(rays[i]!,geo,geo.transform,undefined,{});
+         if(depth!==null)closest=Math.min(closest,depth);
+       }
+       if(Number.isFinite(closest))hits.push({ray:i,depth:closest,
+         distance:closest*Math.hypot(...rays[i]!.delta)});
+     }
+     if(hits.length){
+       candidates.push({actor:state.actor,model,
+         matrix:state.drawn[0]!.transform,hits});
+     }
+   }
+   return selectPickCandidate(candidates)?.gid??null;
+ }
  return {
-   retainModel,setActors,update,pickRenderedActor,
+   retainModel,setActors,update,pickRenderedActor,pickRenderedEntityFan,
    stats:()=>({models:models.size,actors:residents.size,
      primitives:[...residents.values()].reduce((n,s)=>n+s.ids.length,0)}),
    dispose(){

@@ -52,7 +52,7 @@ try {
    const domeTop=sample(48,79),domeBottom=sample(48,12);
    const combined=world.render(I,["sky:1","sky:6"]);
    const upper=sample(48,79),lower=sample(48,12);
-   const stats=world.stats();
+   const stats={geometryCount:combined.geometryCount,residentMB:combined.residentMB};
    world.dispose();
    return {kinds:genuine.map(x=>x.material.sky),count:genuine.map(x=>x.geometry.indices.length),
      domeTop,domeBottom,upper,lower,preTriangles:pre.triangleCount,

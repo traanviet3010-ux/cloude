@@ -418,3 +418,35 @@ test("cancel and failed original native stage uploads never release an active st
  stage.dispose();
  assert.equal(w.textures.size,0);
 });
+
+
+test("original frontend transferred ImageBitmap is closed after success and GL upload error",()=>{
+ const world=renderer(),stage=createOriginalStageBridge(world);
+ const path="/assets/sro/authentic-original-title.png";
+ stage.adoptWorld(lease("title-owned-native-image",[
+   group("original-title-textured",{
+     geometry:{...mesh(),uvs:new Float32Array([0,0,1,0,0,1])},
+     material:{...material(),texture:path}
+   })
+ ]));
+ let successfulCloses=0,failedCloses=0;
+ const image={width:1,height:1,close(){successfulCloses++;}};
+ stage.setWorldTexture(path,image);
+ assert.equal(successfulCloses,1,
+   "The real transferred original ImageBitmap must not linger in Safari CPU/native RAM");
+ assert.equal(world.textures.get(path),image);
+ const original=world.setTexture;
+ world.setTexture=(id,next)=>{if(next)throw Error("Safari GL allocation rejected");return original(id,next);};
+ assert.throws(()=>stage.setWorldTexture(path,{
+   width:1,height:1,close(){failedCloses++;}
+ }),/Safari GL allocation rejected/);
+ assert.equal(failedCloses,1,
+   "Original decoded bitmap must also be closed when GL rejects its upload");
+ assert.equal(world.textures.get(path),image,
+   "A failed new transfer must not evict previously uploaded genuine stage image");
+ world.setTexture=original;
+ stage.step();
+ assert.equal(stage.worldStats().sceneId,"title-owned-native-image");
+ stage.dispose();
+ assert.equal(world.textures.size,0);
+});

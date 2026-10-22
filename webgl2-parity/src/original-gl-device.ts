@@ -13,11 +13,14 @@ export interface OriginalGlDeviceOptions {
  readonly context?:WebGL2RenderingContext;
 }
 export function createOriginalGlDevice(canvas:HTMLCanvasElement,options:OriginalGlDeviceOptions={}){
- const gl=options.context??canvas.getContext("webgl2",{
+ const context=options.context??canvas.getContext("webgl2",{
    alpha:false,antialias:false,depth:true,stencil:false,
    preserveDrawingBuffer:false,powerPreference:"low-power"
  });
- if(!gl)throw Error("Original Silkroad requires a WebGL2 context");
+ if(!context)throw Error("Original Silkroad requires a WebGL2 context");
+ // TS does not preserve nullable-canvas checks through nested closures.
+ // Retain the exact validated instance, never open a second GL context.
+ const gl:WebGL2RenderingContext=context;
  if(gl.canvas!==canvas)throw Error("Original WebGL2 context belongs to another canvas");
  const mobile=options.mobile??/iPhone|iPad|Android/.test(navigator.userAgent);
  const budget=options.maxResidentMB??(mobile?320:768);

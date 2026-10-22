@@ -4,6 +4,14 @@
  * artwork and draw commands. No bitmap placeholders are created.
  */
 import type {OriginalGlDevice} from "./original-gl-device";
+import type {Viewport} from "@/engine/contracts/runtime";
+export interface OriginalGlSurfaceTarget {
+ readonly framebuffer:WebGLFramebuffer|null;
+ readonly color:WebGLTexture|null;
+ readonly depth:WebGLRenderbuffer|null;
+ readonly width:number;
+ readonly height:number;
+}
 
 export function createOriginalGlSurface(
  device:OriginalGlDevice,options:{readonly directToCanvas?:boolean}={}
@@ -62,6 +70,23 @@ export function createOriginalGlSurface(
      gl.bindRenderbuffer(gl.RENDERBUFFER,null);
    }
  }
+ function acquire(viewport:Viewport,retain=false,renderScale=100):OriginalGlSurfaceTarget{
+   assert();
+   if(renderScale!==100)
+     throw Error("Original WebGL2 scaled scene/depth targets not ported; cannot silently lower HUD resolution");
+   if(retain&&directToCanvas)
+     throw Error("Original WebGL2 retained scene requires an offscreen color target");
+   resize(viewport.width,viewport.height);
+   return {framebuffer:directToCanvas?null:framebuffer,
+     color:directToCanvas?null:color,depth:directToCanvas?null:depth,
+     width,height};
+ }
+ function frameView():OriginalGlSurfaceTarget{
+   assert();
+   if(!width||!height)throw Error("Native GL surface frame was not acquired");
+   return {framebuffer:directToCanvas?null:framebuffer,
+     color:directToCanvas?null:color,depth:directToCanvas?null:depth,width,height};
+ }
  function beginScene(){
    assert();
    if(active)throw Error("Original GL scene frame already active");
@@ -103,7 +128,11 @@ export function createOriginalGlSurface(
    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
    releaseAttachments();disposed=true;width=height=0;
  }
- return {resize,beginScene,presentScene,abortScene,dispose,
+ return {
+   resize,acquire,frameView,frameDepth:()=>frameView().depth,
+   depth:()=>frameView().depth,
+   beginScene,presentScene,encodePresent:presentScene,
+   abortScene,dispose,
    stats:()=>({width,height,allocated:!!framebuffer,directToCanvas,active,disposed})};
 }
 export type OriginalGlSurface=ReturnType<typeof createOriginalGlSurface>;

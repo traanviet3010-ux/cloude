@@ -11,6 +11,8 @@ on:
       - "webgl2-parity/tests/native-original-sky-pixels.mjs"
       - "webgl2-parity/tests/native-sun-cloud-pixels.mjs"
       - "webgl2-parity/tests/native-star-moon-pixels.mjs"
+      - "webgl2-parity/tests/native-water-frames-pixels.mjs"
+      - "webgl2-parity/tests/native-water-source-bridge.ts"
       - "webgl2-parity/tests/native-sky-source-bridge.ts"
       - "webgl2-parity/tests/original-gl-owners-pixels.mjs"
       - "webgl2-parity/tests/native-lighting-pixels.mjs"
@@ -53,6 +55,7 @@ jobs:
           node tests/native-original-sky-pixels.mjs
           node tests/native-sun-cloud-pixels.mjs
           node tests/native-star-moon-pixels.mjs
+          node tests/native-water-frames-pixels.mjs
           node tests/original-gl-owners-pixels.mjs
           node tests/native-lighting-pixels.mjs
           node tests/native-alpha-compare-pixels.mjs

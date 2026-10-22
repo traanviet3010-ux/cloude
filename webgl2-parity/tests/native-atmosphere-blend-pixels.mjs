@@ -109,9 +109,18 @@ try{
        lightmap:true,blend:false,doubleSided:true,alphaCutoff:0}});
    renderer.render(identity,["original-red-base","original-blue-additive"]);
    const realLightmap=read(32,32);
+   // Source worldEnvironment: fogStart=env.fog.w (31),
+   // fogEnd=env.settings.x (32), flag=settings.y (33) and
+   // terrainFogColor=env.terrainFog.rgb (72..74). Identity matrix
+   // gives native viewZ=1, halfway between 0 and 2.
+   packed[31]=0;packed[32]=2;packed[33]=1;
+   packed.set([.8,.2,.2],72);
+   renderer.setOriginalLighting(packed,false,false);
+   renderer.render(identity,["original-red-base","original-blue-additive"]);
+   const linearFogLightmap=read(32,32);
    renderer.dispose();
    return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha,
-     lightmapMultiply,realLightmap};
+     lightmapMultiply,realLightmap,linearFogLightmap};
  });
  console.log("ORIGINAL_SKY_BLEND_PIXELS_DIAGNOSTIC",JSON.stringify(result));
  assert.ok(result.skyTop[1]>135&&result.skyTop[0]<125,
@@ -135,6 +144,10 @@ try{
    result.realLightmap[1]>103&&result.realLightmap[1]<143 &&
    result.realLightmap[2]>180&&result.realLightmap[2]<222,
    "Actual WorldMaterial.lightmap texture must multiply terrain using source + packed shadow floor");
+ assert.ok(result.linearFogLightmap[0]>100&&result.linearFogLightmap[0]<135 &&
+   result.linearFogLightmap[1]>67&&result.linearFogLightmap[1]<100 &&
+   result.linearFogLightmap[2]>104&&result.linearFogLightmap[2]<143,
+   "Authentic linear terrain lightmap fog must interpolate baked light with packed terrainFog");
  console.log("ORIGINAL_OPEN_SRO_ATMOSPHERE_D3D_BLEND_PIXELS_PASS",JSON.stringify(result));
 }finally{
  await browser.close();await new Promise(r=>server.close(r));

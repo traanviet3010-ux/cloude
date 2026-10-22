@@ -138,6 +138,32 @@ try{
     ]});
     state.budgetStillDrawn=budgetOwner.stats().drawCalls;
     budgetOwner.dispose();
+
+    // Validate the ORIGINAL pinned WGSL atlas uvTurn convention in real
+    // WebGL2 pixels, including its non-symmetric 90-degree rotations.
+    const turnCanvas=document.createElement("canvas");
+    turnCanvas.width=32;turnCanvas.height=32;
+    document.body.appendChild(turnCanvas);
+    const turnOwner=new NativeUiWebgl2Renderer(turnCanvas,8);
+    // Four distinct authored texels: TL red, TR green, BL blue, BR yellow.
+    turnOwner.setTexture("original-CIF-rotated-atlas",new ImageData(
+      new Uint8ClampedArray([
+        255,0,0,255, 0,255,0,255,
+        0,0,255,255, 255,255,0,255
+      ]),2,2));
+    const gt=turnCanvas.getContext("webgl2");
+    state.uvTurns=[];
+    for(let turn=0;turn<4;turn++){
+      turnOwner.draw({revision:turn+1,width:32,height:32,quads:[{
+        rect:[0,0,32,32],clip:[0,0,32,32],uv:[0,0,1,1],
+        color:[1,1,1,1],sampling:"nearest",
+        texture:"original-CIF-rotated-atlas",uvTurn:turn
+      }]});
+      const p=new Uint8Array(4);
+      gt.readPixels(8,24,1,1,gt.RGBA,gt.UNSIGNED_BYTE,p);
+      state.uvTurns.push([...p]);
+    }
+    turnOwner.dispose();
     return state;
   });
   assert.ok(state.inside[0]>=240&&state.inside[1]<20&&state.inside[2]<20,
@@ -175,7 +201,12 @@ try{
   assert.ok(state.protectedBudgetStats.failedUploads>=1);
   assert.equal(state.protectedBudgetStats.residentMB,8);
   assert.equal(state.budgetStillDrawn,2);
-
+  const expectedOriginalUvTurns=[
+    [255,0,0,255], [0,0,255,255],
+    [255,255,0,255], [0,255,0,255]
+  ];
+  assert.deepEqual(state.uvTurns,expectedOriginalUvTurns,
+    "All retail CIF 90-degree atlas rotations must match pinned OpenSRO WGSL in GL pixels");
 
   console.log("OPEN_SRO_UI_WEBGL2_GL_PIXEL_TEST_PASS",JSON.stringify(state));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

@@ -145,6 +145,9 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
        // GL upload. A partially transparent mesh needs the retail per-texel
        // pick-alpha mask, not yet available through the WebGL2 asset owner.
        if((geometry.material?.alphaCutoff??0)>0||
+          geometry.material?.blend||geometry.material?.textureAlpha||
+          geometry.material?.surfaceAlpha||
+          geometry.material?.alphaCompare!==undefined||
           (geometry.material?.color?.[3]??1)<1)continue;
        const depth=pickGeometry(ray,geometry,geometry.transform,undefined,{});
        if(depth!==null&&(!best||depth<best.depth))best={gid,depth};
@@ -177,6 +180,9 @@ export function createOriginalWebgl2Characters(world:OriginalWorldWebgl2){
        let closest=Infinity;
        for(const geo of state.drawn){
          if((geo.material?.alphaCutoff??0)>0||
+            geo.material?.blend||geo.material?.textureAlpha||
+            geo.material?.surfaceAlpha||
+            geo.material?.alphaCompare!==undefined||
             (geo.material?.color?.[3]??1)<1)continue;
          const depth=pickGeometry(rays[i]!,geo,geo.transform,undefined,{});
          if(depth!==null)closest=Math.min(closest,depth);

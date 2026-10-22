@@ -70,9 +70,9 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
   if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
      mat?.water||(mat?.sky!==undefined&&![1,3,5,6].includes(mat.sky))||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||
-     mat?.groundDecal||mat?.instanceFade||
+     mat?.instanceFade||
      mat?.instanceMaterialTint||mat?.textureAlpha||mat?.surfaceAlpha||
-     mat?.shaderDiffuse||mat?.decal)
+     mat?.shaderDiffuse)
     throw Error("Original material requires native staged WebGL2 shader parity");
   if(mat?.fog && (!Number.isInteger(mat.fog.color)||mat.fog.color<0||
      mat.fog.color>0xffffffff||!Number.isFinite(mat.fog.nearPlane)||

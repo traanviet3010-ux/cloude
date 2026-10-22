@@ -232,6 +232,7 @@ export class OriginalWorldWebgl2 {
  private disposed=false;
  private lost=false;
  private readonly lostHandler=(event:Event)=>{event.preventDefault();this.lost=true;};
+ private readonly restoredHandler=()=>{this.lost=true;};
  constructor(private readonly canvas:HTMLCanvasElement,memoryMB=160){
    const gl=canvas.getContext("webgl2",{antialias:false,alpha:false,depth:true,stencil:false});
    if(!gl)throw Error("Cannot create original Silkroad WebGL2 graphics context");
@@ -255,7 +256,7 @@ export class OriginalWorldWebgl2 {
    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
    canvas.addEventListener("webglcontextlost",this.lostHandler,false);
-   canvas.addEventListener("webglcontextrestored",()=>{this.lost=true;},{once:true});
+   canvas.addEventListener("webglcontextrestored",this.restoredHandler,false);
  }
  private validate(){
    if(this.disposed||this.lost)throw Error("Original SRO WebGL2 scene no longer available");
@@ -616,6 +617,7 @@ export class OriginalWorldWebgl2 {
  dispose(){
    if(this.disposed)return;
    this.disposed=true;this.canvas.removeEventListener("webglcontextlost",this.lostHandler);
+   this.canvas.removeEventListener("webglcontextrestored",this.restoredHandler);
    for(const id of [...this.entries.keys()])this.retire(id);
    this.worldTextures.dispose();this.gl.deleteTexture(this.white);
    this.lighting=null;this.skyPacked=null;this.environmentPacked=null;

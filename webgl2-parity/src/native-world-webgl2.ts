@@ -14,7 +14,7 @@ import {originalBlendPair} from "./original-blend-webgl2";
 import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -70,6 +70,8 @@ uniform int uObjectFade;
 uniform int uFadeAlphaOnly;
 uniform int uSurfaceAlpha;
 uniform float uStageFactor;
+uniform int uLightmap;
+uniform vec3 uLightmapShadow;
 out vec4 fragColor;
 bool originalAlphaAccept(float pixelAlpha,float reference){
  // Exact pinned GPU shader D3D9 HAL quantization: truncate alpha to
@@ -91,6 +93,14 @@ bool originalAlphaAccept(float pixelAlpha,float reference){
 }
 void main(){
  vec4 texel=uUseTexture==1?texture(uTexture,vUv):vec4(1.0);
+ // Pinned OpenSRO geometry shader: baked lightmap branch produces
+ // clamp(light.rgb + env.shadow.rgb). The pipeline then multiplies the
+ // already drawn terrain using D3DBLEND ZERO/SRCCOLOR.
+ // Its separate fog and cascade passes are not enabled in this GL path.
+ if(uLightmap==1){
+   fragColor=vec4(clamp(texel.rgb+uLightmapShadow,0.0,1.0),1.0);
+   return;
+ }
  vec4 c;
  if(uLit==1){
    vec3 lit=uObjectVertexLighting==1?vVertexLighting:
@@ -380,10 +390,11 @@ export class OriginalWorldWebgl2 {
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
        bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",
-       blend:(geometry.material?.blend??false)||(material?.objectFade??false),
-       blendPair:material?.blendPair,
+       blend:(geometry.material?.blend??false)||(material?.objectFade??false)||!!material?.lightmap,
+       blendPair:material?.lightmap?{source:1,destination:3}:material?.blendPair,
        doubleSided:geometry.material?.doubleSided??false,
-       depthWrite:geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade),
+       depthWrite:material?.lightmap?false:(geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade)),
+       lightmap:!!material?.lightmap,
        stageFactor:material?.stageFactor??1,
        objectFade:!!material?.objectFade,fadeAlphaOnly:!!material?.fadeAlphaOnly,
        surfaceAlpha:!!material?.surfaceAlpha,
@@ -436,6 +447,9 @@ export class OriginalWorldWebgl2 {
      gl.uniform1i(gl.getUniformLocation(this.program,"uFadeAlphaOnly"),s.fadeAlphaOnly?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uSurfaceAlpha"),s.surfaceAlpha?1:0);
      gl.uniform1f(gl.getUniformLocation(this.program,"uStageFactor"),s.stageFactor);
+      gl.uniform1i(gl.getUniformLocation(this.program,"uLightmap"),s.lightmap?1:0);
+      gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapShadow"),
+        this.skyPacked?.subarray(40,43)??new Float32Array([0,0,0]));
      gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
        s.objectVertexLighting?1:0);
@@ -445,6 +459,12 @@ export class OriginalWorldWebgl2 {
      gl.uniform1f(gl.getUniformLocation(this.program,"uAmbientScale"),s.ambientScale);
      gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),s.texture?1:0);
      gl.bindTexture(gl.TEXTURE_2D,s.texture?this.worldTextures.get(s.texture):this.white);
+      // The original lightmap sampler clamps; ordinary world materials
+      // repeat. Texture objects may be shared, so set this on every draw.
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,
+        s.lightmap?gl.CLAMP_TO_EDGE:gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,
+        s.lightmap?gl.CLAMP_TO_EDGE:gl.REPEAT);
      if(s.doubleSided)gl.disable(gl.CULL_FACE);else{gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);}
      originalBlendPair(gl,s.blend,s.blendPair);
      gl.depthMask(s.depthWrite);

@@ -67,7 +67,7 @@ export function admitOriginalGeometry(source:Geometry):GlNativeGeometry {
     throw Error("Original Silkroad D3DCMPFUNC alpha comparison invalid");
   if(mat?.alphaCutoff!==undefined && (!Number.isFinite(mat.alphaCutoff)||mat.alphaCutoff<0||mat.alphaCutoff>1))
     throw Error("Original Silkroad alpha cutoff outside native 0..1 range");
-  if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||mat?.lightmap||
+  if(mat?.frames||mat?.textureStage||mat?.uvVelocity||mat?.uvAtlas||
      mat?.water||mat?.sky||mat?.colorTimeline||mat?.textureFactorPulse||
      mat?.environmentReflection||mat?.deferredParticle||
      mat?.fog||mat?.groundDecal||mat?.instanceFade||

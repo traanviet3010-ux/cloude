@@ -118,9 +118,21 @@ try{
    renderer.setOriginalLighting(packed,false,false);
    renderer.render(identity,["original-red-base","original-blue-additive"]);
    const linearFogLightmap=read(32,32);
+   renderer.set("original-local-fog",{...ground,
+     material:{color:[1,0,0,1],unlit:true,doubleSided:true,
+       blend:false,alphaCutoff:0,
+       fog:{color:0xff0000ff,nearPlane:0,farPlane:2,intensity:1}}});
+   renderer.render(identity,["original-local-fog"]);
+   const localFog=read(32,32);
+   renderer.set("original-local-fog",{...ground,
+     material:{color:[1,0,0,1],unlit:true,doubleSided:true,
+       blend:false,alphaCutoff:0,fogDisabled:true,
+       fog:{color:0xff0000ff,nearPlane:0,farPlane:2,intensity:1}}});
+   renderer.render(identity,["original-local-fog"]);
+   const fogDisabled=read(32,32);
    renderer.dispose();
    return {skyTop,skyBottom,noSky,additive,defaultAlpha,destAlpha,
-     lightmapMultiply,realLightmap,linearFogLightmap};
+     lightmapMultiply,realLightmap,linearFogLightmap,localFog,fogDisabled};
  });
  console.log("ORIGINAL_SKY_BLEND_PIXELS_DIAGNOSTIC",JSON.stringify(result));
  assert.ok(result.skyTop[1]>135&&result.skyTop[0]<125,
@@ -148,6 +160,11 @@ try{
    result.linearFogLightmap[1]>67&&result.linearFogLightmap[1]<100 &&
    result.linearFogLightmap[2]>104&&result.linearFogLightmap[2]<143,
    "Authentic linear terrain lightmap fog must interpolate baked light with packed terrainFog");
+ assert.ok(result.localFog[0]>116&&result.localFog[0]<140&&
+   result.localFog[2]>116&&result.localFog[2]<140,
+   "Native material local fog must mix author RGB, near/far and original shader viewZ");
+ assert.ok(result.fogDisabled[0]>240&&result.fogDisabled[2]<12,
+   "D3DRS_FOGENABLE disabled material must retain author RGB without fog");
  console.log("ORIGINAL_OPEN_SRO_ATMOSPHERE_D3D_BLEND_PIXELS_PASS",JSON.stringify(result));
 }finally{
  await browser.close();await new Promise(r=>server.close(r));

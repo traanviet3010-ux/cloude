@@ -56,6 +56,9 @@ try{
    renderer.render(identity,[]);
    const skyTop=read(32,60),skyBottom=read(32,4);
    renderer.setOriginalLighting(packed,false,false);
+   // The previous original CIF/UI frame can leave a tiny scissor active.
+   // The next WorldScene must clear the full target, never retain old sky.
+   gl.enable(gl.SCISSOR_TEST);gl.scissor(0,0,2,2);
    renderer.render(identity,[]);
    const noSky=read(32,60);
    const ground={

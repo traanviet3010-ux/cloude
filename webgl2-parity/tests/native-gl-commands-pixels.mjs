@@ -71,21 +71,31 @@ void main(){outColor=vec4(1,0,0,1);}`);
    gl.bindVertexArray(null);
    const px=(x,y)=>{const p=new Uint8Array(4);
      gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return [...p];};
-   let attemptedNested=false,computeBlocked=false,twiceBlocked=false,bundleClosed=false;
+   let attemptedNested=false,computeBlocked=false,twiceBlocked=false,
+     bundleClosed=false,invalidBlendBlocked=false;
    const bundleEncoder=frame.commands.createRenderBundleEncoder();
-   bundleEncoder.drawIndexed({program,vertexArray:vao,count:3,instances:1,
-     cull:false,depthTest:true,depthWrite:true});
+   const mutableDraw={program,vertexArray:vao,count:3,instances:1,
+     cull:false,depthTest:true,depthWrite:true};
+   bundleEncoder.drawIndexed(mutableDraw);
    const originalBundle=bundleEncoder.finish();
+   // The bundle snapshots the original draw before the source owner reuses
+   // its scratch descriptor for the next frame.
+   mutableDraw.count=0;
    try{bundleEncoder.finish();}catch{bundleClosed=true;}
    const run=frame.render({
      width:64,height:64,
      world:()=>{
        const encoder=frame.commands.encoder();
+       const clearColor=[0,0,0,1];
        const pass=encoder.beginRenderPass({width:64,height:64,
-         colorLoad:"clear",clearColor:[0,0,0,1],depthLoad:"clear",clearDepth:1});
+         colorLoad:"clear",clearColor,depthLoad:"clear",clearDepth:1});
+       clearColor[1]=1; // changing the caller scratch array cannot change GPU commands
        try{encoder.beginRenderPass({width:64,height:64});}
        catch{attemptedNested=true;}
        pass.scissor([16,16,32,32]);
+       try{pass.drawIndexed({program,vertexArray:vao,count:3,instances:1,
+         blend:{source:-999,destination:gl.ONE}});}
+       catch{invalidBlendBlocked=true;}
        pass.executeBundles([originalBundle]);
        pass.end();
        const recorded=encoder.finish();
@@ -120,6 +130,7 @@ void main(){outColor=vec4(1,0,0,1);}`);
    frame.dispose();surface.dispose();device.dispose();
    return {inside,outside,cleared,afterStale,
      nestedBlocked:attemptedNested,computeBlocked,twiceBlocked,bundleClosed,
+     invalidBlendBlocked,
      retiredBlocked,run:run.scene,after:after.scene,
      before,commandStats,disposed:device.stats()};
  });
@@ -133,7 +144,8 @@ void main(){outColor=vec4(1,0,0,1);}`);
    "Retired draw validation must fail before clearing/mutating framebuffer");
  assert.equal(r.run.drawCalls,1);
  assert.equal(r.after.drawCalls,0);
- assert.ok(r.bundleClosed,"Original render bundle must be immutable after finish");
+ assert.ok(r.bundleClosed&&r.invalidBlendBlocked,
+   "Immutable render bundle and invalid GL blend state must fail closed");
  assert.ok(r.nestedBlocked&&r.computeBlocked&&r.twiceBlocked&&r.retiredBlocked,
    "Unsupported compute, nested render passes, duplicate submits and stale VAOs must fail closed");
  assert.equal(r.commandStats.submissions,2);

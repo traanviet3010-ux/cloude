@@ -14,7 +14,7 @@ import {originalBlendPair} from "./original-blend-webgl2";
 import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;lightmap:boolean;sky:number;decal:boolean;groundDecal:boolean;fogDisabled:boolean;localFog:readonly [number,number,number,number,number]|null;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 precision highp int;
@@ -475,12 +475,16 @@ export class OriginalWorldWebgl2 {
        color:new Float32Array(geometry.material?.color??[1,1,1,1]),alphaCutoff:geometry.material?.alphaCutoff??0,alphaCompare:geometry.material?.alphaCompare??7,
        bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",
-       blend:(geometry.material?.blend??false)||(material?.objectFade??false)||!!material?.lightmap,
-       blendPair:material?.lightmap?{source:1,destination:3}:material?.blendPair,
+       blend:(geometry.material?.blend??false)||(material?.objectFade??false)||
+         !!material?.lightmap||!!material?.decal||!!material?.groundDecal,
+       blendPair:material?.lightmap?{source:1,destination:3}:
+         material?.groundDecal?{source:5,destination:6}:material?.blendPair,
        doubleSided:geometry.material?.doubleSided??false,
-       depthWrite:material?.sky?false:material?.lightmap?false:
-         (geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade)),
+       depthWrite:material?.sky||material?.lightmap||material?.groundDecal?false:
+         (geometry.material?.depthWrite??(!geometry.material?.blend||
+           !!material?.objectFade||!!material?.decal)),
        lightmap:!!material?.lightmap,sky:material?.sky??0,
+       decal:!!material?.decal,groundDecal:!!material?.groundDecal,
        fogDisabled:!!material?.fogDisabled,
        localFog:material?.fog?[
          ((material.fog.color>>>16)&255)/255,
@@ -592,12 +596,12 @@ export class OriginalWorldWebgl2 {
       // The original lightmap sampler clamps; ordinary world materials
       // repeat. Texture objects may be shared, so set this on every draw.
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,
-        s.lightmap?gl.CLAMP_TO_EDGE:gl.REPEAT);
+        (s.lightmap||s.decal)?gl.CLAMP_TO_EDGE:gl.REPEAT);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,
-        s.lightmap?gl.CLAMP_TO_EDGE:gl.REPEAT);
+        (s.lightmap||s.decal)?gl.CLAMP_TO_EDGE:gl.REPEAT);
      if(s.doubleSided)gl.disable(gl.CULL_FACE);else{gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);}
-      if(s.sky)gl.disable(gl.DEPTH_TEST);
-      else gl.enable(gl.DEPTH_TEST);
+      if(s.sky||s.groundDecal)gl.disable(gl.DEPTH_TEST);
+      else{gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);}
      originalBlendPair(gl,s.blend,s.blendPair);
      gl.depthMask(s.depthWrite);
      gl.bindVertexArray(s.vao);

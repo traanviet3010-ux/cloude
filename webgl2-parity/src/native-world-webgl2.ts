@@ -288,14 +288,16 @@ export class OriginalWorldWebgl2 {
    this.validate();
    const used=new Set<string>();
    for(const id of this.visible){
-     const texture=this.entries.get(id)?.texture;
-     if(texture)used.add(texture);
+     const slot=this.entries.get(id);
+     if(slot?.texture)used.add(slot.texture);
+     for(const phase of slot?.frames??[])used.add(phase);
    }
    // A frustum-culled old stage mesh still needs its authored material
    // texture until the authentic next scene has fully committed.
    for(const id of this.protectedStageGroups){
-     const texture=this.entries.get(id)?.texture;
-     if(texture)used.add(texture);
+     const slot=this.entries.get(id);
+     if(slot?.texture)used.add(slot.texture);
+     for(const phase of slot?.frames??[])used.add(phase);
    }
    for(const key of this.pendingTextures)used.add(key);
    this.worldTextures.put(path,image,used);

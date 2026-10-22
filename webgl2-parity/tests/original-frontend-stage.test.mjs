@@ -28,6 +28,12 @@ function renderer(maxSlots=Infinity){
  const present=new Map(),updates=[],textures=new Map();
  let pinned=[],stageProtected=new Set();
  return {
+   updateOriginalTerrain(id,geom){
+     assert.ok(present.has(id),"Native terrain must reuse a live geometry slot");
+     const old=present.get(id);
+     present.set(id,{...old,positions:geom.positions,indices:geom.indices});
+     updates.push(["lod:"+id,geom]);
+   },
    set(id,geom){
      updates.push([id,geom]);
      if(geom){
@@ -163,6 +169,46 @@ test("low GPU budget fails closed without evicting original visible or culled me
  bridge.clearWorld();
  assert.deepEqual(w.getStageProtected(),[]);
  bridge.dispose();
+});
+test("native original terrain groups are admitted at LOD0 and updated in place with real camera cell",()=>{
+ const w=renderer(),stage=createOriginalStageBridge(w);
+ const heights=new Array(289).fill(2);
+ const terrain=group("authentic-terrain",{
+   material:{...material(),terrain:true},
+   geometry:{...mesh(),
+     positions:new Float32Array([0,0,0,320,0,0,0,0,320]),
+     indices:new Uint32Array([0,1,2,0,2,1]),
+     uvs:new Float32Array([0,0,1,0,0,1])
+   },
+   ranges:[
+     {cell:[0,0],lod:0,indexStart:0,indexCount:3,
+      vertexStart:0,vertexCount:3,center:[0,0,0],radius:320,heights,
+      seamVertices:new Uint32Array([0,8])},
+     {cell:[6,0],lod:1,indexStart:3,indexCount:3,
+      vertexStart:0,vertexCount:3,center:[1920,0,0],radius:320,heights}
+   ]
+ });
+ const originalIndices=[...terrain.geometry.indices];
+ const originalPositions=[...terrain.geometry.positions];
+ stage.adoptWorld(lease("native-terrain-world",[terrain]),"distance");
+ stage.step();
+ assert.equal(stage.worldStats().sceneId,"native-terrain-world");
+ assert.deepEqual([...w.present.get("authentic-terrain").indices],[0,1,2],
+   "Initial terrain admission draws only authored LOD0, not all four LODs");
+ assert.equal(stage.updateTerrain([0,0,0]).updated,1);
+ assert.deepEqual([...w.present.get("authentic-terrain").indices],[0,1,2,0,2,1],
+   "Uses actual original terrainLod() range selection");
+ assert.equal(stage.updateTerrain([0,0,0]).updated,0,
+   "Same camera cell must not re-upload or rebuild geometry");
+ assert.equal(stage.updateTerrain([14*320,0,0]).updated,1);
+ assert.equal(w.present.get("authentic-terrain").indices.length,0,
+   "Nonresident cell renders no invented terrain");
+ assert.deepEqual([...terrain.geometry.indices],originalIndices);
+ assert.deepEqual([...terrain.geometry.positions],originalPositions,
+   "Original scene lease vertex/index arrays are never mutated");
+ assert.equal(w.present.size,1,"LOD selection must not create a second GPU model");
+ stage.dispose();
+ assert.equal(w.present.size,0);
 });
 test("stage lease input bounds and double admissions fail without overwriting the original stage",()=>{
  const w=renderer(),bridge=createOriginalStageBridge(w);

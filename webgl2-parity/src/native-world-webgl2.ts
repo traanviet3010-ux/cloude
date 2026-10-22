@@ -433,8 +433,9 @@ export class OriginalWorldWebgl2 {
  set(id:string,geometry:Geometry|null){
    this.validate();
    if(!id||id.length>512)throw Error("Invalid original SRO geometry id");
-   if(this.entries.has(id))this.retire(id);
-   if(!geometry)return;
+   if(!geometry){this.retire(id);return;}
+   // Replacing a resident mesh must be atomic: validate and upload its
+   // successor before releasing the old login/character/GameWorld draw.
    const material=geometry.material;
    const lit=material?.unlit===false;
    if(lit){
@@ -457,11 +458,18 @@ export class OriginalWorldWebgl2 {
    const row:GlNativeGeometry=admitOriginalGeometry(geometry);
    const accounted=row.byteSize+row.instanceCount*4;
    if(accounted>this.budget)throw Error("One original mesh exceeds GPU residency limit");
-   for(const [key] of [...this.entries].sort((a,b)=>a[1].last-b[1].last)){
-     if(this.used+accounted<=this.budget)break;
-     if(!this.visible.has(key)&&!this.protectedStageGroups.has(key))this.retire(key);
+   const previous=this.entries.get(id);
+   let projected=this.used-(previous?.bytes??0)+accounted;
+   const victims:string[]=[];
+   // Do not free original GPU buffers during preflight. Safari can reject a
+   // bufferData upload even after size checks, and the current scene must
+   // remain draw-able in that case.
+   for(const [key,slot] of [...this.entries].sort((a,b)=>a[1].last-b[1].last)){
+     if(projected<=this.budget)break;
+     if(key===id||this.visible.has(key)||this.protectedStageGroups.has(key))continue;
+     projected-=slot.bytes;victims.push(key);
    }
-   if(this.used+accounted>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
+   if(projected>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
    const gl=this.gl;
    const vao=gl.createVertexArray(),vbo=gl.createBuffer(),ebo=gl.createBuffer(),
      maskVbo=row.starMasks?gl.createBuffer():null,
@@ -509,6 +517,10 @@ export class OriginalWorldWebgl2 {
      gl.vertexAttribDivisor(8,1);
      gl.bindVertexArray(null);
      if(gl.getError()!==gl.NO_ERROR)throw Error("WebGL2 native mesh buffer upload failed");
+     // Commit the new resident generation only after every authentic VBO,
+     // index, mask and instance stream reached GL without an error.
+     if(previous)this.retire(id);
+     for(const key of victims)this.retire(key);
      this.entries.set(id,{vao,vbo,maskVbo,ebo,instanceVbo,opacityVbo,instances:row.instanceCount,
        capacity:row.instanceCount,sourceByteSize:row.byteSize,
        count:row.indices.length,vertexCount:row.vertexCount,indexCapacity:row.indices.length,transform:row.transform,

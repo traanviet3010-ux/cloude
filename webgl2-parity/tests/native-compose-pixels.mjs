@@ -239,12 +239,14 @@ try{
    // handlers: no fabricated successful "context restored" is claimed.
    const lostEvent=new Event("webglcontextlost",{cancelable:true});
    lostCanvas.dispatchEvent(lostEvent);
+   const staleLostWorldPick=lostGame.pickRenderedScenery(.5,.5);
    let rejectedLostFrame=false;
    try{lostGame.originalFrontendFrame(1,.016);}
    catch(err){rejectedLostFrame=/no longer available|context lost|unavailable/.test(String(err));}
    lostGame.dispose();
    complete.contextLoss={lostEventPrevented:lostEvent.defaultPrevented,
-     rejectedLostFrame,disposed:true,glStillPresent:!!lostGl};
+     rejectedLostFrame,disposed:true,glStillPresent:!!lostGl,
+     staleLostWorldPick};
    return complete;
  });
  assert.ok(data.ui[0]>220&&data.ui[2]<40,"Authored UiScene must overlay the world on same WebGL2 context");
@@ -300,5 +302,7 @@ try{
    "No drawing is permitted against stale WebGL2 textures after context loss");
  assert.equal(data.contextLoss.disposed,true,
    "Original native scene and asset owners must cleanly dispose after lost context");
+ assert.equal(data.contextLoss.staleLostWorldPick,null,
+   "A WebKit-lost GL generation must never return a stale original scenery/teleport target");
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

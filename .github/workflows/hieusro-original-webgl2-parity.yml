@@ -57,6 +57,7 @@ jobs:
         run: |
           node --test tests/original-frontend-flow.integration.mjs
           node --test tests/original-frontend-stage.test.mjs
+          node --test tests/original-frontend-asset-demand.integration.mjs
       - name: Verify actual pinned OpenSRO CPU skeletal pose and materialized mesh
         env:
           SRO_SOURCE_ROOT: /tmp/opensro-original

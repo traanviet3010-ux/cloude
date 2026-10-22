@@ -11,6 +11,7 @@ import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
 import {originalBlendPair} from "./original-blend-webgl2";
+import {createOriginalAtmosphereWebgl2} from "./original-atmosphere-webgl2";
 import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
   count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
@@ -126,6 +127,8 @@ export class OriginalWorldWebgl2 {
  private readonly worldTextures:OriginalWorldTextures;
  private readonly white:WebGLTexture;
  private lighting:OriginalGlLighting|null=null;
+ private atmosphere:ReturnType<typeof createOriginalAtmosphereWebgl2>;
+ private skyPacked:Float32Array|null=null;
  private readonly budget:number;
  private used=0;
  private frame=0;
@@ -147,6 +150,7 @@ export class OriginalWorldWebgl2 {
      const e=gl.getProgramInfoLog(p);gl.deleteProgram(p);throw Error("Native scene pipeline: "+e);
    }
    this.program=p;
+   this.atmosphere=createOriginalAtmosphereWebgl2(gl);
    this.worldTextures=new OriginalWorldTextures(gl,/iPhone|iPad/.test(navigator.userAgent)?96:256);
    const white=gl.createTexture();
    if(!white)throw Error("Cannot allocate original untextured white fallback");
@@ -199,9 +203,12 @@ export class OriginalWorldWebgl2 {
  }
  hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
  /** The ORIGINAL worldEnvironment() packed Float32Array; never sample fabricated palette. */
- setOriginalLighting(packed:Float32Array,useNativeSun=false){
+ setOriginalLighting(packed:Float32Array,useNativeSun=false,drawAtmosphere=false){
    this.validate();
    this.lighting=readOriginalGlLighting(packed,useNativeSun);
+   // Atmosphere uses the actual retail packed zenith/horizon/camera basis.
+   // No fake cloud/stars are injected, and empty scenes remain black.
+   this.skyPacked=drawAtmosphere?packed.slice():null;
  }
  /**
   * Update native CPU-skinned vertices in the existing VBO. No reallocation
@@ -403,6 +410,7 @@ export class OriginalWorldWebgl2 {
    const gl=this.gl;gl.viewport(0,0,this.canvas.width,this.canvas.height);
    gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
    gl.clearColor(0,0,0,1);gl.clearDepth(1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+   if(this.skyPacked)this.atmosphere.draw(this.skyPacked);
    gl.useProgram(this.program);
    gl.uniform1i(gl.getUniformLocation(this.program,"uTexture"),0);
    gl.activeTexture(gl.TEXTURE0);
@@ -451,7 +459,8 @@ export class OriginalWorldWebgl2 {
    this.disposed=true;this.canvas.removeEventListener("webglcontextlost",this.lostHandler);
    for(const id of [...this.entries.keys()])this.retire(id);
    this.worldTextures.dispose();this.gl.deleteTexture(this.white);
-   this.lighting=null;
+   this.lighting=null;this.skyPacked=null;
+   this.atmosphere.dispose();
    this.protectedStageGroups.clear();
    this.gl.deleteProgram(this.program);
  }

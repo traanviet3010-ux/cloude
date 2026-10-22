@@ -543,8 +543,9 @@ export class OriginalWorldWebgl2 {
    for(const id of sceneIds){
      const s=this.entries.get(id);
      if(!s)throw Error("Original world group not resident: "+id);
-     if(s.texture&&!this.worldTextures.has(s.texture))
-       throw Error("Original world material texture not resident: "+s.texture);
+     const required=s.sky===4?s.frames:[s.texture];
+     for(const path of required)if(path&&!this.worldTextures.has(path))
+       throw Error("Original world material texture not resident: "+path);
    }
    if(sceneIds.some(id=>this.entries.get(id)!.sky)&&!this.environmentPacked)
      throw Error("Original sky geometry requires packed native WorldEnvironment");
@@ -574,6 +575,10 @@ export class OriginalWorldWebgl2 {
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTime"),sky[48]!);
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudScroll"),sky[49]!);
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudAlpha"),sky[50]!);
+     gl.uniform1f(gl.getUniformLocation(this.program,"uLunarDay"),sky[56]!);
+     gl.uniform2fv(gl.getUniformLocation(this.program,"uSkyPixel"),sky.subarray(57,59));
+     gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTwinkle"),sky[51]!);
+     gl.uniform1fv(gl.getUniformLocation(this.program,"uSkyFlicker"),sky.subarray(60,72));
    }
    gl.activeTexture(gl.TEXTURE0);
    gl.uniformMatrix4fv(gl.getUniformLocation(this.program,"uViewProjection"),false,camera);
@@ -626,8 +631,11 @@ export class OriginalWorldWebgl2 {
        new Float32Array(s.color.subarray(0,3)));
      gl.uniform3fv(gl.getUniformLocation(this.program,"uAmbientFactor"),s.ambient);
      gl.uniform1f(gl.getUniformLocation(this.program,"uAmbientScale"),s.ambientScale);
-     gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),s.texture?1:0);
-     gl.bindTexture(gl.TEXTURE_2D,s.texture?this.worldTextures.get(s.texture):this.white);
+     const texture=s.sky===4&&s.frames.length?
+       s.frames[Math.floor(Math.max(0,this.environmentPacked?.[56]??0))%s.frames.length]!:
+       s.texture;
+     gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),texture?1:0);
+     gl.bindTexture(gl.TEXTURE_2D,texture?this.worldTextures.get(texture):this.white);
       // The original lightmap sampler clamps; ordinary world materials
       // repeat. Texture objects may be shared, so set this on every draw.
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,

@@ -43,13 +43,19 @@ export class OriginalWorldTextures {
    const old=this.data.get(path);
    if(bytes>this.limit)throw Error("Native world texture exceeds memory allowance");
    const keep=new Set(protectedPaths);keep.add(path);
+   // Plan eviction WITHOUT mutating current title/GameWorld residency.
+   // A failed Safari GL upload must never destroy textures that still
+   // belong to the previous complete native scene.
    const candidates=[...this.data].sort((a,b)=>a[1].last-b[1].last);
+   const victims:Array<readonly [string,Slot]>=[];
+   let projected=this.used-(old?.bytes??0)+bytes;
    for(const [key,slot] of candidates){
-     if(this.used-(old?.bytes??0)+bytes>this.limit && !keep.has(key)){
-       gl.deleteTexture(slot.handle);this.data.delete(key);this.used-=slot.bytes;
-     }
+     if(projected<=this.limit)break;
+     if(keep.has(key))continue;
+     victims.push([key,slot]);
+     projected-=slot.bytes;
    }
-   if(this.used-(old?.bytes??0)+bytes>this.limit)
+   if(projected>this.limit)
      throw Error("Native scene visible textures exceed WebGL2 budget");
    const tex=gl.createTexture();if(!tex)throw Error("Cannot allocate native scene texture");
    try{
@@ -76,6 +82,12 @@ export class OriginalWorldTextures {
      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
      if(gl.getError()!==gl.NO_ERROR)throw Error("Original Silkroad world texture GPU upload failed");
+     // Commit only after the new native bitmap/BCn texture is validated.
+     // Until this point, an OOM, lost GL context or corrupt upload leaves
+     // the already-visible original Silkroad stage untouched.
+     for(const [key,slot] of victims){
+       gl.deleteTexture(slot.handle);this.data.delete(key);this.used-=slot.bytes;
+     }
      if(old){gl.deleteTexture(old.handle);this.used-=old.bytes;}
      this.data.set(path,{handle:tex,bytes,width,height,last:this.current});
      this.used+=bytes;

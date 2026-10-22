@@ -29,6 +29,7 @@ out vec4 vColor;
 out vec2 vUv;
 out vec3 vNormal;
 out vec3 vVertexLighting;
+out float vViewZ;
 flat out float vInstanceOpacity;
 uniform vec3 uDiffuse;
 uniform vec3 uAmbient;
@@ -39,6 +40,7 @@ uniform float uAmbientScale;
 void main(){
  mat4 instance=uModel*aInstanceModel;
  gl_Position=uViewProjection*instance*vec4(aPos,1.0);
+ vViewZ=gl_Position.w;
  vColor=aColor;vUv=aUv;vInstanceOpacity=aInstanceOpacity;
  // Matches OpenSRO's inverse-transpose world normal and retained vertex
  // object-light calculation, not a new lighting preset.
@@ -53,6 +55,7 @@ in vec4 vColor;
 in vec2 vUv;
 in vec3 vNormal;
 in vec3 vVertexLighting;
+in float vViewZ;
 flat in float vInstanceOpacity;
 uniform vec4 uMaterialColor;
 uniform vec3 uDiffuse;
@@ -72,6 +75,10 @@ uniform int uSurfaceAlpha;
 uniform float uStageFactor;
 uniform int uLightmap;
 uniform vec3 uLightmapShadow;
+uniform int uLightmapFogEnabled;
+uniform vec3 uLightmapFogColor;
+uniform float uLightmapFogStart;
+uniform float uLightmapFogEnd;
 out vec4 fragColor;
 bool originalAlphaAccept(float pixelAlpha,float reference){
  // Exact pinned GPU shader D3D9 HAL quantization: truncate alpha to
@@ -98,7 +105,14 @@ void main(){
  // already drawn terrain using D3DBLEND ZERO/SRCCOLOR.
  // Its separate fog and cascade passes are not enabled in this GL path.
  if(uLightmap==1){
-   fragColor=vec4(clamp(texel.rgb+uLightmapShadow,0.0,1.0),1.0);
+   vec3 baked=clamp(texel.rgb+uLightmapShadow,0.0,1.0);
+   // Original OpenSRO D3DFOG_LINEAR for lightmap groups:
+   // fogStart=env.fog.w, fogEnd=env.settings.x,
+   // target=env.terrainFog.rgb. Experimental height fog/sun shadows
+   // remain separately gated until their native passes are ported.
+   float fog=uLightmapFogEnabled==1?
+     clamp((vViewZ-uLightmapFogStart)/max(0.001,uLightmapFogEnd-uLightmapFogStart),0.0,1.0):0.0;
+   fragColor=vec4(mix(baked,uLightmapFogColor,fog),1.0);
    return;
  }
  vec4 c;
@@ -452,6 +466,14 @@ export class OriginalWorldWebgl2 {
       gl.uniform1i(gl.getUniformLocation(this.program,"uLightmap"),s.lightmap?1:0);
       gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapShadow"),
         this.environmentPacked?.subarray(40,43)??new Float32Array([0,0,0]));
+      gl.uniform1i(gl.getUniformLocation(this.program,"uLightmapFogEnabled"),
+        this.environmentPacked?.[33]!>0.5?1:0);
+      gl.uniform3fv(gl.getUniformLocation(this.program,"uLightmapFogColor"),
+        this.environmentPacked?.subarray(72,75)??new Float32Array([0,0,0]));
+      gl.uniform1f(gl.getUniformLocation(this.program,"uLightmapFogStart"),
+        this.environmentPacked?.[31]??0);
+      gl.uniform1f(gl.getUniformLocation(this.program,"uLightmapFogEnd"),
+        this.environmentPacked?.[32]??0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uLit"),s.lit?1:0);
      gl.uniform1i(gl.getUniformLocation(this.program,"uObjectVertexLighting"),
        s.objectVertexLighting?1:0);

@@ -10,8 +10,10 @@ import {originalCameraToWebgl2} from "./clip-space";
 import {OriginalWorldTextures} from "./original-world-textures";
 import type {WorldTexture} from "@/engine/contracts/texture";
 import {readOriginalGlLighting,type OriginalGlLighting} from "./original-lighting";
+import {originalBlendPair} from "./original-blend-webgl2";
+import type {BlendPair} from "@/engine/foundation/rendering/blend-state";
 interface Slot { vao:WebGLVertexArrayObject;vbo:WebGLBuffer;ebo:WebGLBuffer;instanceVbo:WebGLBuffer;opacityVbo:WebGLBuffer;instances:number;capacity:number;sourceByteSize:number;
-  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
+  count:number;vertexCount:number;indexCapacity:number;transform:Float32Array;color:Float32Array;alphaCutoff:number;alphaCompare:number;bytes:number;last:number;texture:string;blend:boolean;blendPair?:BlendPair;doubleSided:boolean;depthWrite:boolean;stageFactor:number;objectFade:boolean;fadeAlphaOnly:boolean;surfaceAlpha:boolean;lit:boolean;ambient:Float32Array;ambientScale:number;objectVertexLighting:boolean; }
 const VS=`#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -372,6 +374,7 @@ export class OriginalWorldWebgl2 {
        bytes:accounted,last:this.frame,
        texture:geometry.material?.texture??"",
        blend:(geometry.material?.blend??false)||(material?.objectFade??false),
+       blendPair:material?.blendPair,
        doubleSided:geometry.material?.doubleSided??false,
        depthWrite:geometry.material?.depthWrite??(!geometry.material?.blend||!!material?.objectFade),
        stageFactor:material?.stageFactor??1,
@@ -432,8 +435,7 @@ export class OriginalWorldWebgl2 {
      gl.uniform1i(gl.getUniformLocation(this.program,"uUseTexture"),s.texture?1:0);
      gl.bindTexture(gl.TEXTURE_2D,s.texture?this.worldTextures.get(s.texture):this.white);
      if(s.doubleSided)gl.disable(gl.CULL_FACE);else{gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);}
-     if(s.blend){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);}
-     else gl.disable(gl.BLEND);
+     originalBlendPair(gl,s.blend,s.blendPair);
      gl.depthMask(s.depthWrite);
      gl.bindVertexArray(s.vao);
      gl.drawElementsInstanced(gl.TRIANGLES,s.count,gl.UNSIGNED_INT,0,s.instances);

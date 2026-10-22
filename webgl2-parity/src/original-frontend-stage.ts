@@ -12,6 +12,7 @@ import type { WorldRenderStats } from "@/engine/contracts/scene";
 import { admitOriginalGeometry } from "./native-geometry";
 import { OriginalWorldWebgl2 } from "./native-world-webgl2";
 import {selectOriginalTerrain} from "./original-terrain-selection";
+import {pickRay,pickGeometry} from "@/engine/foundation/rendering/picking";
 import type {WorldCamera,WorldGroup} from "@/engine/contracts/scene";
 
 type Stage = {
@@ -287,6 +288,30 @@ export function createOriginalStageBridge(world:OriginalWorldWebgl2){
          !Number.isSafeInteger(triangles)||triangles<0)
         throw Error("Invalid native renderer world frame evidence");
       renderedVisible=visible;renderedTriangles=triangles;
+    },
+    /** Exact pinned OpenSRO segment/triangle kernel on the last fully
+     * published ORIGINAL uninstanced opaque scenery mesh. Not a replacement
+     * for GameWorld navmesh, terrain cells or teleport-gate picking.
+     * The compositor restricts eligible keys to actually rendered groups.
+     */
+    pickStaticGroup(matrix:Float32Array,x:number,y:number,
+      rendered:ReadonlySet<string>):{id:string;key:string;depth:number}|null{
+      check();
+      const ray=pickRay(matrix,x,y);
+      if(!ray)return null;
+      let best:{id:string;key:string;depth:number}|null=null;
+      for(const entry of readyEntries){
+        if(!rendered.has(entry.key)||entry.terrain)continue;
+        const geo=entry.geometry,material=geo.material;
+        // Real OpenSRO pick alpha and per-instance navmesh offsets are
+        // required for these cases: never claim a solid hit without them.
+        if(geo.instances||(material?.alphaCutoff??0)>0||
+           (material?.color?.[3]??1)<1)continue;
+        const depth=pickGeometry(ray,geo,geo.transform,undefined,{});
+        if(depth!==null&&(!best||depth<best.depth))
+          best={id:entry.id,key:entry.key,depth};
+      }
+      return best;
     },
     drawIds:()=>{check();return [...readyIds];},
     drawEntries:()=>{check();return readyEntries.map(({id,key})=>({id,key}));},

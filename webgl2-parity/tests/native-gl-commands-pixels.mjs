@@ -71,7 +71,12 @@ void main(){outColor=vec4(1,0,0,1);}`);
    gl.bindVertexArray(null);
    const px=(x,y)=>{const p=new Uint8Array(4);
      gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return [...p];};
-   let attemptedNested=false,computeBlocked=false,twiceBlocked=false;
+   let attemptedNested=false,computeBlocked=false,twiceBlocked=false,bundleClosed=false;
+   const bundleEncoder=frame.commands.createRenderBundleEncoder();
+   bundleEncoder.drawIndexed({program,vertexArray:vao,count:3,instances:1,
+     cull:false,depthTest:true,depthWrite:true});
+   const originalBundle=bundleEncoder.finish();
+   try{bundleEncoder.finish();}catch{bundleClosed=true;}
    const run=frame.render({
      width:64,height:64,
      world:()=>{
@@ -81,8 +86,7 @@ void main(){outColor=vec4(1,0,0,1);}`);
        try{encoder.beginRenderPass({width:64,height:64});}
        catch{attemptedNested=true;}
        pass.scissor([16,16,32,32]);
-       pass.drawIndexed({program,vertexArray:vao,count:3,instances:1,
-         cull:false,depthTest:true,depthWrite:true});
+       pass.executeBundles([originalBundle]);
        pass.end();
        const recorded=encoder.finish();
        const submitted=recorded.submit();
@@ -115,7 +119,7 @@ void main(){outColor=vec4(1,0,0,1);}`);
    const afterStale=px(32,32);
    frame.dispose();surface.dispose();device.dispose();
    return {inside,outside,cleared,afterStale,
-     nestedBlocked:attemptedNested,computeBlocked,twiceBlocked,
+     nestedBlocked:attemptedNested,computeBlocked,twiceBlocked,bundleClosed,
      retiredBlocked,run:run.scene,after:after.scene,
      before,commandStats,disposed:device.stats()};
  });
@@ -129,6 +133,7 @@ void main(){outColor=vec4(1,0,0,1);}`);
    "Retired draw validation must fail before clearing/mutating framebuffer");
  assert.equal(r.run.drawCalls,1);
  assert.equal(r.after.drawCalls,0);
+ assert.ok(r.bundleClosed,"Original render bundle must be immutable after finish");
  assert.ok(r.nestedBlocked&&r.computeBlocked&&r.twiceBlocked&&r.retiredBlocked,
    "Unsupported compute, nested render passes, duplicate submits and stale VAOs must fail closed");
  assert.equal(r.commandStats.submissions,2);

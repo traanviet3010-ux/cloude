@@ -680,6 +680,17 @@ export class OriginalWorldWebgl2 {
    if(gl.getError()!==gl.NO_ERROR)throw Error("Original World WebGL2 draw failed");
    return {triangleCount:triangles,geometryCount:sceneIds.length,residentMB:this.used/1048576};
  }
+ /** Pandora-inspired read-only GPU residency diagnostics, in browser memory.
+  * These are logical allocations and pending original assets, not a claim
+  * about the iPhone process's physical GPU or WebKit memory use.
+  */
+ residencyStats(){
+   this.validate();
+   return {meshMB:this.used/1048576,meshCount:this.entries.size,
+     pendingTextures:this.pendingTextures.size,
+     protectedGroups:this.protectedStageGroups.size,
+     textures:this.worldTextures.stats()};
+ }
  glContext():WebGL2RenderingContext {this.validate();return this.gl;}
  dispose(){
    if(this.disposed)return;

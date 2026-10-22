@@ -10,7 +10,7 @@ import {createOriginalGlFrame} from "./original-gl-frame";
 export function createOriginalGlOwners(canvas:HTMLCanvasElement,options:OriginalGlDeviceOptions={}){
  const device=createOriginalGlDevice(canvas,options);
  let surface:ReturnType<typeof createOriginalGlSurface>;
- try{surface=createOriginalGlSurface(device);}
+ try{surface=createOriginalGlSurface(device,{directToCanvas:options.mobile});}
  catch(error){device.dispose();throw error;}
  const frame=createOriginalGlFrame(device,surface);
  let disposed=false;

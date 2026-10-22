@@ -129,6 +129,7 @@ export class OriginalWorldWebgl2 {
  private frame=0;
  private visible=new Set<string>();
  private pendingTextures=new Set<string>();
+ private readonly protectedStageGroups=new Set<string>();
  private disposed=false;
  private lost=false;
  private readonly lostHandler=(event:Event)=>{event.preventDefault();this.lost=true;};
@@ -174,6 +175,19 @@ export class OriginalWorldWebgl2 {
  protectPendingTextures(paths:readonly string[]){
    this.validate();
    this.pendingTextures=new Set(paths);
+ }
+ /** Preserve the genuine scene's GPU buffers even when temporarily culled.
+  * A staged admission must fail, not silently evict a still-owned old scene.
+  */
+ protectStageGroups(ids:readonly string[]){
+   this.validate();
+   this.protectedStageGroups.clear();
+   for(const id of ids)this.protectedStageGroups.add(id);
+ }
+ protectStageGroup(id:string){
+   this.validate();
+   if(!this.entries.has(id))throw Error("Cannot protect an unadmitted native group: "+id);
+   this.protectedStageGroups.add(id);
  }
  hasTexture(path:string){this.validate();return this.worldTextures.has(path);}
  /** The ORIGINAL worldEnvironment() packed Float32Array; never sample fabricated palette. */
@@ -266,7 +280,7 @@ export class OriginalWorldWebgl2 {
    if(accounted>this.budget)throw Error("One original mesh exceeds GPU residency limit");
    for(const [key] of [...this.entries].sort((a,b)=>a[1].last-b[1].last)){
      if(this.used+accounted<=this.budget)break;
-     if(!this.visible.has(key))this.retire(key);
+     if(!this.visible.has(key)&&!this.protectedStageGroups.has(key))this.retire(key);
    }
    if(this.used+accounted>this.budget)throw Error("Original visible meshes exceed GPU residency limit");
    const gl=this.gl;
@@ -393,6 +407,7 @@ export class OriginalWorldWebgl2 {
    for(const id of [...this.entries.keys()])this.retire(id);
    this.worldTextures.dispose();this.gl.deleteTexture(this.white);
    this.lighting=null;
+   this.protectedStageGroups.clear();
    this.gl.deleteProgram(this.program);
  }
 }

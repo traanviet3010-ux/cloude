@@ -201,6 +201,41 @@ try{
      pendingPixel,switchedPixel,sceneId:switchedFrame.stage.sceneId,
      triangles:switchedFrame.triangleCount};
    overlapGame.dispose();
+
+   // Safari/WebKit may dispatch webglcontextlost during the transition from
+   // character selection to the original GameWorld. A destroyed generation
+   // may release GPU state but MUST NOT try to draw into its lost context.
+   const lostCanvas=document.createElement("canvas");
+   lostCanvas.width=64;lostCanvas.height=64;document.body.appendChild(lostCanvas);
+   const lostGame=createOriginalSilkroadWebgl2(lostCanvas);
+   const lostGl=lostCanvas.getContext("webgl2");
+   const lostPath="/assets/sro/retail-scene-on-lost-context.dds";
+   const lostGroup={
+     id:"retail-titled-mesh-on-context-loss",center:[0,0,1],radius:1,
+     material:{color:[1,1,1,1],unlit:true,texture:lostPath,
+       doubleSided:true,alphaCutoff:0,blend:false},
+     geometry:{positions:new Float32Array([-.7,-.7,1,.7,-.7,1,0,.7,1]),
+       uvs:new Float32Array([0,0,1,0,0,1]),
+       indices:new Uint32Array([0,1,2]),transform:I}
+   };
+   lostGame.adoptWorld(stageLease("real-titled-scene-to-dispose",[lostGroup]),"full");
+   lostGame.setWorldCamera({eye:[0,0,0],target:[0,0,1],
+     fov:Math.PI/2,near:.1,far:10});
+   lostGame.setWorldTexture(lostPath,{kind:"native-texture",
+     width:1,height:1,format:"bgra8unorm",
+     levels:[new Uint8Array([0,0,255,255])]});
+   lostGame.setUi({revision:1,width:64,height:64,quads:[]});
+   lostGame.originalFrontendFrame(1,0);
+   // Dispatch the exact cancelable browser event used by WebGL context loss
+   // handlers: no fabricated successful "context restored" is claimed.
+   const lostEvent=new Event("webglcontextlost",{cancelable:true});
+   lostCanvas.dispatchEvent(lostEvent);
+   let rejectedLostFrame=false;
+   try{lostGame.originalFrontendFrame(1,.016);}
+   catch(err){rejectedLostFrame=/no longer available|context lost|unavailable/.test(String(err));}
+   lostGame.dispose();
+   complete.contextLoss={lostEventPrevented:lostEvent.defaultPrevented,
+     rejectedLostFrame,disposed:true,glStillPresent:!!lostGl};
    return complete;
  });
  assert.ok(data.ui[0]>220&&data.ui[2]<40,"Authored UiScene must overlay the world on same WebGL2 context");
@@ -236,5 +271,11 @@ try{
    "After complete native stage upload, the reused original group ID must draw new green geometry");
  assert.equal(data.overlap.sceneId,"original-dock");
  assert.equal(data.overlap.triangles,2);
+ assert.equal(data.contextLoss.lostEventPrevented,true,
+   "WebGL lost-context handler must request browser restore only via native event");
+ assert.equal(data.contextLoss.rejectedLostFrame,true,
+   "No drawing is permitted against stale WebGL2 textures after context loss");
+ assert.equal(data.contextLoss.disposed,true,
+   "Original native scene and asset owners must cleanly dispose after lost context");
  console.log("ORIGINAL_OPEN_SRO_WORLD_AND_UI_ONE_WEBGL2_PASS",JSON.stringify(data));
 }finally{await browser.close();await new Promise(r=>httpServer.close(r));}

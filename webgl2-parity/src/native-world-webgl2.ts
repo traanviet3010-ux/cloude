@@ -167,6 +167,12 @@ export class OriginalWorldWebgl2 {
      const texture=this.entries.get(id)?.texture;
      if(texture)used.add(texture);
    }
+   // A frustum-culled old stage mesh still needs its authored material
+   // texture until the authentic next scene has fully committed.
+   for(const id of this.protectedStageGroups){
+     const texture=this.entries.get(id)?.texture;
+     if(texture)used.add(texture);
+   }
    for(const key of this.pendingTextures)used.add(key);
    this.worldTextures.put(path,image,used);
  }

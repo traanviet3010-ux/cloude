@@ -28,7 +28,9 @@ jobs:
         run: |
           cd webgl2-parity
           npm install --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.28.2
-          node --test tests/*.test.mjs
+          # The stage test imports the pinned original OpenSRO terrainLod().
+          # Run it only AFTER that exact source checkout exists.
+          node --test $(find tests -maxdepth 1 -name '*.test.mjs' ! -name 'original-frontend-stage.test.mjs' | sort)
       - name: Lint read-only original asset recovery contract (never fetch or build proprietary files in CI)
         run: |
           bash -n webgl2-parity/scripts/rebuild-original-v150-assets-test.sh
@@ -54,6 +56,7 @@ jobs:
         working-directory: webgl2-parity
         run: |
           node --test tests/original-frontend-flow.integration.mjs
+          node --test tests/original-frontend-stage.test.mjs
       - name: Verify actual pinned OpenSRO CPU skeletal pose and materialized mesh
         env:
           SRO_SOURCE_ROOT: /tmp/opensro-original

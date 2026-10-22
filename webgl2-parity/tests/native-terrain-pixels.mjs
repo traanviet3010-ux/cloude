@@ -77,7 +77,26 @@ try{
     const away=game.originalFrontendFrame(2,.032);
     const original=Array.from(group.geometry.indices);
     game.dispose();
-    return {first,again,away,mid,inputIndices,original};
+
+    // A real GameWorld can publish its existing WorldScene directly; it must
+    // pass through the same original GPU admission without fabricating a map.
+    const directCanvas=document.createElement("canvas");
+    directCanvas.width=64;directCanvas.height=64;
+    document.body.appendChild(directCanvas);
+    const directGame=createOriginalSilkroadWebgl2(directCanvas);
+    directGame.setWorld({
+      id:"original-gameworld-direct-scene",originRegion:0,
+      groups:[group],warnings:[],terrainDetail:"distance"
+    });
+    directGame.setWorldCamera({eye:[0,0,0],target:[0,0,1],
+      fov:Math.PI/2,near:.1,far:10});
+    directGame.setUi({revision:1,width:64,height:64,quads:[]});
+    const direct=directGame.originalFrontendFrame(2,.05);
+    const dp=new Uint8Array(4);
+    const directGl=directCanvas.getContext("webgl2");
+    directGl.readPixels(32,32,1,1,directGl.RGBA,directGl.UNSIGNED_BYTE,dp);
+    directGame.dispose();
+    return {first,again,away,mid,inputIndices,original,direct,directPixel:[...dp]};
   });
   assert.equal(result.first.stage.sceneId,"native-SRO-terrain-scene");
   assert.equal(result.first.stage.residentGroups,1);
@@ -93,6 +112,11 @@ try{
     "Moving native camera must not recreate the original GPU model");
   assert.deepEqual(result.original,result.inputIndices,
     "Never mutate the asset worker's authored terrain index stream");
+  assert.equal(result.direct.stage.sceneId,"original-gameworld-direct-scene",
+    "The original GameWorld direct WorldScene must be accepted");
+  assert.equal(result.direct.triangleCount,2);
+  assert.ok(result.directPixel[0]>230,
+    "Native GameWorld direct terrain must reach the GL framebuffer");
   console.log("ORIGINAL_OPEN_SRO_WEBGL2_TERRAIN_LOD_PIXEL_PASS",JSON.stringify({
     trianglesFirst:result.first.triangleCount,
     trianglesAway:result.away.triangleCount,

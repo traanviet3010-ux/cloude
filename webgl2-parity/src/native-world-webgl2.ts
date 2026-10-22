@@ -583,7 +583,6 @@ export class OriginalWorldWebgl2 {
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyTime"),sky[48]!);
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudScroll"),sky[49]!);
      gl.uniform1f(gl.getUniformLocation(this.program,"uSkyCloudAlpha"),sky[50]!);
-     gl.uniform1f(gl.getUniformLocation(this.program,"uFrameNumber"),sky[34]!);
      gl.uniform3fv(gl.getUniformLocation(this.program,"uWaterTint"),sky.subarray(36,39));
      gl.uniform1f(gl.getUniformLocation(this.program,"uLunarDay"),sky[56]!);
      gl.uniform2fv(gl.getUniformLocation(this.program,"uSkyPixel"),sky.subarray(57,59));
